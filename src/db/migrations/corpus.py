@@ -6,7 +6,7 @@ import sqlite3
 
 from .common import column_exists, run_migrations, table_exists
 
-CORPUS_SCHEMA_VERSION = 16
+CORPUS_SCHEMA_VERSION = 17
 
 
 def migration_001_create_base_schema(
@@ -391,6 +391,16 @@ def migration_016_add_scheduler_runs(
         """)
 
 
+def migration_017_add_incident_date_flagged_index(
+    connection: sqlite3.Connection,
+) -> None:
+    """Index plagiarism_incidents(date_flagged) for faster get_recent_incidents queries."""
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_incidents_date_flagged "
+        "ON plagiarism_incidents(date_flagged)"
+    )
+
+
 CORPUS_MIGRATIONS = {
     1: migration_001_create_base_schema,
     2: migration_002_add_document_metadata,
@@ -408,6 +418,7 @@ CORPUS_MIGRATIONS = {
     14: migration_013_add_incident_severity_idx,
     15: migration_015_pattern_recognition,
     16: migration_016_add_scheduler_runs,
+    17: migration_017_add_incident_date_flagged_index,
 }
 
 
@@ -511,6 +522,10 @@ def down_016_add_scheduler_runs(connection: sqlite3.Connection) -> None:
     connection.execute("DROP TABLE IF EXISTS scheduler_runs")
 
 
+def down_017_add_incident_date_flagged_index(connection: sqlite3.Connection) -> None:
+    connection.execute("DROP INDEX IF EXISTS idx_incidents_date_flagged")
+
+
 CORPUS_DOWN_MIGRATIONS = {
     1: down_001_create_base_schema,
     2: down_002_add_document_metadata,
@@ -528,6 +543,7 @@ CORPUS_DOWN_MIGRATIONS = {
     14: down_014_add_incident_severity_idx,
     15: down_015_pattern_recognition,
     16: down_016_add_scheduler_runs,
+    17: down_017_add_incident_date_flagged_index,
 }
 
 
