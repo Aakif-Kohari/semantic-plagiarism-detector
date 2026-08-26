@@ -396,6 +396,37 @@ def test_create_database_backup_uses_utc_timestamp(tmp_path):
     assert re.search(r"\.\d{8}_\d{6}Z\.db$", db_backup.name) is not None
 
 
+def test_create_database_backup_cleans_up_on_failure(tmp_path, monkeypatch):
+    from src.db.database_backup import create_database_backup
+    import src.db.database_backup
+
+    source = tmp_path / "source.db"
+    create_test_database(source)
+    backup_dir = tmp_path / "backups"
+
+    def mock_iter_chunks(db_path, chunk_size=64*1024):
+        yield b"partial header..."
+        raise IOError("Disk full or connection lost")
+
+    monkeypatch.setattr(src.db.database_backup, "iter_sqlite_snapshot_chunks", mock_iter_chunks)
+
+    # 1. Test compressed backup cleanup
+    with pytest.raises(IOError, match="Disk full or connection lost"):
+        create_database_backup(source, backup_dir=backup_dir, compress_backup=True)
+
+    # Assert no files remain in the backup directory
+    files = list(backup_dir.glob("*"))
+    assert len(files) == 0
+
+    # 2. Test uncompressed backup cleanup
+    with pytest.raises(IOError, match="Disk full or connection lost"):
+        create_database_backup(source, backup_dir=backup_dir, compress_backup=False)
+
+    files = list(backup_dir.glob("*"))
+    assert len(files) == 0
+
+
+
 
 
 

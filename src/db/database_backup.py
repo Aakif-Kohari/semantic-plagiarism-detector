@@ -247,17 +247,26 @@ def create_database_backup(
     destination_dir = Path(backup_dir).expanduser()
     destination_dir.mkdir(parents=True, exist_ok=True)
 
-    if compress_backup:
-        backup_path = destination_dir / f"{source_name}.{timestamp}.db.gz"
-        compression_level = int(os.getenv("BACKUP_GZIP_COMPRESSION_LEVEL", "6"))
-        with gzip.GzipFile(backup_path, "wb", compresslevel=compression_level) as gz_file:
-            for chunk in iter_sqlite_snapshot_chunks(database_path):
-                gz_file.write(chunk)
-    else:
-        backup_path = destination_dir / f"{source_name}.{timestamp}.db"
-        with open(backup_path, "wb") as f:
-            for chunk in iter_sqlite_snapshot_chunks(database_path):
-                f.write(chunk)
+    backup_path = None
+    try:
+        if compress_backup:
+            backup_path = destination_dir / f"{source_name}.{timestamp}.db.gz"
+            compression_level = int(os.getenv("BACKUP_GZIP_COMPRESSION_LEVEL", "6"))
+            with gzip.GzipFile(backup_path, "wb", compresslevel=compression_level) as gz_file:
+                for chunk in iter_sqlite_snapshot_chunks(database_path):
+                    gz_file.write(chunk)
+        else:
+            backup_path = destination_dir / f"{source_name}.{timestamp}.db"
+            with open(backup_path, "wb") as f:
+                for chunk in iter_sqlite_snapshot_chunks(database_path):
+                    f.write(chunk)
+    except Exception:
+        if backup_path and os.path.exists(backup_path):
+            try:
+                os.unlink(backup_path)
+            except OSError:
+                pass
+        raise
 
     try:
         os.chmod(backup_path, 0o600)
