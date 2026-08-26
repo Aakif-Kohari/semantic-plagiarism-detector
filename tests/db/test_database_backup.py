@@ -8,6 +8,7 @@ import pytest
 from src.db.database_backup import (
     _ALLOWED_DB_DIR,
     SQLITE_HEADER,
+    BackupRestoreSecurityError,
     create_sqlite_snapshot,
     get_database_file_size_bytes,
     verify_backup_file,
@@ -215,6 +216,42 @@ def test_create_database_backup_sets_restrictive_permissions(tmp_path, monkeypat
     assert chmod_calls[-1][1] == 0o600
 
 
+ feature/backup-security-error-3409
+def test_backup_restore_security_error_bypasses_value_error_handlers():
+    """
+    Scenario: Verify that BackupRestoreSecurityError inherits from Exception
+              and is NOT caught by except ValueError blocks.
+    Acceptance Criteria:
+    - Assert that catching ValueError fails to intercept BackupRestoreSecurityError.
+    - Confirm the security exception bubbles up to base Exception blocks.
+    """
+
+    # 1. Negative Test: Verify a ValueError block cannot intercept the error
+    try:
+        with pytest.raises(BackupRestoreSecurityError):
+            try:
+                # Force trigger the targeted security exception
+                raise BackupRestoreSecurityError("Unauthorized administrative data restoration attempt blocked.")
+            except ValueError:
+                # If execution drops into this block, the exception was incorrectly caught
+                pytest.fail("Security Vulnerability: BackupRestoreSecurityError was caught by a ValueError handler!")
+    except BackupRestoreSecurityError:
+        # Expected baseline behavior: The exception bubbled out completely unscathed
+        pass
+
+
+def test_exception_inheritance_integrity():
+    """
+    Scenario: Explicitly audit class inheritance properties to protect
+              against unintended future refactoring regressions.
+    """
+    # Assert structural type hierarchy constraints directly
+    assert issubclass(BackupRestoreSecurityError, Exception), "Must inherit from the base Exception class."
+    assert not issubclass(BackupRestoreSecurityError, ValueError), (
+        "Security Vulnerability: BackupRestoreSecurityError must NOT inherit from ValueError, "
+        "as this allows broad input validation catch blocks to accidentally swallow security alerts."
+    )
+
 def test_get_database_table_stats_ignores_sqlite_internal_tables(tmp_path):
     """Verify that get_database_table_stats returns user-defined tables but ignores internal SQLite metadata tables."""
     from src.db.database_backup import get_database_table_stats
@@ -301,6 +338,7 @@ def test_create_database_backup_respects_gzip_compression_level_env(tmp_path, mo
         assert passed_compresslevel[0] == 3
 
 
+ feature/backup-integrity-check-3407
 def test_verify_backup_file_valid_gzip(tmp_path):
     import gzip
     source = tmp_path / "source.db"
@@ -430,3 +468,6 @@ def test_create_database_backup_cleans_up_on_failure(tmp_path, monkeypatch):
 
 
 
+
+ main
+ main
