@@ -23,6 +23,14 @@ Have an idea to improve the application?
 - Open a new issue using the **[Feature Request Template](.github/ISSUE_TEMPLATE/feature_request.md)**.
 - Describe the problem your feature solves and your proposed user experience.
 
+## 🔒 Security Vulnerabilities
+
+If you discover a security flaw or vulnerability (such as SSRF, SQL Injection, remote code execution, or authentication bypasses), **please do NOT open a public GitHub issue**. Publicly disclosing security flaws can expose application instances to risk before a patch is available.
+
+Instead, please report security vulnerabilities privately:
+- **Email Alias:** [security@domain.com](mailto:security@domain.com)
+- **Detailed Policy:** Refer to our **[Security Policy (SECURITY.md)](SECURITY.md)** for our full vulnerability disclosure guidelines, response timelines, and security best practices.
+
 ---
 
 ## ⚡ Troubleshooting Batch Uploads

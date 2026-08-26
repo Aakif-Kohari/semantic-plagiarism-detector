@@ -4,7 +4,7 @@ from unittest.mock import patch
 import pytest
 
 from src.core.export_engine import LMSExportEngine
-from src.errors import ExportFailedError
+from src.exceptions import ExportFailedError
 
 
 def test_write_text_export_success(tmp_path):
@@ -17,9 +17,7 @@ def test_write_text_export_success(tmp_path):
     )
 
     assert result == destination.resolve()
-    assert destination.read_text(encoding="utf-8") == (
-        "a,b\n1,2\n"
-    )
+    assert destination.read_text(encoding="utf-8") == ("a,b\n1,2\n")
 
 
 def test_write_binary_export_success(tmp_path):
@@ -55,9 +53,7 @@ def test_permission_error_is_wrapped(tmp_path):
             )
 
     assert raised.value.__cause__ is permission_error
-    assert "Check the destination permissions" in str(
-        raised.value
-    )
+    assert "Check the destination permissions" in str(raised.value)
 
 
 def test_disk_os_error_is_wrapped(tmp_path):
@@ -131,8 +127,6 @@ def test_csv_generation_io_error_is_wrapped():
             ExportFailedError,
             match="Unable to generate the CSV export",
         ) as raised:
-            LMSExportEngine.generate_incident_csv(
-                incidents
-            )
+            LMSExportEngine.generate_incident_csv(incidents)
 
     assert raised.value.__cause__ is io_error

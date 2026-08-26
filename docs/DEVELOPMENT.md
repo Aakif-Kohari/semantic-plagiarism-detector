@@ -35,9 +35,10 @@ After activating your virtual environment, upgrade pip and install the required 
 ```bash
 pip install --upgrade pip
 pip install -r requirements.txt
+pip install -r requirements-dev.txt
 pip install pytest-cov
+python -m nltk.downloader punkt_tab
 ```
-
 ---
 
 ## ⚙️ Step 3: Install Native C Dependencies
@@ -110,7 +111,7 @@ This project uses `pre-commit` to automatically check formatting, linting, and v
 
 ### Install and Register Git Hooks
 ```bash
-pip install pre-commit
+pip install -r requirements-dev.txt
 pre-commit install
 ```
 
@@ -136,3 +137,68 @@ python scripts/generate_seed_data.py --reset-db --include-plagiarism
 ```
 
 For more details on optional parameters, refer to the seed generation guide in `scripts/generate_seed_data.py`.
+
+
+---
+
+## 🚀 Production Deployment & PyTorch Worker Memory
+
+The embedding pipeline uses a Sentence Transformers / PyTorch model loaded by
+`EmbeddingModelManager`. The manager is a singleton **within one Python
+process**; it is not a cross-process singleton.
+
+When deploying behind a process-based server such as Gunicorn, independent
+workers can each initialise their own model instance, multiplying model memory
+usage.
+
+### Recommended Gunicorn configuration
+
+Prefer **one worker with multiple threads** when memory is constrained unless
+you have measured that multiple model-owning processes fit the available budget.
+
+```bash
+gunicorn --workers 1 --threads 4 --bind 0.0.0.0:8501 <application-module>:<application>
+```
+
+Replace the application placeholder with the WSGI/ASGI entry point used by
+your deployment. Do not use this command as a replacement for the Streamlit
+entry point; Streamlit is normally launched with:
+
+```bash
+streamlit run app/streamlit_app.py
+```
+
+### Why worker count affects memory
+
+Gunicorn workers are separate operating-system processes. Each process has its
+own Python interpreter and its own `EmbeddingModelManager` instance.
+
+| Gunicorn configuration | Model-owning processes | Expected model-memory impact |
+|---|---:|---|
+| `--workers 1 --threads 4` | 1 | One model copy |
+| `--workers 2 --threads 4` | 2 | Approximately two model copies |
+| `--workers 4 --threads 4` | 4 | Approximately four model copies |
+
+Actual memory usage depends on the model, PyTorch runtime, allocator
+behaviour, and CPU/GPU execution, so these figures are deployment guidance.
+
+### PyTorch shared-memory multiprocessing
+
+PyTorch multiprocessing and shared-memory primitives are not a drop-in
+replacement for the current process-local singleton. Sharing model parameters
+between worker processes requires deliberate process creation, tensor sharing,
+lifecycle, and device management.
+
+For the current architecture, limiting deployment to a single model-owning
+worker is the simpler and more predictable memory-control strategy.
+
+### Deployment checklist
+
+1. Confirm how many Python processes will load `EmbeddingModelManager`.
+2. Start with one worker and multiple threads when memory is constrained.
+3. Measure resident memory after the embedding model loads.
+4. Increase worker count only after confirming additional model copies fit the
+   host or container memory limit.
+5. If process-level model sharing is introduced later, add integration tests
+   covering model initialisation, concurrent inference, shutdown, and the
+   target CPU/GPU device.

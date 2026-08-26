@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 embedding_model.py
 ------------------
@@ -16,28 +14,96 @@ Recent Additions (Issue #920):
   explicit Python-level mini-batches. This prevents memory spikes when
   processing large document sets (100+ files) by yielding memory back to
   the garbage collector between batch forward passes.
+
+Recent Additions (Issue #1580):
+- Added verify_model_cache_integrity() to detect zero-byte (corrupted)
+  cached SentenceTransformer weight files and automatically re-download
+  the model when the cached copy is unusable.
+
+Recent Additions (Issue #3479):
+- Added release_large_batch_memory() so callers (_process_scan_job and the
+  batch CLI commands) can explicitly run gc.collect() and, when CUDA is
+  available, torch.cuda.empty_cache() after scans larger than 20 documents.
 """
 
+from __future__ import annotations
+
+import gc
 import logging
 import os
-import gc
-from typing import List, Dict
+import shutil
+from pathlib import Path
+from typing import Callable, Dict, List, Optional
 
 import numpy as np
-from sentence_transformers import SentenceTransformer
 import torch
+import torch.quantization
+from sentence_transformers import SentenceTransformer
 
-from src.core.config import EMBEDDING_BATCH_SIZE
+from src.core.text_chunking import ChunkString
+from src.exceptions import ModelInitializationError
 
 logger = logging.getLogger(__name__)
 
 # ── Singleton model loader ─────────────────────────────────────────────────────
 _DEFAULT_MODEL_NAME = "paraphrase-multilingual-MiniLM-L12-v2"
 _model: SentenceTransformer | None = None
+_quantized_model: SentenceTransformer | None = None
+
+
+def _apply_dynamic_quantization(model: SentenceTransformer) -> SentenceTransformer:
+    """Apply PyTorch dynamic INT8 quantization to the model's Linear layers.
+
+    Dynamic quantization is intended for CPU inference. Apple Silicon's MPS
+    backend does not benefit from this INT8 path, so MPS models are returned
+    unchanged to preserve native floating-point performance.
+
+    Args:
+        model: The loaded SentenceTransformer model instance.
+
+    Returns:
+        The quantized SentenceTransformer model, or the original model when
+        running on MPS.
+    """
+    device = _detect_device(model)
+    if device == "mps":
+        logger.warning(
+            "[embedding_model] Dynamic INT8 quantization is disabled on MPS; "
+            "using the unquantized floating-point model to preserve performance."
+        )
+        return model
+
+    logger.info(
+        "[embedding_model] Applying dynamic INT8 quantization to Linear layers..."
+    )
+    try:
+        # Quantize only the Linear layers within the transformer modules
+        # This preserves the embedding output dimensions while reducing memory
+        quantized_model = torch.quantization.quantize_dynamic(
+            model,
+            {torch.nn.Linear},
+            dtype=torch.qint8,
+            inplace=False,  # Return a new instance to preserve the original float32 model
+        )
+        logger.info("[embedding_model] Dynamic quantization applied successfully.")
+        return quantized_model
+    except Exception as exc:
+        logger.warning(
+            "[embedding_model] Failed to apply dynamic quantization: %s. "
+            "Falling back to float32 model.",
+            exc,
+        )
+        return model
 
 
 def _detect_device(model: SentenceTransformer | None = None) -> str:
-    """Detect active PyTorch compute device (cpu, cuda, or mps)."""
+    """Detect the active PyTorch compute device.
+
+    Supports NVIDIA CUDA, AMD ROCm (exposed by PyTorch through the CUDA
+    device API), Intel XPU, and Apple MPS. ROCm intentionally returns
+    ``"cuda"`` because PyTorch uses ``torch.device("cuda")`` for HIP
+    devices as well.
+    """
     if model is not None and hasattr(model, "device"):
         dev = getattr(model, "device")
         if isinstance(dev, str):
@@ -45,12 +111,42 @@ def _detect_device(model: SentenceTransformer | None = None) -> str:
         if hasattr(dev, "type") and isinstance(getattr(dev, "type", None), str):
             return dev.type
 
+    # Intel oneAPI/XPU devices. Keep this ahead of CUDA so an available XPU
+    # is not shadowed by another backend exposed by the same PyTorch build.
     try:
+        xpu = getattr(torch, "xpu", None)
         if (
-            hasattr(torch, "cuda")
-            and hasattr(torch.cuda, "is_available")
-            and torch.cuda.is_available()
+            xpu is not None
+            and hasattr(xpu, "is_available")
+            and xpu.is_available()
         ):
+            return "xpu"
+    except Exception:
+        pass
+
+    # PyTorch exposes AMD ROCm through the CUDA API. ``torch.version.hip`` is
+    # the reliable indicator that the installed PyTorch build targets HIP.
+    # ``torch.backends.cuda.is_built()`` is checked as a safe fallback for
+    # CUDA-enabled builds where the HIP version metadata is unavailable.
+    try:
+        cuda = getattr(torch, "cuda", None)
+        cuda_available = (
+            cuda is not None
+            and hasattr(cuda, "is_available")
+            and cuda.is_available()
+        )
+        cuda_backend = getattr(getattr(torch, "backends", None), "cuda", None)
+        cuda_built = bool(
+            cuda_backend is not None
+            and hasattr(cuda_backend, "is_built")
+            and cuda_backend.is_built()
+        )
+        hip_version = getattr(getattr(torch, "version", None), "hip", None)
+
+        if cuda_available and hip_version:
+            logger.info("[embedding_model] AMD ROCm/HIP device detected.")
+            return "cuda"
+        if cuda_available and cuda_built:
             return "cuda"
     except Exception:
         pass
@@ -88,48 +184,96 @@ def get_embedding_model_info() -> tuple[str, int]:
 
 
 class EmbeddingModelManager:
-    """Manages the SentenceTransformer embedding model lifecycle and fallbacks."""
+    """Manages the SentenceTransformer embedding model lifecycle, fallbacks, and quantization."""
 
     _instance = None
 
+    def __init__(self, quantize_model: bool = False):
+        """Initialize the EmbeddingModelManager.
+
+        Args:
+            quantize_model: If True, applies dynamic INT8 quantization to the
+                            model's Linear layers to reduce RAM usage by ~50% on CPU.
+        """
+        self.quantize_model = quantize_model
+        self._model = None
+        self._quantized_model = None
+
     @classmethod
-    def get_instance(cls) -> EmbeddingModelManager:
+    def get_instance(cls, quantize_model: bool = False) -> "EmbeddingModelManager":
         if cls._instance is None:
-            cls._instance = cls()
+            cls._instance = cls(quantize_model=quantize_model)
+        elif quantize_model and not cls._instance.quantize_model:
+            # Update instance if quantization is requested but not yet applied
+            cls._instance.quantize_model = True
+            cls._instance._quantized_model = None  # Force reload/quantize
         return cls._instance
 
     def get_model(self) -> SentenceTransformer:
-        global _model
-        if _model is None:
-            primary = _get_model_name()
-            fallback = "all-MiniLM-L6-v2"
-            cache_dir = _get_cache_dir()
-            logger.info(f"[embedding_model] Loading model: {primary} ...")
+        global _model, _quantized_model
+
+        if self.quantize_model:
+            if _quantized_model is not None:
+                return _quantized_model
+        else:
+            if _model is not None:
+                return _model
+
+        primary = _get_model_name()
+        fallback = os.getenv("SEMANTIC_PLAGIARISM_FALLBACK_MODEL", "all-MiniLM-L6-v2")
+        cache_dir = _get_cache_dir()
+        logger.info(f"[embedding_model] Loading model: {primary} ...")
+        logger.info(
+            f"[embedding_model] Model cache target: {cache_dir or 'default (~/.cache/huggingface)'}"
+        )
+
+        try:
+            _repair_corrupted_model_cache(_resolve_cache_root(), primary)
+            loaded_model = SentenceTransformer(primary, cache_folder=cache_dir)
+            device = _detect_device(loaded_model)
             logger.info(
-                f"[embedding_model] Model cache target: {cache_dir or 'default (~/.cache/huggingface)'}"
+                "SentenceTransformer model [%s] running on device [%s]",
+                primary,
+                device,
+            )
+            logger.info("[embedding_model] Model loaded successfully.")
+        except Exception as primary_exc:
+            logger.warning(
+                "Primary embedding model %s unavailable. Falling back to %s",
+                primary,
+                fallback,
             )
             try:
-                _model = SentenceTransformer(primary, cache_folder=cache_dir)
-                device = _detect_device(_model)
-                logger.info(
-                    "Initializing SentenceTransformer model [%s] on device [%s]",
-                    primary,
-                    device,
-                )
-                logger.info("[embedding_model] Model loaded successfully.")
-            except Exception:
-                logger.warning(
-                    "Primary embedding model %s unavailable. Falling back to %s",
-                    primary,
-                    fallback,
-                )
-                _model = SentenceTransformer(fallback, cache_folder=cache_dir)
-                device = _detect_device(_model)
-                logger.info(
-                    "Initializing SentenceTransformer model [%s] on device [%s]",
-                    fallback,
-                    device,
-                )
+                loaded_model = SentenceTransformer(fallback, cache_folder=cache_dir)
+            except Exception as fallback_exc:
+                raise ModelInitializationError(
+                    "Unable to initialize the embedding model. Both the configured "
+                    f"primary model '{primary}' and fallback model '{fallback}' "
+                    "failed to load. This usually means the models are unavailable "
+                    "from the configured Hugging Face cache or cannot be downloaded. "
+                    "For offline or air-gapped deployments, download both models "
+                    "on an internet-connected machine with 'hf download', copy "
+                    "the model directories into the deployment environment, and "
+                    "configure SEMANTIC_PLAGIARISM_MODEL to point to the local "
+                    "primary model directory. For example: `hf download "
+                    "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2 "
+                    "--local-dir /opt/models/paraphrase-multilingual-MiniLM-L12-v2` "
+                    "and `hf download sentence-transformers/all-MiniLM-L6-v2 "
+                    "--local-dir /opt/models/all-MiniLM-L6-v2`. "
+                    f"Primary error: {primary_exc!r}; fallback error: {fallback_exc!r}"
+                ) from fallback_exc
+            device = _detect_device(loaded_model)
+            logger.info(
+                "SentenceTransformer model [%s] running on device [%s]",
+                fallback,
+                device,
+            )
+
+        if self.quantize_model:
+            _quantized_model = _apply_dynamic_quantization(loaded_model)
+            return _quantized_model
+
+        _model = loaded_model
         return _model
 
 
@@ -141,7 +285,145 @@ def _get_model() -> SentenceTransformer:
 # ── Public API ─────────────────────────────────────────────────────────────────
 
 
-def embed_chunks(chunks: List[str], batch_size: int = 32) -> np.ndarray:
+# Model weight file extensions inspected by verify_model_cache_integrity()
+# (issue #1580, extended for issue #2919). Extension-based matching avoids
+# breaking when HuggingFace ships new weight formats (e.g. GGUF, ONNX)
+# under different filenames.
+_MODEL_WEIGHT_EXTENSIONS = (".bin", ".safetensors", ".onnx", ".gguf")
+
+def _resolve_cache_root() -> Path:
+    """Resolve the HuggingFace hub cache root used for model downloads."""
+    configured = _get_cache_dir()
+    if configured:
+        return Path(configured)
+    hf_home = os.getenv("HF_HOME", str(Path.home() / ".cache" / "huggingface"))
+    return Path(hf_home) / "hub"
+
+
+def _model_cache_subdir(cache_root: Path, model_name: str) -> Path:
+    """Return the HuggingFace hub cache sub-directory for ``model_name``."""
+    hub_name = model_name.replace("/", "--")
+    return cache_root / f"models--{hub_name}"
+
+
+def verify_model_cache_integrity(cache_dir: Path) -> bool:
+    """Verify cached SentenceTransformer weight files are not corrupted.
+
+    Acceptance criteria (issue #1580, extended by #2919):
+    - Inspects any cached file matching a known model weight extension
+      (``.bin``, ``.safetensors``, ``.onnx``, ``.gguf``) for zero-byte
+      sizes.    - Returns ``True`` when the cache holds no corrupted weight files.
+    - Returns ``False`` when any cached weight file is zero bytes or
+      unreadable, allowing the caller to re-download the model.
+
+    Args:
+        cache_dir: Path to the HuggingFace cache directory to inspect.
+            This may be the hub root (``~/.cache/huggingface/hub``) or a
+            model-specific ``models--<org>--<name>`` sub-directory.
+
+    Returns:
+        ``True`` if every cached weight file has a non-zero, readable
+        size (or no weight files are cached yet); ``False`` when any
+        weight file is zero bytes or cannot be stat-ed.
+
+    Example:
+        >>> from pathlib import Path
+        >>> from src.core.embedding_model import verify_model_cache_integrity
+        >>> verify_model_cache_integrity(Path("~/.cache/huggingface/hub").expanduser())
+        True
+    """
+    cache_path = Path(cache_dir)
+
+    if not cache_path.is_dir():
+        logger.debug(
+            "[embedding_model] Model cache dir %s not found; nothing to verify.",
+            cache_path,
+        )
+        return True
+
+    corrupted: list[tuple[Path, str]] = []
+    for root, _, filenames in os.walk(cache_path):
+        for filename in filenames:
+            if not filename.endswith(_MODEL_WEIGHT_EXTENSIONS):
+                continue
+            weight_path = Path(root) / filename
+            try:
+                size = weight_path.stat().st_size
+            except OSError as exc:
+                corrupted.append((weight_path, f"unreadable ({exc})"))
+                continue
+            if size <= 1024 * 1024:
+                corrupted.append((weight_path, "too small (<= 1MB)"))
+
+    if corrupted:
+        for weight_path, reason in corrupted:
+            logger.warning(
+                "[embedding_model] Corrupted model weight file detected: %s (%s).",
+                weight_path,
+                reason,
+            )
+        return False
+
+    return True
+
+
+def _repair_corrupted_model_cache(cache_root: Path, model_name: str) -> None:
+    """Remove a corrupted cached model so it is re-downloaded on load.
+
+    When the cached copy of ``model_name`` contains zero-byte weight
+    files, the entire ``models--<name>`` cache directory is removed so
+    the next ``SentenceTransformer`` load re-downloads a healthy copy
+    (issue #1580).
+    """
+    model_cache_dir = _model_cache_subdir(cache_root, model_name)
+    if not model_cache_dir.is_dir():
+        return
+
+    if not verify_model_cache_integrity(model_cache_dir):
+        logger.warning(
+            "[embedding_model] Corrupted cache detected for model %s at %s; "
+            "removing it so the model is re-downloaded.",
+            model_name,
+            model_cache_dir,
+        )
+        shutil.rmtree(model_cache_dir, ignore_errors=True)
+
+
+# Issue #3479: batches larger than this many documents trigger explicit
+# garbage collection (and CUDA cache release when applicable).
+LARGE_BATCH_GC_THRESHOLD = 20
+
+
+def release_large_batch_memory(batch_size: int) -> None:
+    """Explicitly free heap memory after large batch scans (Issue #3479).
+
+    Processing 100+ documents in a single batch leaves NumPy arrays and
+    PyTorch tensors on the heap. ``_process_scan_job`` and the batch CLI
+    commands call this once a scan finishes so those intermediates are
+    released promptly instead of lingering until the next allocation cycle.
+
+    Args:
+        batch_size: Number of documents/chunks processed in the finished
+            batch. Cleanup only runs when this exceeds
+            ``LARGE_BATCH_GC_THRESHOLD``.
+    """
+    if batch_size <= LARGE_BATCH_GC_THRESHOLD:
+        return
+
+    logger.debug(
+        "[embedding_model] Releasing memory after large batch of %d items",
+        batch_size,
+    )
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+
+def embed_chunks(
+    chunks: list[str],
+    batch_size: int = 32,
+    cancel_callback: Optional[Callable[[], bool]] = None,
+) -> np.ndarray:
     """
     Generate embeddings for a list of text chunks using explicit mini-batching.
 
@@ -155,6 +437,7 @@ def embed_chunks(chunks: List[str], batch_size: int = 32) -> np.ndarray:
         chunks: List of text strings to embed.
         batch_size: Number of texts encoded per forward pass. Defaults to 32
                     to balance throughput and memory consumption.
+        cancel_callback: Optional callback returning True if processing should be cancelled.
 
     Returns:
         numpy array of shape (N, 384) where N = len(chunks). Returns an
@@ -164,7 +447,7 @@ def embed_chunks(chunks: List[str], batch_size: int = 32) -> np.ndarray:
         return np.empty((0, 384), dtype=np.float32)
 
     model = _get_model()
-    all_embeddings: List[np.ndarray] = []
+    all_embeddings: list[np.ndarray] = []
     total_chunks = len(chunks)
 
     logger.debug(
@@ -175,7 +458,14 @@ def embed_chunks(chunks: List[str], batch_size: int = 32) -> np.ndarray:
 
     # Process in explicit mini-batches to optimize memory utilization
     for i in range(0, total_chunks, batch_size):
-        batch = chunks[i : i + batch_size]
+        if cancel_callback and cancel_callback():
+            logger.info("[embedding_model] Embedding forward pass cancelled by callback.")
+            raise RuntimeError("Scan job cancelled")
+
+        batch = [
+            chunk.text if isinstance(chunk, ChunkString) else chunk
+            for chunk in chunks[i : i + batch_size]
+        ]
 
         # Encode the current mini-batch
         # show_progress_bar=False keeps console clean in Streamlit
@@ -201,8 +491,8 @@ def embed_chunks(chunks: List[str], batch_size: int = 32) -> np.ndarray:
 
 
 def embed_documents(
-    chunked_docs: Dict[str, List[str]], batch_size: int = 32
-) -> Dict[str, np.ndarray]:
+    chunked_docs: dict[str, list[str]], batch_size: int = 32
+) -> dict[str, np.ndarray]:
     """
     Embed all chunks across multiple documents using optimized mini-batching.
 
@@ -219,10 +509,10 @@ def embed_documents(
         Dict mapping document name → numpy array of embeddings (shape: N×384).
         Documents with no chunks will have an empty array of shape (0, 384).
     """
-    embeddings: Dict[str, np.ndarray] = {}
-    all_chunks: List[str] = []
-    doc_chunk_counts: List[int] = []
-    doc_names: List[str] = []
+    embeddings: dict[str, np.ndarray] = {}
+    all_chunks: list[str] = []
+    doc_chunk_counts: list[int] = []
+    doc_names: list[str] = []
 
     # Initialize all documents with empty arrays to ensure consistent return types
     for doc_name in chunked_docs.keys():

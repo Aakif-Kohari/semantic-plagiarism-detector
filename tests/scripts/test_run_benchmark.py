@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 test_run_benchmark.py
 ---------------------
@@ -12,11 +10,13 @@ Validates:
 - Output formatting helpers
 """
 
+from __future__ import annotations
+
 import argparse
 import json
 import sys
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import numpy as np
 import pytest
@@ -28,7 +28,6 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 import run_benchmark
-
 
 # ─── Synthetic Data Generation Tests ──────────────────────────────────────────
 

@@ -1,19 +1,23 @@
 """
 src/utils/bulk_export.py
 -------------------------
-Bulk export utilities for generating ZIP archives containing per-pair
-plagiarism reports (PDF, CSV, JSON) and incident CSV streams.
+Bulk export utilities for generating ZIP archives, CSV streams, JSON payloads,
+and formatted reports from plagiarism detection results.
 
 Provides functions to:
-- Stream incident data into CSV format with UTF-8-SIG encoding
-- Generate multi-format ZIP archives with plagiarism reports
+- Stream incident data into multiple formats (CSV, JSON, XLSX) via a unified dispatcher
+- Generate multi-format ZIP archives with per-pair plagiarism reports
 - Normalize CSV column headers to standardized formats
+- Sanitize cell values to prevent formula injection
 
-Recent Additions (Issue #1253):
-- Added `normalize_csv_headers` function that strips whitespace and
-  replaces invalid symbols with underscores in CSV column headers,
-  ensuring standardized snake_case or Title Case formatting without
-  trailing spaces.
+Recent Additions (Issue #2008):
+- Added `ExportFormat` enum to centralize and validate supported export formats.
+- Replaced magic strings ("csv", "json", "xlsx", "pdf") with strict enum typing.
+- Added `export_incidents_to_format()` dispatcher function that routes data
+  to the appropriate serializer based on the `ExportFormat` enum.
+
+Previous Additions (Issue #1253):
+- Added `normalize_csv_headers` function for standardized snake_case/Title Case formatting.
 """
 
 import csv
@@ -23,13 +27,16 @@ import logging
 import os
 import re
 import zipfile
-from datetime import datetime
-from typing import Dict, List, Optional, Generator, Callable
-import numpy as np
+from datetime import datetime, timezone
+from enum import Enum
+from typing import Any, Callable, Generator, Optional
 
+import numpy as np
 import pandas as pd
 
 from src.core.similarity import find_most_similar_chunks
+from src.utils.export_sanitizer import sanitize_spreadsheet_value
+from src.utils.filename import sanitize_filename
 from src.utils.pdf_report import generate_plagiarism_report
 
 logger = logging.getLogger(__name__)
@@ -56,6 +63,92 @@ _MULTIPLE_UNDERSCORES_PATTERN = re.compile(r"_{2,}")
 
 # Pattern to match leading and trailing underscores or whitespace
 _LEADING_TRAILING_PATTERN = re.compile(r"^[\s_]+|[\s_]+$")
+
+
+class ExportFormat(str, Enum):
+    """Enumeration of supported export formats for bulk data extraction.
+
+    Using an Enum instead of raw strings provides IDE autocomplete,
+    prevents typos (e.g., "csv" vs "CSV" vs "Csv"), and allows for
+    strict type checking in function signatures.
+
+    Members:
+        CSV: Comma-Separated Values format.
+        JSON: JavaScript Object Notation format.
+        XLSX: Microsoft Excel Open XML Spreadsheet format.
+        PDF: Portable Document Format for visual reports.
+    """
+
+    CSV = "csv"
+    JSON = "json"
+    XLSX = "xlsx"
+    PDF = "pdf"
+
+    @classmethod
+    def _missing_(cls, value: Any) -> Optional["ExportFormat"]:
+        """Handle case-insensitive lookup and raise ValueError for invalid formats.
+
+        This override allows users to pass strings like "CSV" or "Json" and
+        have them automatically resolved to the correct enum member. If the
+        value is completely unrecognized, a descriptive ValueError is raised.
+
+        Args:
+            value: The raw value to look up.
+
+        Returns:
+            The matching ExportFormat member, or None if not found.
+
+        Raises:
+            ValueError: If the value does not match any known format.
+        """
+        if isinstance(value, str):
+            # Attempt case-insensitive match
+            lower_value = value.lower().strip()
+            for member in cls:
+                if member.value == lower_value:
+                    return member
+
+            # If we reach here, the string was not recognized
+            valid_options = ", ".join([f"'{m.value}'" for m in cls])
+            raise ValueError(
+                f"Invalid export format: '{value}'. "
+                f"Supported formats are: {valid_options}."
+            )
+
+        # For non-string types, let the default Enum behavior handle it (returns None)
+        return None
+
+    def get_mime_type(self) -> str:
+        """Return the standard MIME type for this export format."""
+        mime_map = {
+            ExportFormat.CSV: "text/csv",
+            ExportFormat.JSON: "application/json",
+            ExportFormat.XLSX: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ExportFormat.PDF: "application/pdf",
+        }
+        return mime_map.get(self, "application/octet-stream")
+
+    def get_file_extension(self) -> str:
+        """Return the standard file extension for this export format."""
+        return f".{self.value}"
+
+
+def sanitize_csv_cell_value(val: Any) -> str:
+    """Sanitize a CSV cell value to prevent CSV formula injection (Issue #1744).
+
+    Uses the shared spreadsheet sanitizer so CSV and Excel exports apply the
+    same formula-injection rules.
+
+    Args:
+        val: Any cell value (string, numeric, None, etc.)
+
+    Returns:
+        Sanitized string representation safe from formula injection.
+    """
+    if val is None:
+        return ""
+    sanitized = sanitize_spreadsheet_value(str(val))
+    return sanitized if isinstance(sanitized, str) else str(sanitized)
 
 
 def normalize_csv_headers(headers: list[str]) -> list[str]:
@@ -116,8 +209,7 @@ def normalize_csv_headers(headers: list[str]) -> list[str]:
             # Step 1: Strip leading and trailing whitespace
             cleaned = header.strip()
 
-        # Step 2: Replace invalid characters (anything not alphanumeric,
-        # underscore, or hyphen) with underscores
+        # Step 2: Replace invalid characters with underscores
         cleaned = _INVALID_HEADER_CHARS_PATTERN.sub("_", cleaned)
 
         # Step 3: Replace spaces with underscores
@@ -150,25 +242,37 @@ def normalize_csv_headers(headers: list[str]) -> list[str]:
     return normalized
 
 
-def export_incidents_csv_stream(incidents_list: List[Dict]) -> bytes:
+def export_incidents_csv_stream(
+    incidents_list: list[dict],
+    delimiter: str = ",",
+    quoting_style: int = csv.QUOTE_MINIMAL,
+) -> bytes:
     """Stream a list of incident dicts into a CSV-formatted byte stream
     encoded with **utf-8-sig** (UTF-8 with BOM) for Excel compatibility.
 
     The function writes the following columns in order:
 
-    * **Incident ID** – ``incident_id`` field (default: empty string)
-    * **Doc A**       – ``document_a`` field
-    * **Doc B**       – ``document_b`` field
-    * **Similarity**  – ``similarity_score`` formatted as a percentage (e.g. ``95.00%``)
-    * **Severity**    – ``severity_rank`` field
-    * **Status**      – ``review_status`` field
-    * **Date**        – ``date_flagged`` field
+    * **Incident ID** â€“ ``incident_id`` field (default: empty string)
+    * **Doc A**       â€“ ``document_a`` field
+    * **Doc B**       â€“ ``document_b`` field
+    * **Similarity**  â€“ ``similarity_score`` formatted as a percentage (e.g. ``95.00%``)
+    * **Severity**    â€“ ``severity_rank`` field
+    * **Status**      â€“ ``review_status`` field
+    * **Date**        â€“ ``date_flagged`` field
 
     Parameters
     ----------
     incidents_list:
         A list of incident dictionaries, as returned by
         :func:`~src.db.incidents.get_all_incidents`.
+    delimiter:
+        Single-character field delimiter passed through to
+        :class:`csv.DictWriter`. Defaults to ``","``. Use ``";"`` or
+        ``"\\t"`` for locales (e.g. many European Excel configurations)
+        that expect semicolon- or tab-delimited CSV files.
+    quoting_style:
+        The quoting mode passed to :class:`csv.DictWriter`. Defaults to
+        ``csv.QUOTE_MINIMAL``.
 
     Returns
     -------
@@ -181,13 +285,21 @@ def export_incidents_csv_stream(incidents_list: List[Dict]) -> bytes:
     --------
     >>> csv_bytes = export_incidents_csv_stream(incidents)
     >>> assert csv_bytes.startswith(b"\\xef\\xbb\\xbf")  # UTF-8 BOM
+
+    >>> csv_bytes = export_incidents_csv_stream(incidents, delimiter=";")
+    >>> assert b";" in csv_bytes
     """
+    if not isinstance(delimiter, str) or len(delimiter) != 1:
+        delimiter = ","
+
     output = io.StringIO()
     writer = csv.DictWriter(
         output,
         fieldnames=_CSV_HEADERS,
         extrasaction="ignore",
         lineterminator="\r\n",
+        delimiter=delimiter,
+        quoting=quoting_style,
     )
     writer.writeheader()
 
@@ -200,13 +312,13 @@ def export_incidents_csv_stream(incidents_list: List[Dict]) -> bytes:
 
         writer.writerow(
             {
-                "Incident ID": incident.get("incident_id", ""),
-                "Doc A": incident.get("document_a", ""),
-                "Doc B": incident.get("document_b", ""),
-                "Similarity": similarity_str,
-                "Severity": incident.get("severity_rank", ""),
-                "Status": incident.get("review_status", ""),
-                "Date": incident.get("date_flagged", ""),
+                "Incident ID": sanitize_csv_cell_value(incident.get("incident_id", "")),
+                "Doc A": sanitize_csv_cell_value(incident.get("document_a", "")),
+                "Doc B": sanitize_csv_cell_value(incident.get("document_b", "")),
+                "Similarity": sanitize_csv_cell_value(similarity_str),
+                "Severity": sanitize_csv_cell_value(incident.get("severity_rank", "")),
+                "Status": sanitize_csv_cell_value(incident.get("review_status", "")),
+                "Date": sanitize_csv_cell_value(incident.get("date_flagged", "")),
             }
         )
 
@@ -214,15 +326,169 @@ def export_incidents_csv_stream(incidents_list: List[Dict]) -> bytes:
     return csv_text.encode("utf-8-sig")
 
 
+def export_incidents_json_stream(incidents_list: list[dict]) -> bytes:
+    """Serialize a list of incident dicts into a JSON-formatted byte stream.
+
+    Args:
+        incidents_list: List of incident dictionaries.
+
+    Returns:
+        UTF-8 encoded JSON bytes.
+    """
+    # Use default=str to handle datetime objects gracefully
+    json_str = json.dumps(incidents_list, indent=2, default=str, ensure_ascii=False)
+    return json_str.encode("utf-8")
+
+
+def export_incidents_xlsx_stream(incidents_list: list[dict]) -> bytes:
+    """Convert a list of incident dicts into an Excel XLSX byte stream.
+
+    Requires pandas and openpyxl. If openpyxl is missing, falls back to CSV.
+
+    Args:
+        incidents_list: List of incident dictionaries.
+
+    Returns:
+        Raw bytes of the XLSX file.
+    """
+    try:
+        df = pd.DataFrame(incidents_list)
+
+        # Rename columns for better readability in Excel
+        column_mapping = {
+            "incident_id": "Incident ID",
+            "document_a": "Document A",
+            "document_b": "Document B",
+            "similarity_score": "Similarity Score",
+            "severity_rank": "Severity",
+            "review_status": "Status",
+            "date_flagged": "Date Flagged",
+        }
+        df = df.rename(columns=column_mapping)
+
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine="openpyxl") as writer:
+            df.to_excel(writer, index=False, sheet_name="Plagiarism Incidents")
+            wb = writer.book
+            if hasattr(wb, "properties") and wb.properties is not None:
+                wb.properties.title = "Semantic Plagiarism Similarity Report"
+                wb.properties.creator = "Semantic Plagiarism Detector"
+                wb.properties.created = datetime.now(timezone.utc)
+
+        return output.getvalue()
+    except ImportError:
+        logger.warning("openpyxl not installed. Falling back to CSV for XLSX request.")
+        return export_incidents_csv_stream(incidents_list)
+
+
+def export_incidents_to_format(
+    incidents_list: list[dict],
+    format: ExportFormat | str = ExportFormat.CSV,
+) -> bytes:
+    """Dispatcher function that routes incident data to the appropriate serializer.
+
+    This is the primary entry point for exporting incidents. It accepts either
+    an `ExportFormat` enum member or a raw string (which is coerced to the enum).
+
+    Args:
+        incidents_list: List of incident dictionaries to export.
+        format: The desired export format. Can be an `ExportFormat` enum member
+                or a string like "csv", "json", "xlsx".
+
+    Returns:
+        Raw bytes of the serialized data.
+
+    Raises:
+        ValueError: If the provided format string is invalid.
+        TypeError: If the format argument is not a string or ExportFormat.
+    """
+    # Coerce string to Enum (raises ValueError if invalid via _missing_)
+    if isinstance(format, str):
+        format_enum = ExportFormat(format)
+    elif isinstance(format, ExportFormat):
+        format_enum = format
+    else:
+        raise TypeError(
+            f"format must be an ExportFormat enum or string, got {type(format).__name__}"
+        )
+
+    logger.info(
+        "Exporting %d incidents to %s format.",
+        len(incidents_list),
+        format_enum.value.upper(),
+    )
+
+    if format_enum == ExportFormat.CSV:
+        return export_incidents_csv_stream(incidents_list)
+    elif format_enum == ExportFormat.JSON:
+        return export_incidents_json_stream(incidents_list)
+    elif format_enum == ExportFormat.XLSX:
+        return export_incidents_xlsx_stream(incidents_list)
+    elif format_enum == ExportFormat.PDF:
+        # PDF export typically requires a different data structure (flags, not just incidents)
+        # For this dispatcher, we log a warning and fallback to JSON
+        logger.warning(
+            "PDF export via incident dispatcher is not fully supported. Returning JSON."
+        )
+        return export_incidents_json_stream(incidents_list)
+    else:
+        # Unreachable due to Enum validation, but kept for safety
+        raise ValueError(f"Unhandled export format: {format_enum}")
+
+
+def sanitize_export_filename(filename: str, default_ext: str = ".csv") -> str:
+    """Strip illegal OS/filesystem characters from the filename and ensure it ends with default_ext."""
+    sanitized = re.sub(r'[<>:"/\\|?*]', "", filename)
+    if not sanitized.endswith(default_ext):
+        sanitized += default_ext
+    return sanitized
+
+
+def export_incidents_csv(
+    incidents_list: list[dict],
+    delimiter: str = ",",
+    quoting_style: int = csv.QUOTE_MINIMAL,
+    filename: Optional[str] = None,
+) -> bytes | tuple[bytes, str]:
+    """Export a list of incident dicts to a CSV-formatted byte stream.
+
+    Validates that the delimiter is a single character string, falling back to a
+    comma if an invalid delimiter is supplied.
+    """
+    if not isinstance(delimiter, str) or len(delimiter) != 1:
+        delimiter = ","
+
+    csv_bytes = export_incidents_csv_stream(
+        incidents_list, delimiter=delimiter, quoting_style=quoting_style
+    )
+
+    if filename is not None:
+        return csv_bytes, sanitize_export_filename(filename)
+    return csv_bytes
+
+
 def stream_incidents_csv_chunks(
     query_func: Callable,
     batch_size: int = 1000,
+    delimiter: str = ",",
+    quoting_style: int = csv.QUOTE_MINIMAL,
 ) -> Generator[str, None, None]:
-    """
-    Stream incidents in chunks to a CSV-formatted string generator.
+    """Stream incidents in chunks to a CSV-formatted string generator.
 
     This avoids loading all incidents into memory at once by fetching them in batches.
     The first yielded string includes the CSV headers.
+
+    Parameters
+    ----------
+    query_func:
+        Callable accepting ``limit`` and ``offset`` keyword arguments that
+        returns a batch of incident dicts.
+    batch_size:
+        Number of incidents to fetch per batch.
+    delimiter:
+        Single-character field delimiter. Defaults to ``","``.
+    quoting_style:
+        The quoting mode passed to :class:`csv.DictWriter`.
     """
     # Yield the header first
     output = io.StringIO()
@@ -231,6 +497,8 @@ def stream_incidents_csv_chunks(
         fieldnames=_CSV_HEADERS,
         extrasaction="ignore",
         lineterminator="\r\n",
+        delimiter=delimiter,
+        quoting=quoting_style,
     )
     writer.writeheader()
     yield output.getvalue()
@@ -247,6 +515,8 @@ def stream_incidents_csv_chunks(
             fieldnames=_CSV_HEADERS,
             extrasaction="ignore",
             lineterminator="\r\n",
+            delimiter=delimiter,
+            quoting=quoting_style,
         )
 
         for incident in batch:
@@ -258,13 +528,19 @@ def stream_incidents_csv_chunks(
 
             writer.writerow(
                 {
-                    "Incident ID": incident.get("incident_id", ""),
-                    "Doc A": incident.get("document_a", ""),
-                    "Doc B": incident.get("document_b", ""),
-                    "Similarity": similarity_str,
-                    "Severity": incident.get("severity_rank", ""),
-                    "Status": incident.get("review_status", ""),
-                    "Date": incident.get("date_flagged", ""),
+                    "Incident ID": sanitize_csv_cell_value(
+                        incident.get("incident_id", "")
+                    ),
+                    "Doc A": sanitize_csv_cell_value(incident.get("document_a", "")),
+                    "Doc B": sanitize_csv_cell_value(incident.get("document_b", "")),
+                    "Similarity": sanitize_csv_cell_value(similarity_str),
+                    "Severity": sanitize_csv_cell_value(
+                        incident.get("severity_rank", "")
+                    ),
+                    "Status": sanitize_csv_cell_value(
+                        incident.get("review_status", "")
+                    ),
+                    "Date": sanitize_csv_cell_value(incident.get("date_flagged", "")),
                 }
             )
 
@@ -275,21 +551,15 @@ def stream_incidents_csv_chunks(
             break
 
 
-def _sanitise_filename(name: str) -> str:
-    """Strip non-alphanumeric characters (except ``-``, ``_``) for safe filenames."""
-    return (
-        "".join(c for c in name if c.isalnum() or c in ("-", "_")).rstrip() or "unnamed"
-    )
-
-
 def generate_bulk_reports_zip(
-    flags: List[Dict],
+    flags: list[dict],
     *,
-    chunked_docs: Optional[Dict[str, List[str]]] = None,
-    embeddings: Optional[Dict[str, "np.ndarray"]] = None,
+    chunked_docs: Optional[dict[str, list[str]]] = None,
+    embeddings: Optional[dict[str, "np.ndarray"]] = None,
     include_pdf: bool = True,
     include_csv: bool = True,
     include_json: bool = True,
+    progress_callback: Optional[Callable[[int, int], None]] = None,
 ) -> bytes:
     """Generate a ZIP file containing selected artefacts for flagged document pairs.
 
@@ -297,27 +567,27 @@ def generate_bulk_reports_zip(
     ----------
     flags:
         List of flag dicts returned by :func:`~src.core.similarity.flag_plagiarism`.
-        Each dict must contain ``doc_a``, ``doc_b``, ``similarity`` and
-        ``threshold_at_time_of_flag``.
     chunked_docs:
-        Optional mapping of document name → list of text chunks.
+        Optional mapping of document name â†’ list of text chunks.
     embeddings:
-        Optional mapping of document name → NumPy embedding array.
+        Optional mapping of document name â†’ NumPy embedding array.
     include_pdf:
-        Whether to generate per‑pair PDF reports.
+        Whether to generate perâ€‘pair PDF reports.
     include_csv:
         Whether to include a summary CSV of all flagged pairs.
     include_json:
         Whether to include a metadata JSON file describing the export.
+    progress_callback:
+        Optional callback invoked with (current_idx, total_count) after processing each pair.
 
     Returns
     -------
     bytes
-        In‑memory ZIP file contents.
+        Inâ€‘memory ZIP file contents.
     """
-
     memory_file = io.BytesIO()
-    csv_rows = []  # collect rows for optional CSV
+    csv_rows = []
+    total_count = len(flags)
 
     with zipfile.ZipFile(memory_file, "w", zipfile.ZIP_DEFLATED) as zf:
         for idx, flag in enumerate(flags):
@@ -326,7 +596,6 @@ def generate_bulk_reports_zip(
             score = float(flag.get("similarity", 0.0))
             threshold = float(flag.get("threshold_at_time_of_flag", 0.5))
 
-            # Gather CSV row data early
             csv_rows.append(
                 {
                     "doc_a": doc_a,
@@ -336,7 +605,6 @@ def generate_bulk_reports_zip(
                 }
             )
 
-            # Attempt to enrich the report with top matching chunk pairs
             top_pairs = []
             if (
                 chunked_docs
@@ -348,8 +616,8 @@ def generate_bulk_reports_zip(
                     emb_a = embeddings[doc_a]
                     emb_b = embeddings[doc_b]
                     top_pairs = find_most_similar_chunks(
-                        chunked_docs[doc_a],
-                        chunked_docs[doc_b],
+                        [chunk.text for chunk in chunked_docs[doc_a]],
+                        [chunk.text for chunk in chunked_docs[doc_b]],
                         emb_a,
                         emb_b,
                         top_k=3,
@@ -357,7 +625,7 @@ def generate_bulk_reports_zip(
                     )
                 except Exception as exc:
                     logger.debug(
-                        "Could not compute chunk pairs for %s ↔ %s: %s",
+                        "Could not compute chunk pairs for %s â†” %s: %s",
                         doc_a,
                         doc_b,
                         exc,
@@ -373,17 +641,24 @@ def generate_bulk_reports_zip(
                         top_pairs=top_pairs,
                         report_title=f"Plagiarism Report: {doc_a} vs {doc_b}",
                     )
-                    safe_a = _sanitise_filename(doc_a)
-                    safe_b = _sanitise_filename(doc_b)
-                    pdf_filename = f"report_{safe_a}_{safe_b}.pdf"
+                    safe_a = os.path.splitext(
+                        sanitize_filename(doc_a, fallback="doc_a")
+                    )[0]
+                    safe_b = os.path.splitext(
+                        sanitize_filename(doc_b, fallback="doc_b")
+                    )[0]
+                    pdf_filename = sanitize_filename(
+                        f"report_{safe_a}_{safe_b}.pdf", fallback="report.pdf"
+                    )
                     zf.writestr(pdf_filename, pdf_buffer.getvalue())
                 except Exception as exc:
                     logger.error(
-                        "Failed to generate PDF for %s ↔ %s: %s", doc_a, doc_b, exc
+                        "Failed to generate PDF for %s â†” %s: %s", doc_a, doc_b, exc
                     )
-            # Fallback JSON per‑pair if PDF generation fails
-            safe_a = _sanitise_filename(doc_a)
-            safe_b = _sanitise_filename(doc_b)
+
+            # Fallback JSON perâ€‘pair if PDF generation fails
+            safe_a = os.path.splitext(sanitize_filename(doc_a, fallback="doc_a"))[0]
+            safe_b = os.path.splitext(sanitize_filename(doc_b, fallback="doc_b"))[0]
             fallback = {
                 "generated_at": datetime.now().isoformat(),
                 "document_a": doc_a,
@@ -393,8 +668,14 @@ def generate_bulk_reports_zip(
                 "note": "PDF generation failed; JSON fallback provided.",
             }
             zf.writestr(
-                f"report_{safe_a}_{safe_b}.json", json.dumps(fallback, indent=2)
+                sanitize_filename(
+                    f"report_{safe_a}_{safe_b}.json", fallback="report.json"
+                ),
+                json.dumps(fallback, indent=2),
             )
+
+            if progress_callback:
+                progress_callback(idx + 1, total_count)
 
         # Optional CSV summary
         if include_csv:
@@ -419,21 +700,32 @@ def generate_bulk_reports_zip(
     return memory_file.getvalue()
 
 
-def create_batch_incident_zip_archive(incidents: list[dict]) -> bytes:
+def create_batch_incident_zip_archive(
+    incidents: list[dict],
+    delimiter: str = ",",
+    quoting_style: int = csv.QUOTE_MINIMAL,
+    progress_callback: Optional[Callable[[int, int], None]] = None,
+) -> bytes:
     """Generate in-memory ZIP byte buffer containing incidents_summary.csv, metadata.json, and PDF reports.
 
     Args:
         incidents: A list of incident dictionaries.
+        delimiter: Field delimiter used for ``incidents_summary.csv``.
+        quoting_style: The quoting mode passed to CSV export.
+        progress_callback: Optional callback invoked with (current_idx, total_count) after processing each incident.
 
     Returns:
         bytes: The in-memory ZIP file content.
     """
     memory_file = io.BytesIO()
+    total_count = len(incidents)
 
     with zipfile.ZipFile(memory_file, "w", zipfile.ZIP_DEFLATED) as zf:
         # 1. Generate and write incidents_summary.csv
         try:
-            csv_bytes = export_incidents_csv_stream(incidents)
+            csv_bytes = export_incidents_csv_stream(
+                incidents, delimiter=delimiter, quoting_style=quoting_style
+            )
             zf.writestr("incidents_summary.csv", csv_bytes)
         except Exception as exc:
             logger.error(
@@ -462,6 +754,8 @@ def create_batch_incident_zip_archive(incidents: list[dict]) -> bytes:
                     "Skipping PDF generation for incident at index %d: missing doc_a or doc_b",
                     idx,
                 )
+                if progress_callback:
+                    progress_callback(idx + 1, total_count)
                 continue
 
             raw_score = incident.get("similarity_score") or incident.get(
@@ -490,9 +784,12 @@ def create_batch_incident_zip_archive(incidents: list[dict]) -> bytes:
                 except Exception:
                     incident_id = f"unknown_{idx}"
 
-            safe_a = _sanitise_filename(doc_a)
-            safe_b = _sanitise_filename(doc_b)
-            pdf_filename = f"report_{incident_id}_{safe_a}_{safe_b}.pdf"
+            safe_id = sanitize_filename(str(incident_id), fallback=f"unknown_{idx}")
+            safe_a = os.path.splitext(sanitize_filename(doc_a, fallback="doc_a"))[0]
+            safe_b = os.path.splitext(sanitize_filename(doc_b, fallback="doc_b"))[0]
+            pdf_filename = sanitize_filename(
+                f"report_{safe_id}_{safe_a}_{safe_b}.pdf", fallback="report.pdf"
+            )
 
             try:
                 pdf_buffer = generate_plagiarism_report(
@@ -506,28 +803,34 @@ def create_batch_incident_zip_archive(incidents: list[dict]) -> bytes:
                 zf.writestr(pdf_filename, pdf_buffer.getvalue())
             except Exception as exc:
                 logger.error(
-                    "Failed to generate PDF for incident %s (%s ↔ %s): %s",
+                    "Failed to generate PDF for incident %s (%s â†” %s): %s",
                     incident_id,
                     doc_a,
                     doc_b,
                     exc,
                 )
 
+            if progress_callback:
+                progress_callback(idx + 1, total_count)
+
     return memory_file.getvalue()
 
 
-def create_documents_bulk_zip_archive(filenames: list[str]) -> bytes:
+def create_documents_bulk_zip_archive(
+    filenames: list[str],
+    progress_callback: Optional[Callable[[int, int], None]] = None,
+) -> bytes:
     """Create a downloadable .zip archive containing text content and metadata manifest
     for the specified document filenames from the corpus database.
 
     Args:
         filenames: List of document filenames to include in the ZIP archive.
+        progress_callback: Optional callback invoked with (current_idx, total_count) after processing each document.
 
     Returns:
         ZIP archive file bytes ready for download.
     """
-    from src.db.corpus_db import get_all_documents, get_document_word_counts, _connect
-    from src.utils.filename import sanitize_filename
+    from src.db.corpus_db import _connect, get_all_documents, get_document_word_counts
 
     buffer = io.BytesIO()
     raw_docs = get_all_documents(include_deleted=True)
@@ -541,9 +844,10 @@ def create_documents_bulk_zip_archive(filenames: list[str]) -> bytes:
 
     word_counts = get_document_word_counts()
     manifest_rows = []
+    total_count = len(filenames)
 
     with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as zip_file:
-        for filename in filenames:
+        for idx, filename in enumerate(filenames):
             doc_obj = all_docs.get(filename)
             doc_meta = {}
             if doc_obj:
@@ -586,6 +890,9 @@ def create_documents_bulk_zip_archive(filenames: list[str]) -> bytes:
                     "upload_date": doc_meta.get("upload_date") or "N/A",
                 }
             )
+
+            if progress_callback:
+                progress_callback(idx + 1, total_count)
 
         if manifest_rows:
             manifest_df = pd.DataFrame(manifest_rows)

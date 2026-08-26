@@ -62,7 +62,7 @@ def _get_queue() -> Queue:
 # ── Job status helpers ─────────────────────────────────────────────────────────
 
 
-def get_job_status(job_id: str) -> Optional[Dict[str, Any]]:
+def get_job_status(job_id: str) -> Optional[dict[str, Any]]:
     """Return the current status and (if finished) the result summary for a job.
 
     Returns ``None`` if the job ID is unknown or expired.
@@ -72,7 +72,7 @@ def get_job_status(job_id: str) -> Optional[Dict[str, Any]]:
     except Exception:
         return None
 
-    status: Dict[str, Any] = {
+    status: dict[str, Any] = {
         "job_id": job.id,
         "status": job.get_status(),
         "created_at": job.created_at.isoformat() if job.created_at else None,
@@ -84,7 +84,7 @@ def get_job_status(job_id: str) -> Optional[Dict[str, Any]]:
     if job.is_failed:
         status["error"] = str(job.exc_info)
     elif job.is_finished:
-        result: Dict[str, Any] = job.return_value or {}
+        result: dict[str, Any] = job.return_value or {}
         status["result"] = {
             "document_count": result.get("document_count", 0),
             "flags_count": result.get("flags_count", 0),
@@ -97,14 +97,14 @@ def get_job_status(job_id: str) -> Optional[Dict[str, Any]]:
 
 
 def _run_upload_job(
-    file_bytes_dict: Dict[str, bytes],
+    file_bytes_dict: dict[str, bytes],
     threshold: float = PLAGIARISM_THRESHOLD,
     ignore_phrases: Optional[str] = None,
     ocr_language: str = "eng",
     ocr_dpi: int = 300,
     chunk_size: int = 500,
     chunk_overlap: int = 50,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Background task executed by the RQ worker.
 
     Runs the full pipeline then syncs incidents to the database.  Returns a
@@ -129,21 +129,19 @@ def _run_upload_job(
             ignore_phrases=ignore_phrases,
         )
 
-        raw_texts, chunked_docs, embeddings, sim_df, chunk_sim_df, faiss_index, registry, ai_probabilities, flags = pipeline_result
-
-        incidents = sync_flagged_incidents(flags)
+        incidents = sync_flagged_incidents(pipeline_result.flags)
 
         elapsed = time.perf_counter() - start
         logger.info(
             "Background job finished: %d documents, %d flags, %.2fs elapsed",
-            len(raw_texts),
-            len(flags),
+            len(pipeline_result.raw_texts),
+            len(pipeline_result.flags),
             elapsed,
         )
 
         return {
-            "document_count": len(raw_texts),
-            "flags_count": len(flags),
+            "document_count": len(pipeline_result.raw_texts),
+            "flags_count": len(pipeline_result.flags),
             "incidents_count": len(incidents),
             "elapsed_seconds": round(elapsed, 2),
         }
@@ -157,7 +155,7 @@ def _run_upload_job(
 
 
 def enqueue_upload_job(
-    file_bytes_dict: Dict[str, bytes],
+    file_bytes_dict: dict[str, bytes],
     *,
     threshold: float = PLAGIARISM_THRESHOLD,
     ignore_phrases: Optional[str] = None,

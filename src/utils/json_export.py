@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import json
 import math
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
+import jsonschema
 import numpy as np
 import pandas as pd
 
@@ -18,8 +20,12 @@ def get_export_timestamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _json_default_serializer(obj: Any) -> Any:
+def json_serializer_fallback(obj: Any) -> Any:
     """Custom JSON serializer for NumPy data types, pandas Timestamps, and datetime objects.
+
+    Passed as the ``default=`` callback to :func:`json.dumps` so that
+    otherwise non-serializable objects (e.g. ``numpy.int64``, ``numpy.float64``,
+    ``datetime``) don't raise an unhandled ``TypeError`` when exporting.
 
     Args:
         obj: Object instance to serialize.
@@ -30,7 +36,11 @@ def _json_default_serializer(obj: Any) -> Any:
     if isinstance(obj, (np.integer, int)):
         return int(obj)
     if isinstance(obj, (np.floating, float)):
-        return 0.0 if math.isnan(float(obj)) or math.isinf(float(obj)) else round(float(obj), 6)
+        return (
+            0.0
+            if math.isnan(float(obj)) or math.isinf(float(obj))
+            else round(float(obj), 6)
+        )
     if isinstance(obj, np.ndarray):
         return obj.tolist()
     if isinstance(obj, (datetime, pd.Timestamp)):
@@ -43,7 +53,7 @@ def _json_default_serializer(obj: Any) -> Any:
 
 
 def export_similarity_matrix_to_json(
-    df: Optional[Union[pd.DataFrame, Any]],
+    df: Optional[pd.DataFrame | Any],
     include_metadata: bool = False,
     indent: Optional[int] = 2,
 ) -> str:
@@ -91,14 +101,16 @@ def export_similarity_matrix_to_json(
             return json.dumps(payload, indent=indent, ensure_ascii=False)
         return "[]"
 
-    doc_names: List[str] = [str(col) for col in df.columns]
+    doc_names: list[str] = [str(col) for col in df.columns]
     n: int = len(doc_names)
-    pairs: List[Dict[str, Union[str, float]]] = []
+    pairs: list[dict[str, str | float]] = []
 
     for i in range(n):
         for j in range(i + 1, n):
             score = df.iloc[i, j]
-            if pd.isna(score) or (isinstance(score, (float, np.floating)) and math.isnan(float(score))):
+            if pd.isna(score) or (
+                isinstance(score, (float, np.floating)) and math.isnan(float(score))
+            ):
                 score_val = 0.0
             else:
                 score_val = round(float(score), 4)
@@ -120,15 +132,22 @@ def export_similarity_matrix_to_json(
             },
             "pairs": pairs,
         }
-        return json.dumps(output_data, indent=indent, ensure_ascii=False, default=_json_default_serializer)
+        return json.dumps(
+            output_data,
+            indent=indent,
+            ensure_ascii=False,
+            default=json_serializer_fallback,
+        )
 
-    return json.dumps(pairs, indent=indent, ensure_ascii=False, default=_json_default_serializer)
+    return json.dumps(
+        pairs, indent=indent, ensure_ascii=False, default=json_serializer_fallback
+    )
 
 
 def export_to_json(
     data: Any,
     include_metadata: bool = True,
-    metadata: Optional[Dict[str, Any]] = None,
+    metadata: Optional[dict[str, Any]] = None,
     indent: Optional[int] = 2,
 ) -> str:
     """Export arbitrary report data structures into a clean JSON string with an exported_at timestamp.
@@ -148,7 +167,9 @@ def export_to_json(
 
     if isinstance(data, pd.DataFrame):
         processed_data = json.loads(
-            export_similarity_matrix_to_json(data, include_metadata=False, indent=indent)
+            export_similarity_matrix_to_json(
+                data, include_metadata=False, indent=indent
+            )
         )
     else:
         processed_data = data
@@ -158,10 +179,10 @@ def export_to_json(
             processed_data,
             indent=indent,
             ensure_ascii=False,
-            default=_json_default_serializer,
+            default=json_serializer_fallback,
         )
 
-    root_metadata: Dict[str, Any] = {
+    root_metadata: dict[str, Any] = {
         "exported_at": exported_at_timestamp,
     }
 
@@ -186,13 +207,13 @@ def export_to_json(
         payload,
         indent=indent,
         ensure_ascii=False,
-        default=_json_default_serializer,
+        default=json_serializer_fallback,
     )
 
 
 def export_report_to_json(
-    report_dict: Dict[str, Any],
-    custom_metadata: Optional[Dict[str, Any]] = None,
+    report_dict: dict[str, Any],
+    custom_metadata: Optional[dict[str, Any]] = None,
     indent: Optional[int] = 2,
 ) -> str:
     """Export a comprehensive plagiarism inspection report dictionary to JSON.
@@ -218,7 +239,7 @@ def export_report_to_json(
 
 
 def export_incidents_to_json(
-    incidents: List[Dict[str, Any]],
+    incidents: list[dict[str, Any]],
     session_id: Optional[str] = None,
     indent: Optional[int] = 2,
 ) -> str:
@@ -247,7 +268,7 @@ def export_incidents_to_json(
     )
 
 
-def parse_export_json(json_str: str) -> Dict[str, Any]:
+def parse_export_json(json_str: str) -> dict[str, Any]:
     """Parse a serialized JSON report string and validate structure.
 
     Args:
@@ -291,13 +312,14 @@ def generate_export_checksum(json_str: str) -> str:
         64-character SHA-256 hex string.
     """
     import hashlib
+
     if not json_str:
         return hashlib.sha256(b"").hexdigest()
     return hashlib.sha256(json_str.encode("utf-8")).hexdigest()
 
 
 def export_batch_reports_to_json(
-    reports: List[Dict[str, Any]],
+    reports: list[dict[str, Any]],
     batch_id: Optional[str] = None,
     indent: Optional[int] = 2,
 ) -> str:
@@ -311,7 +333,7 @@ def export_batch_reports_to_json(
     Returns:
         JSON report string with batch metadata and exported_at timestamp.
     """
-    metadata: Dict[str, Any] = {
+    metadata: dict[str, Any] = {
         "report_type": "batch_plagiarism_analysis",
         "batch_size": len(reports) if isinstance(reports, list) else 0,
     }
@@ -348,9 +370,9 @@ def export_filtered_similarity_matrix_to_json(
             None, include_metadata=include_metadata, indent=indent
         )
 
-    doc_names: List[str] = [str(col) for col in df.columns]
+    doc_names: list[str] = [str(col) for col in df.columns]
     n: int = len(doc_names)
-    filtered_pairs: List[Dict[str, Union[str, float]]] = []
+    filtered_pairs: list[dict[str, str | float]] = []
 
     for i in range(n):
         for j in range(i + 1, n):
@@ -377,7 +399,7 @@ def export_filtered_similarity_matrix_to_json(
     )
 
 
-def build_export_schema_definition() -> Dict[str, Any]:
+def build_export_schema_definition() -> dict[str, Any]:
     """Return JSON Schema representation for validating exported metadata reports.
 
     Returns:
@@ -407,3 +429,4 @@ def build_export_schema_definition() -> Dict[str, Any]:
             },
         },
     }
+

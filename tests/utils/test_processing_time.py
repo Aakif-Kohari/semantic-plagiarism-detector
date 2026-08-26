@@ -3,23 +3,25 @@ Unit tests for src.utils.processing_time helpers and ProcessingTimer.
 """
 
 import time
+
 import pytest
 
-from src.utils.processing_time import (
+from src.utils.processing_time import (  # ============================================================================
     BYTES_PER_MB,
     ProcessingTimer,
+    calculate_average_latency,
+    calculate_kb_per_second,
     calculate_mb_per_minute,
     calculate_page_throughput,
     calculate_processing_throughput,
-    estimate_processing_seconds,    format_duration,
+    estimate_processing_seconds,
+    format_duration,
     format_processing_duration,
     format_throughput_human_readable,
     processing_eta_text,
     uploaded_files_total_bytes,
 )
 
-
-# ============================================================================
 # Page Throughput Tests
 # ============================================================================
 
@@ -41,6 +43,7 @@ def test_calculate_page_throughput(total_pages, elapsed_seconds, expected):
 # ============================================================================
 # ProcessingTimer Tests
 # ============================================================================
+
 
 def test_timer_initialization():
     timer = ProcessingTimer()
@@ -148,7 +151,10 @@ class TestProcessingThroughput:
             (2048, 2.0, 1.0),  # 2 KB in 2 seconds
             (1048576, 1.0, 1024.0),  # 1 MB in 1 second -> 1024 KB/s
             (512, 0.5, 1.0),  # 0.5 KB in 0.5 seconds
-            (10240, 3.33, 3.08),  # 10 KB in 3.33 seconds (rounded)
+            # 10240 bytes is 10 KB against the module's BYTES_PER_KB of 1024,
+            # so 10 / 3.33 = 3.0. The previous expectation of 3.08 came from
+            # dividing by 1000 instead, which no other row in this table does.
+            (10240, 3.33, 3.0),  # 10 KB in 3.33 seconds (rounded)
             (0, 5.0, 0.0),  # 0 bytes processed
         ],
     )
@@ -348,6 +354,20 @@ def test_eta_text_uses_default_rate():
     assert processing_eta_text(2 * BYTES_PER_MB) == (
         "Estimated processing time: about 4 seconds"
     )
+
+
+def test_calculate_average_latency():
+    assert calculate_average_latency([1.0, 2.0, 3.0]) == 2.0
+
+
+def test_calculate_average_latency_rounds_to_three_decimals():
+    assert calculate_average_latency([1.111, 2.222, 3.334]) == 2.222
+
+
+def test_calculate_average_latency_empty_list():
+    assert calculate_average_latency([]) == 0.0
+
+
 def test_calculate_mb_per_minute():
     # Test normal calculation: 10 MB in 60 seconds (1 minute) = 10.0 MB/min
     ten_mb_in_bytes = 10 * 1024 * 1024
@@ -359,3 +379,19 @@ def test_calculate_mb_per_minute():
 
     # Test zero bytes processed
     assert calculate_mb_per_minute(0, 60.0) == 0.0
+
+
+def test_calculate_kb_per_second():
+    # Test normal calculation: 100 KB (102400 bytes) in 5.0 seconds = 20.0 KB/sec
+    assert calculate_kb_per_second(102400, 5.0) == 20.0
+
+    # Test rounding to 2 decimal places: 100 KB in 3.0 seconds = 33.33 KB/sec
+    assert calculate_kb_per_second(102400, 3.0) == 33.33
+
+    # Test zero or negative elapsed time returns 0.0
+    assert calculate_kb_per_second(102400, 0.0) == 0.0
+    assert calculate_kb_per_second(102400, -2.5) == 0.0
+
+    # Test zero or negative bytes processed
+    assert calculate_kb_per_second(0, 5.0) == 0.0
+    assert calculate_kb_per_second(-1024, 5.0) == 0.0

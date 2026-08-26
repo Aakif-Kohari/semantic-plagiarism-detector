@@ -1,6 +1,4 @@
 #!/usr/bin/env python3
-from __future__ import annotations
-
 """
 run_benchmark.py
 ----------------
@@ -18,26 +16,25 @@ Acceptance Criteria (Issue #955):
 - Print formatted latency metrics table (ms/chunk, throughput docs/sec).
 """
 
+from __future__ import annotations
+
 import argparse
 import json
 import logging
 import os
 import random
-import string
 import sys
 import time
 from pathlib import Path
-from typing import Dict, List, Tuple
-
-import numpy as np
+from typing import Dict, List
 
 # Add project root to path for imports
 ROOT_DIR = Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from src.core.embedding_model import embed_chunks, embed_documents, _detect_device
-from src.core.faiss_index import build_index, search_similar_chunks
+from src.core.embedding_model import _detect_device, embed_chunks, embed_documents
+from src.core.faiss_index import build_index
 from src.core.text_chunking import chunk_documents
 
 # Configure logging
@@ -128,7 +125,7 @@ def generate_synthetic_document(
 def generate_synthetic_corpus(
     num_docs: int,
     chunks_per_doc: int,
-) -> Dict[str, List[str]]:
+) -> dict[str, list[str]]:
     """
     Generate a synthetic corpus of documents and their pre-chunked text.
 
@@ -177,9 +174,9 @@ def generate_synthetic_corpus(
 
 
 def benchmark_embedding_throughput(
-    corpus: Dict[str, List[str]],
+    corpus: dict[str, list[str]],
     batch_size: int = 32,
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """
     Measure the throughput and latency of the embedding pipeline.
 
@@ -217,9 +214,9 @@ def benchmark_embedding_throughput(
 
 
 def benchmark_document_embedding(
-    corpus: Dict[str, List[str]],
+    corpus: dict[str, list[str]],
     batch_size: int = 32,
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """
     Measure the throughput of document-level embedding (embed_documents).
 
@@ -234,7 +231,7 @@ def benchmark_document_embedding(
     logger.info(f"Benchmarking document embedding for {num_docs} documents...")
 
     start_time = time.perf_counter()
-    doc_embeddings = embed_documents(corpus, batch_size=batch_size)
+    embed_documents(corpus, batch_size=batch_size)
     end_time = time.perf_counter()
 
     total_time_seconds = end_time - start_time
@@ -250,9 +247,9 @@ def benchmark_document_embedding(
 
 
 def benchmark_faiss_indexing(
-    corpus: Dict[str, List[str]],
+    corpus: dict[str, list[str]],
     batch_size: int = 32,
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """
     Measure the time required to build a FAISS index from the corpus.
 
@@ -301,7 +298,7 @@ def benchmark_faiss_indexing(
 
 def print_metrics_table(
     title: str,
-    metrics: Dict[str, float],
+    metrics: dict[str, float],
     device: str,
 ) -> None:
     """
@@ -339,7 +336,7 @@ def print_metrics_table(
 
 
 def save_results_to_json(
-    results: Dict[str, Dict[str, float]],
+    results: dict[str, dict[str, float]],
     output_path: str,
     args: argparse.Namespace,
 ) -> None:

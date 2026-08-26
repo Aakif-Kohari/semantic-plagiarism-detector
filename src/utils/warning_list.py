@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import html
+import re
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
 import pandas as pd
@@ -62,10 +64,12 @@ def _normalise_warning(
     }
 
 
-def _truncate_search_query(search_query: str) -> str:
-    """Limit search input length to avoid expensive matching on oversized strings."""
-    if not isinstance(search_query, str):
+def _truncate_search_query(search_query: Any) -> str:
+    """Limit search input length to avoid expensive matching on oversized strings, safely casting numeric inputs."""
+    if search_query is None:
         return ""
+    if not isinstance(search_query, str):
+        search_query = str(search_query)
     return search_query[:MAX_SEARCH_QUERY_LENGTH].strip()
 
 
@@ -79,36 +83,22 @@ def filter_warnings(
 
     if min_match_length > 0:
         normalised = [
-            item for item in normalised if item.get("matched_length", 0) >= min_match_length
+            item
+            for item in normalised
+            if item.get("matched_length", 0) >= min_match_length
         ]
 
-    query = _truncate_search_query(search_query).casefold()
-    if not query:
-        return normalised
-
-    filtered = []
-    for item in normalised:
-        doc_a = item["doc_a"].casefold()
-        doc_b = item["doc_b"].casefold()
-
-        if query in doc_a or query in doc_b:
-            filtered.append(item)
-            continue
-
-        if fuzz is not None:
-            score_a = max(fuzz.partial_ratio(query, doc_a), fuzz.token_set_ratio(query, doc_a))
-            score_b = max(fuzz.partial_ratio(query, doc_b), fuzz.token_set_ratio(query, doc_b))
-            if score_a >= FUZZY_THRESHOLD or score_b >= FUZZY_THRESHOLD:
-                filtered.append(item)
-
-    return filtered
+    predicate = matches_query_predicate(search_query)
+    return [item for item in normalised if predicate(item)]
 
 
 def build_key_extractor(field: str) -> Callable[[Mapping[str, Any]], Any]:
     """Return a key extraction function suitable for sorting warning items."""
+
     def extract_key(item: Mapping[str, Any]) -> Any:
         val = item.get(field, "")
         return val.casefold() if isinstance(val, str) else val
+
     return extract_key
 
 
@@ -181,14 +171,116 @@ def _reset_page() -> None:
     st.session_state.warning_page = 1
 
 
-def render_copy_button(text_to_copy: str, button_id: str = "copy-btn", copy_label: str = "📋 Copy", copied_label: str = "✅ Copied!", height: int = 45) -> None:
-    escaped_text = (
-        text_to_copy.replace("\\", "\\\\")
-        .replace('"', '\\"')
-        .replace("`", "\\`")
-        .replace("$", "\\$")
-        .replace("\n", "\\n")
-    )
+DEFAULT_COPY_BUTTON_ID = "copy-btn"
+
+# An HTML id that is also safe to drop into a JavaScript string literal and a
+# CSS-free ``getElementById`` lookup: letters, digits, hyphen, underscore.
+_SAFE_ELEMENT_ID_RE = re.compile(r"[^A-Za-z0-9_-]+")
+
+# Characters that must not reach a JavaScript string literal verbatim. ``<`` is
+# in the list because ``</script>`` inside a literal still closes the block for
+# the HTML parser, which is how "it is only a string" becomes script execution.
+_JS_STRING_ESCAPES = {
+    "\\": "\\\\",
+    '"': '\\"',
+    "'": "\\'",
+    "`": "\\`",
+    "$": "\\$",
+    "\n": "\\n",
+    "\r": "\\r",
+    "\u2028": "\\u2028",
+    "\u2029": "\\u2029",
+    "<": "\\u003C",
+    ">": "\\u003E",
+    "&": "\\u0026",
+}
+
+
+def sanitize_element_id(
+    raw_id: Any,
+    fallback: str = DEFAULT_COPY_BUTTON_ID,
+) -> str:
+    """Reduce *raw_id* to characters that are safe as an HTML id.
+
+    The id is written into an HTML attribute *and* into a JavaScript string
+    literal inside the same document. Escaping cannot serve both at once —
+    the browser un-escapes the attribute but leaves the literal alone, so the
+    two stop matching and the button silently dies. Restricting the character
+    set instead keeps a single value valid in both places.
+
+    Args:
+        raw_id: Caller-supplied id. Any type; non-strings are stringified.
+        fallback: Used when nothing survives sanitisation.
+
+    Returns:
+        A string of ``[A-Za-z0-9_-]`` only, never empty.
+
+    Examples:
+        >>> sanitize_element_id("copy_ca_3")
+        'copy_ca_3'
+        >>> sanitize_element_id('"><script>alert(1)</script><div id="')
+        'scriptalert1scriptdivid'
+        >>> sanitize_element_id("<<<>>>")
+        'copy-btn'
+    """
+    if raw_id is None:
+        return fallback
+
+    cleaned = _SAFE_ELEMENT_ID_RE.sub("", str(raw_id))
+    return cleaned or fallback
+
+
+def escape_js_string(value: Any) -> str:
+    """Escape *value* for use inside a double-quoted JavaScript string literal.
+
+    Args:
+        value: Any object; it is stringified first.
+
+    Returns:
+        The escaped text, safe to interpolate between two double quotes inside
+        a ``<script>`` block.
+
+    Examples:
+        >>> escape_js_string('</script><script>alert(1)</script>')
+        '\\u003C/script\\u003E\\u003Cscript\\u003Ealert(1)\\u003C/script\\u003E'
+    """
+    text = str(value)
+    return "".join(_JS_STRING_ESCAPES.get(char, char) for char in text)
+
+
+def render_copy_button(
+    text_to_copy: str,
+    button_id: str = DEFAULT_COPY_BUTTON_ID,
+    copy_label: str = "📋 Copy",
+    copied_label: str = "✅ Copied!",
+    height: int = 45,
+) -> None:
+    """Render a clipboard button as an isolated Streamlit HTML component.
+
+    Every caller-supplied value is neutralised for the context it lands in:
+    ``button_id`` is reduced to a safe identifier, the labels are HTML-escaped
+    where they appear as markup and JS-escaped where they are assigned through
+    ``innerHTML``, and the copied text is JS-escaped.
+
+    Args:
+        text_to_copy: Text placed on the clipboard when the button is clicked.
+        button_id: DOM id for the button. Sanitised; see
+            :func:`sanitize_element_id`.
+        copy_label: Button caption in its resting state.
+        copied_label: Button caption shown for two seconds after a copy.
+        height: Height in pixels of the embedded component.
+    """
+    safe_button_id = sanitize_element_id(button_id)
+
+    # Labels appear twice: literally in the markup, and as a JavaScript string
+    # written back through innerHTML. Those are two different contexts and each
+    # needs its own escaping.
+    safe_copy_label = html.escape(str(copy_label))
+    safe_copied_label = html.escape(str(copied_label))
+    js_copy_label = escape_js_string(safe_copy_label)
+    js_copied_label = escape_js_string(safe_copied_label)
+
+    escaped_text = escape_js_string(text_to_copy)
     html_code = f"""
     <style>
         body {{
@@ -197,7 +289,7 @@ def render_copy_button(text_to_copy: str, button_id: str = "copy-btn", copy_labe
             overflow: hidden;
         }}
     </style>
-    <button id="{button_id}" style="
+    <button id="{safe_button_id}" style="
         display: inline-flex;
         align-items: center;
         justify-content: center;
@@ -217,10 +309,10 @@ def render_copy_button(text_to_copy: str, button_id: str = "copy-btn", copy_labe
         box-sizing: border-box;
         transition: background-color 0.2s, color 0.2s, border-color 0.2s;
     " onmouseover="this.style.borderColor='#ff4b4b'; this.style.color='#ff4b4b'" onmouseout="this.style.borderColor='#d6d6d8'; this.style.color='#31333f'">
-        {copy_label}
+        {safe_copy_label}
     </button>
     <script>
-        document.getElementById("{button_id}").addEventListener("click", function() {{
+        document.getElementById("{safe_button_id}").addEventListener("click", function() {{
             const text = "{escaped_text}";
             const textArea = document.createElement("textarea");
             textArea.value = text;
@@ -233,12 +325,12 @@ def render_copy_button(text_to_copy: str, button_id: str = "copy-btn", copy_labe
             try {{
                 const successful = document.execCommand('copy');
                 if (successful) {{
-                    const btn = document.getElementById("{button_id}");
-                    btn.innerHTML = "{copied_label}";
+                    const btn = document.getElementById("{safe_button_id}");
+                    btn.innerHTML = "{js_copied_label}";
                     btn.style.borderColor = "#28a745";
                     btn.style.color = "#28a745";
                     setTimeout(function() {{
-                        btn.innerHTML = "{copy_label}";
+                        btn.innerHTML = "{js_copy_label}";
                         btn.style.borderColor = "#d6d6d8";
                         btn.style.color = "#31333f";
                     }}, 2000);
@@ -253,6 +345,36 @@ def render_copy_button(text_to_copy: str, button_id: str = "copy-btn", copy_labe
     st.components.v1.html(html_code, height=height)
 
 
+def _chunked_docs_from_results(results: Any) -> Mapping[str, Sequence[str]]:
+    """Pull the chunk mapping out of whatever shape ``analysis_results`` has.
+
+    The pipeline result has been a plain tuple, a ``NamedTuple`` and a small
+    result object over the life of this module, and session state can still be
+    holding any of them after a rerun. Reading ``results[1]`` only works for
+    the first two; an object exposing ``chunked_docs`` as a plain attribute
+    raises ``TypeError: ... is not subscriptable``.
+
+    Args:
+        results: The value stored in ``st.session_state.analysis_results``.
+
+    Returns:
+        The document-to-chunks mapping, or an empty mapping when the value
+        does not carry one.
+    """
+    chunked_docs = getattr(results, "chunked_docs", None)
+
+    if chunked_docs is None:
+        try:
+            chunked_docs = results[1]
+        except (TypeError, IndexError, KeyError):
+            return {}
+
+    if not isinstance(chunked_docs, Mapping):
+        return {}
+
+    return chunked_docs
+
+
 def _has_exact_match(doc_a: str, doc_b: str) -> bool:
     """Check if two documents share at least one exact matching chunk (ignoring whitespace)."""
     if (
@@ -260,13 +382,13 @@ def _has_exact_match(doc_a: str, doc_b: str) -> bool:
         or st.session_state.analysis_results is None
     ):
         return False
-    chunked_docs = st.session_state.analysis_results[1]
+    chunked_docs = _chunked_docs_from_results(st.session_state.analysis_results)
     chunks_a = chunked_docs.get(doc_a, [])
     chunks_b = chunked_docs.get(doc_b, [])
 
     # Normalize chunks by removing all whitespace
-    norm_a = {"".join(c.split()) for c in chunks_a if c.strip()}
-    norm_b = {"".join(c.split()) for c in chunks_b if c.strip()}
+    norm_a = {"".join((c.text if hasattr(c, "text") else c).split()) for c in chunks_a if (c.text if hasattr(c, "text") else c).strip()}
+    norm_b = {"".join((c.text if hasattr(c, "text") else c).split()) for c in chunks_b if (c.text if hasattr(c, "text") else c).strip()}
 
     return not norm_a.isdisjoint(norm_b)
 
@@ -343,7 +465,7 @@ def render_warning_controls(
             {
                 "key": "clear_threshold",
                 "label": get_text("warn_filter_threshold", lang=lang_code).format(
-                    pct=f"{threshold*100:.0f}"
+                    pct=f"{threshold * 100:.0f}"
                 ),
                 "action": "threshold",
             }
@@ -604,9 +726,9 @@ def render_warning_controls(
 
     # Generate Markdown Summary of all High & Medium warnings
     summary_flags = [
-        _normalise_warning(flag)
+        nf
         for flag in flags
-        if _normalise_warning(flag)["severity"] in ("High", "Medium")
+        if (nf := _normalise_warning(flag))["severity"] in ("High", "Medium")
     ]
     if not summary_flags:
         markdown_text = get_text("warn_no_summary", lang=lang_code)
@@ -629,8 +751,6 @@ def render_warning_controls(
             )
         markdown_text = "\n".join(markdown_lines)
 
-
-
     left, middle, right = st.columns([3, 2, 2])
     with left:
         if current_page.total_items:
@@ -648,7 +768,7 @@ def render_warning_controls(
             text_to_copy=markdown_text,
             button_id="copy-summary-btn",
             copy_label="📋 Copy Summary",
-            copied_label="✅ Copied!"
+            copied_label="✅ Copied!",
         )
     with right:
         st.download_button(
@@ -666,9 +786,7 @@ def render_warning_controls(
     # with a transition so re-filtered/re-sorted results animate smoothly
     # instead of snapping instantly.
     with st.container(key="warning_list_container"):
-
         for flag in current_page.items:
-
             if compact_view:
                 render_compact_warning_row(flag)
                 st.markdown(
@@ -771,22 +889,29 @@ def render_warning_controls(
         ):
             st.session_state.warning_page = current_page.page + 1
             st.rerun()
-def matches_query_predicate(flag: dict, search_query: str) -> bool:
-    """
-    Check if a flagged incident matches a search query across document names or text snippets.
-    """
-    if not search_query or not search_query.strip():
-        return True
 
-    query = search_query.strip().lower()
-    doc_a = str(flag.get("doc_a", "")).lower()
-    doc_b = str(flag.get("doc_b", "")).lower()
-    snippet_a = str(flag.get("snippet_a", "")).lower()
-    snippet_b = str(flag.get("snippet_b", "")).lower()
 
-    return (
-        query in doc_a
-        or query in doc_b
-        or query in snippet_a
-        or query in snippet_b
-    )
+def matches_query_predicate(search_query: str) -> Callable[[Mapping[str, Any]], bool]:
+    """
+    Return a predicate that checks whether a warning matches the given search query.
+    """
+    query = _truncate_search_query(search_query).casefold()
+
+    def predicate(flag: Mapping[str, Any]) -> bool:
+        if not query:
+            return True
+        doc_a = str(flag.get("doc_a", "")).casefold()
+        doc_b = str(flag.get("doc_b", "")).casefold()
+        if query in doc_a or query in doc_b:
+            return True
+        if fuzz is not None:
+            score_a = max(
+                fuzz.partial_ratio(query, doc_a), fuzz.token_set_ratio(query, doc_a)
+            )
+            score_b = max(
+                fuzz.partial_ratio(query, doc_b), fuzz.token_set_ratio(query, doc_b)
+            )
+            return score_a >= FUZZY_THRESHOLD or score_b >= FUZZY_THRESHOLD
+        return False
+
+    return predicate

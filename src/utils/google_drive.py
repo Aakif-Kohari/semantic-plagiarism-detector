@@ -6,23 +6,51 @@ and bulk downloading supported assignment files (.pdf, .docx, .txt).
 """
 
 import io
+import logging
 import os
 import re
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import requests
-
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseDownload
+from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
 
 from src.utils.filename import unique_filename
+
+logger = logging.getLogger(__name__)
 
 # Supported extensions for the plagiarism detection pipeline
 SUPPORTED_EXTENSIONS = (".pdf", ".docx", ".doc", ".txt")
 
+#: Chunk size (256 KB) used for resumable uploads so large files (>10 MB)
+#: survive flaky/slow connections instead of failing in a single request (#3462).
+RESUMABLE_UPLOAD_CHUNK_SIZE = 256 * 1024
 
-def get_supported_file_extensions() -> List[str]:
+#: Files larger than this size (10 MB) should use the resumable upload path.
+LARGE_FILE_THRESHOLD_BYTES = 10 * 1024 * 1024
+
+
+def validate_service_account_key(key_dict: dict) -> bool:
+    """
+    Validate that the service account JSON key dictionary contains required fields.
+    """
+    if not isinstance(key_dict, dict):
+        logger.warning("Invalid key type: expected a dictionary.")
+        return False
+
+    required_keys = ["type", "project_id", "private_key", "client_email"]
+    for key in required_keys:
+        if key not in key_dict or not key_dict[key]:
+            logger.warning(
+                f"Google Drive service account key is missing or empty for required field: {key}"
+            )
+            return False
+
+    return True
+
+
+def get_supported_file_extensions() -> list[str]:
     """
     Return the list of supported file extensions for the plagiarism detection pipeline.
 
@@ -34,6 +62,7 @@ def get_supported_file_extensions() -> List[str]:
 
 _DRIVE_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{33}$")
 _DRIVE_URL_RE = re.compile(r"folders/([a-zA-Z0-9_-]{33})(?:[/?]|$)")
+
 
 def extract_google_drive_folder_id(url_or_id: str) -> str | None:
     """
@@ -53,6 +82,34 @@ def extract_google_drive_folder_id(url_or_id: str) -> str | None:
     match = _DRIVE_URL_RE.search(cleaned)
     if match:
         return match.group(1)
+
+    return None
+
+
+_FOLDER_ID_PATTERN = re.compile(r"[\w-]{25,}")
+
+
+def extract_folder_id(url_or_id: str) -> str | None:
+    """
+    Extracts a Google Drive folder ID from a full Drive URL or raw ID string.
+
+    Uses a permissive regex to match any run of word characters and hyphens
+    that is at least 25 characters long, so it accepts both full folder
+    URLs (e.g. "https://drive.google.com/drive/folders/1A2B3C...") and a
+    bare folder ID pasted on its own.
+
+    Args:
+        url_or_id: A Google Drive folder URL or a raw folder ID string.
+
+    Returns:
+        The extracted folder ID string, or None if no valid ID is found.
+    """
+    if not isinstance(url_or_id, str):
+        return None
+
+    match = _FOLDER_ID_PATTERN.search(url_or_id)
+    if match:
+        return match.group(0)
 
     return None
 
@@ -79,7 +136,7 @@ def get_drive_service(
         raise ValueError("No API Key or Service Account credentials provided.")
 
 
-def list_files_in_folder(service, folder_id: str) -> List[Dict[str, str]]:
+def list_files_in_folder(service, folder_id: str) -> list[dict[str, str]]:
     """
     Lists all supported assignment files (.pdf, .docx, .txt) within a specified Google Drive folder.
     """
@@ -140,7 +197,7 @@ def bulk_download_drive_folder(
     api_key: Optional[str] = None,
     service_account_info: Optional[dict] = None,
     progress_callback: Optional[Callable[[int, int], None]] = None,
-) -> Tuple[Dict[str, bytes], List[str]]:
+) -> tuple[dict[str, bytes], list[str]]:
     """
     Main helper: Extracts folder ID, lists supported files, downloads them into memory,
     and returns a dictionary mapping filename -> raw bytes.
@@ -171,9 +228,7 @@ def bulk_download_drive_folder(
     # Pre-compute total batch size (in bytes) so the callback can report overall
     # progress rather than just per-file progress. Files without a reported size
     # (rare, but the Drive API allows it) simply don't contribute to the total.
-    batch_total_bytes = sum(
-        int(f["size"]) for f in files_to_download if f.get("size")
-    )
+    batch_total_bytes = sum(int(f["size"]) for f in files_to_download if f.get("size"))
 
     downloaded_files_dict = {}
     downloaded_names = []
@@ -185,14 +240,13 @@ def bulk_download_drive_folder(
     for file_record in files_to_download:
         file_progress_cb = None
         if progress_callback is not None:
+
             def file_progress_cb(
                 file_bytes_downloaded,
                 _file_total_bytes,
                 _base=bytes_done_before_current_file,
             ):
-                progress_callback(
-                    _base + file_bytes_downloaded, batch_total_bytes
-                )
+                progress_callback(_base + file_bytes_downloaded, batch_total_bytes)
 
         file_bytes = download_file_bytes(
             service, file_record["id"], progress_callback=file_progress_cb
@@ -203,7 +257,9 @@ def bulk_download_drive_folder(
         )
         downloaded_files_dict[safe_name] = file_bytes
         downloaded_names.append(safe_name)
-        bytes_done_before_current_file += int(file_record.get("size") or len(file_bytes))
+        bytes_done_before_current_file += int(
+            file_record.get("size") or len(file_bytes)
+        )
         if progress_callback is not None:
             progress_callback(bytes_done_before_current_file, batch_total_bytes)
 
@@ -232,3 +288,182 @@ def check_folder_access(folder_id: str) -> bool:
         return response.status_code == 200
     except requests.RequestException:
         return False
+
+
+def should_use_resumable_upload(file_size: Optional[int]) -> bool:
+    """
+    Return True when a file is large enough to require the resumable upload path.
+
+    Args:
+        file_size: File size in bytes (``None`` or ``0`` when unknown).
+
+    Returns:
+        True for files larger than :data:`LARGE_FILE_THRESHOLD_BYTES` (10 MB).
+    """
+    return bool(file_size and file_size > LARGE_FILE_THRESHOLD_BYTES)
+
+
+def build_resumable_media(
+    file_path: str,
+    mime_type: str = "application/octet-stream",
+) -> MediaFileUpload:
+    """
+    Build a resumable ``MediaFileUpload`` handle with 256 KB chunks.
+
+    Args:
+        file_path: Path of the local file to upload.
+        mime_type: MIME type reported to the Drive API.
+
+    Returns:
+        A ``googleapiclient.http.MediaFileUpload`` configured with
+        ``resumable=True`` and ``chunksize=256*1024`` (#3462).
+    """
+    return MediaFileUpload(
+        file_path,
+        mimetype=mime_type,
+        resumable=True,
+        chunksize=RESUMABLE_UPLOAD_CHUNK_SIZE,
+    )
+
+
+def upload_file_resumable(
+    service: Any,
+    file_path: str,
+    folder_id: Optional[str] = None,
+    file_name: Optional[str] = None,
+    mime_type: str = "application/octet-stream",
+    num_retries: int = 3,
+    progress_callback: Optional[Callable[[int, int], None]] = None,
+) -> Dict[str, Any]:
+    """
+    Upload a local file to Google Drive using a resumable, chunked transfer.
+
+    Files larger than ~10 MB frequently fail on slow connections when sent as
+    a single request. This uploads the file in 256 KB chunks via
+    ``MediaFileUpload(resumable=True)`` so interrupted transfers resume from
+    the last acknowledged chunk instead of starting over.
+
+    Args:
+        service: Authenticated Google Drive API service instance.
+        file_path: Path of the local file to upload.
+        folder_id: Optional parent folder ID; omit to upload to "My Drive".
+        file_name: Optional Drive file name; defaults to the basename.
+        mime_type: MIME type reported to the Drive API.
+        num_retries: Retries per individual chunk on transient HTTP errors.
+        progress_callback: Optional callable invoked as ``callback(bytes_uploaded,
+            total_bytes)`` after every chunk, mirroring the download callback
+            convention used in this module. Always receives a final call at
+            100% so Streamlit progress bars complete deterministically.
+
+    Returns:
+        The created Drive file resource dict (at minimum ``id`` and ``name``).
+
+    Raises:
+        FileNotFoundError: If ``file_path`` does not exist.
+        ValueError: If ``file_path`` points to an empty path.
+        googleapiclient.errors.HttpError: If the Drive API rejects a chunk.
+    """
+    if not isinstance(file_path, str) or not file_path.strip():
+        raise ValueError("file_path must be a non-empty string.")
+    if not os.path.isfile(file_path):
+        raise FileNotFoundError(f"File not found: {file_path}")
+
+    metadata: Dict[str, Any] = {"name": file_name or os.path.basename(file_path)}
+    if folder_id:
+        metadata["parents"] = [folder_id]
+
+    media = build_resumable_media(file_path, mime_type=mime_type)
+    request = service.files().create(
+        body=metadata,
+        media_body=media,
+        fields="id, name, mimeType, size",
+    )
+
+    total_bytes = media.size() or 0
+    logger.info(
+        "Starting resumable upload of %s (%d bytes, %d-byte chunks)",
+        file_path,
+        total_bytes,
+        RESUMABLE_UPLOAD_CHUNK_SIZE,
+    )
+
+    response: Optional[Dict[str, Any]] = None
+    bytes_uploaded = 0
+    while response is None:
+        status, response = request.next_chunk(num_retries=num_retries)
+        if status is not None:
+            bytes_uploaded = getattr(status, "resumable_progress", 0) or 0
+            total_bytes = getattr(status, "total_size", 0) or total_bytes
+        if progress_callback is not None:
+            progress_callback(bytes_uploaded, total_bytes)
+
+    # Guarantee a final 100%-complete callback even if the API never sent a
+    # status object carrying the full size (e.g. tiny files uploaded in one chunk).
+    if progress_callback is not None:
+        progress_callback(total_bytes, total_bytes)
+
+    logger.info(
+        "Resumable upload finished for '%s' (id=%s)",
+        metadata["name"],
+        response.get("id"),
+    )
+    return response
+
+
+def bulk_upload_files_resumable(
+    service: Any,
+    file_paths: List[str],
+    folder_id: Optional[str] = None,
+    mime_type: str = "application/octet-stream",
+    progress_callback: Optional[Callable[[int, int], None]] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Upload multiple files resumably, aggregating progress across the batch.
+
+    Args:
+        service: Authenticated Google Drive API service instance.
+        file_paths: Local paths to upload, in order.
+        folder_id: Optional destination folder ID shared by all files.
+        mime_type: MIME type applied to every file.
+        progress_callback: Optional callable invoked as ``callback(bytes_uploaded,
+            batch_total_bytes)`` where totals accumulate across all files.
+
+    Returns:
+        The list of created Drive file resource dicts, one per input path.
+    """
+    sizes = []
+    for path in file_paths:
+        try:
+            sizes.append(os.path.getsize(path))
+        except OSError:
+            sizes.append(0)
+    batch_total_bytes = sum(sizes)
+
+    results: List[Dict[str, Any]] = []
+    bytes_done_before_current_file = 0
+
+    def _batch_progress(bytes_uploaded: int, _total: int) -> None:
+        if progress_callback is not None:
+            progress_callback(
+                bytes_done_before_current_file + bytes_uploaded, batch_total_bytes
+            )
+
+    for index, path in enumerate(file_paths):
+        response = upload_file_resumable(
+            service,
+            path,
+            folder_id=folder_id,
+            mime_type=mime_type,
+            progress_callback=_batch_progress,
+        )
+        results.append(response)
+        bytes_done_before_current_file += sizes[index]
+        if progress_callback is not None:
+            progress_callback(bytes_done_before_current_file, batch_total_bytes)
+
+    if progress_callback is not None:
+        # Final callback guarantees the bar reaches 100% even if reported
+        # sizes didn't perfectly match the bytes actually streamed.
+        progress_callback(batch_total_bytes, batch_total_bytes)
+
+    return results

@@ -16,7 +16,7 @@
  success_soft — and mention get_colors(), set_theme(), sanitize_theme_colors())
 
 ## Component Styling / CSS Class Naming Convention
-(explain the CLASS_* constants in css_constants.py, e.g. CLASS_BADGE = "badge",
+(explain the constants in css_constants.py, e.g. BADGE = "badge",
  and how helper functions like badge_html(), empty_state_html() reference them
  instead of hardcoding class name strings)
 

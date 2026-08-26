@@ -4,6 +4,12 @@
 (explain the app scores every document pair using two independent signals —
  lexical and semantic — then blends them into one hybrid score)
 
+## Document Chunking (src/core/text_chunking.py)
+Before embedding, documents are split into smaller chunks. See
+[CHUNKING_STRATEGIES.md](CHUNKING_STRATEGIES.md) for a full comparison of the
+three available chunking strategies (`chunk_text`, `chunk_by_sentences`,
+`chunk_text_dynamic`), their parameters, and when to use each.
+
 ## Lexical Similarity (src/core/lexical_similarity.py)
 - Jaccard similarity formula: |A ∩ B| / |A ∪ B| over stop-word-filtered
   token sets (see jaccard_similarity())
@@ -41,6 +47,13 @@
 - Table of the three boundaries: plagiarism (0.59), medium (0.75), high (0.90)
 - Explain severity_from_score() logic: below plagiarism → Low (not flagged),
   plagiarism–medium → Low (flagged), medium–high → Medium, ≥ high → High
+
+## AI-Generated Text Detection (src/core/ai_detector.py)
+The app also scores text for likely AI generation, independent of the
+plagiarism-similarity pipeline above. See
+[AI_DETECTION.md](AI_DETECTION.md) for the full breakdown of the five
+metrics used, the confidence tier thresholds, and how the signals are
+combined.
 
 ## Extending the Algorithm
 (short code example: how to plug in a new similarity signal or change the

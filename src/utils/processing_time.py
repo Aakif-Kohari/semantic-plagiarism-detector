@@ -13,9 +13,10 @@ import time
 from collections import defaultdict
 from collections.abc import Iterable
 from contextlib import contextmanager
-from numbers import Real
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from html import escape
+from numbers import Real
+from typing import Any, Optional
 
 
 @dataclass
@@ -42,7 +43,7 @@ class ProfilerSpan:
     def __init__(self, name: str, parent: Optional["ProfilerSpan"] = None):
         self.name = name
         self.parent = parent
-        self.children: List["ProfilerSpan"] = []
+        self.children: list["ProfilerSpan"] = []
         self.start_time: float = time.perf_counter()
         self.end_time: Optional[float] = None
         self.duration: float = 0.0
@@ -52,7 +53,7 @@ class ProfilerSpan:
         self.end_time = time.perf_counter()
         self.duration = self.end_time - self.start_time
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert the span and its children to a dictionary."""
         return {
             "name": self.name,
@@ -68,11 +69,11 @@ class ProcessingTimer:
     """
 
     def __init__(self):
-        self.durations: List[float] = []
-        self.spans: List[ProfilerSpan] = []
-        self._active_stack: List[ProfilerSpan] = []
+        self.durations: list[float] = []
+        self.spans: list[ProfilerSpan] = []
+        self._active_stack: list[ProfilerSpan] = []
         self._active_timers: int = 0
-        self._aggregate_stats: Dict[str, float] = defaultdict(float)
+        self._aggregate_stats: dict[str, float] = defaultdict(float)
 
     @contextmanager
     def time_block(self, name: str = "Unnamed Block"):
@@ -98,12 +99,16 @@ class ProcessingTimer:
             self._active_stack.pop()
             self._active_timers -= 1
 
-            if parent is None:
-                self.durations.append(span.duration)
+            # Record every span, nested or not. Only appending root spans meant
+            # a stage timed inside another stage never reached `durations`, so
+            # callers reading that list saw the outer total and none of the
+            # breakdown. Spans are appended as they close, so the list is
+            # ordered innermost-first, matching the order the blocks finished.
+            self.durations.append(span.duration)
 
             self._aggregate_stats[name] += span.duration
 
-    def get_summary(self) -> Dict[str, float]:
+    def get_summary(self) -> dict[str, float]:
         """Returns aggregated durations for all named blocks."""
         return dict(self._aggregate_stats)
 
@@ -127,7 +132,7 @@ def calculate_processing_throughput(total_bytes: int, elapsed_seconds: float) ->
     if elapsed_seconds <= 0:
         return 0.0
 
-    total_kb = total_bytes / BYTES_PE # type: ignore 
+    total_kb = total_bytes / BYTES_PER_KB  # type: ignore
     throughput = total_kb / elapsed_seconds
     return round(throughput, 2)
 
@@ -166,6 +171,7 @@ def format_throughput_human_readable(throughput_kbps: float) -> str:
         return f"{throughput:.2f} KB/s"
 
     return f"{throughput / 1024:.2f} MB/s"
+
 
 # ============================================================================
 # STREAMLIT UI COMPONENTS
@@ -227,8 +233,15 @@ class TimingUIRenderer:
 
             for name, duration in sorted_items:
                 percentage = (duration / total_time) * 100 if total_time > 0 else 0
+                # Stage names come from time_block() callers and can carry a
+                # filename or another piece of document-derived text. This table
+                # is rendered with unsafe_allow_html=True, so anything unescaped
+                # here is parsed as markup and can break the table apart.
+                safe_name = escape(str(name))
                 html_rows.append(
-                    f"<tr><td>{name}</td><td>{duration:.3f}s</td><td>{percentage:.1f}%</td></tr>"
+                    f"<tr><td>{safe_name}</td>"
+                    f"<td>{duration:.3f}s</td>"
+                    f"<td>{percentage:.1f}%</td></tr>"
                 )
 
             html_table = f"""
@@ -242,7 +255,7 @@ class TimingUIRenderer:
                         <td>Total Measured</td>
                         <td>{total_time:.3f}s</td>
                         <td>100.0%</td>
-                    </tr8>
+                    </tr>
                 </tbody>
             </table>
             """
@@ -340,15 +353,27 @@ def format_processing_duration(seconds: int) -> str:
         minute_unit = "minute" if minutes == 1 else "minutes"
         if remaining_seconds == 0:
             return f"{minutes} {minute_unit}"
-        return f"{minutes} {minute_unit} {remaining_seconds} seconds"
+        second_unit = "second" if remaining_seconds == 1 else "seconds"
+        return f"{minutes} {minute_unit} {remaining_seconds} {second_unit}"
 
     hours, remaining_minutes = divmod(minutes, 60)
     hour_unit = "hour" if hours == 1 else "hours"
-    if remaining_minutes == 0:
-        return f"{hours} {hour_unit}"
 
-    minute_unit = "minute" if remaining_minutes == 1 else "minutes"
-    return f"{hours} {hour_unit} {remaining_minutes} {minute_unit}"
+    # Build the parts that are actually non-zero. The seconds component belongs
+    # here just as much as it does below the hour mark: dropping it turned
+    # "1 hour 1 minute 5 seconds" into "1 hour 1 minute" and made the ETA
+    # disagree with itself either side of the 60-minute boundary.
+    parts = [f"{hours} {hour_unit}"]
+
+    if remaining_minutes:
+        minute_unit = "minute" if remaining_minutes == 1 else "minutes"
+        parts.append(f"{remaining_minutes} {minute_unit}")
+
+    if remaining_seconds:
+        second_unit = "second" if remaining_seconds == 1 else "seconds"
+        parts.append(f"{remaining_seconds} {second_unit}")
+
+    return " ".join(parts)
 
 
 def processing_eta_text(
@@ -360,3 +385,82 @@ def processing_eta_text(
     seconds = estimate_processing_seconds(total_bytes, seconds_per_mb=seconds_per_mb)
     duration = format_processing_duration(seconds)
     return f"Estimated processing time: about {duration}"
+
+
+def calculate_average_latency(latencies: list[float]) -> float:
+    """Calculate the average latency from a list of latencies, rounded to 3 decimals."""
+    if not latencies:
+        return 0.0
+    return round(sum(latencies) / len(latencies), 3)
+
+
+def calculate_mb_per_minute(total_bytes: int, elapsed_seconds: float) -> float:
+    """
+    Calculate document processing throughput in megabytes per minute (MB/min).
+
+    Args:
+        total_bytes (int): Total size processed in bytes.
+        elapsed_seconds (float): Time elapsed in seconds.
+
+    Returns:
+        float: Throughput in MB/min rounded to 2 decimal places. Returns 0.0 if elapsed_seconds <= 0.
+    """
+    if elapsed_seconds <= 0 or total_bytes <= 0:
+        return 0.0
+
+    megabytes = total_bytes / (1024 * 1024)
+    minutes = elapsed_seconds / 60.0
+
+    return round(megabytes / minutes, 2)
+
+
+def calculate_kb_per_second(total_bytes: int, elapsed_seconds: float) -> float:
+    """
+    Calculate document processing throughput in kilobytes per second (KB/sec).
+
+    Args:
+        total_bytes (int): Total size processed in bytes.
+        elapsed_seconds (float): Time elapsed in seconds.
+
+    Returns:
+        float: Throughput in KB/sec rounded to 2 decimal places. Returns 0.0 if elapsed_seconds <= 0.
+    """
+    if elapsed_seconds <= 0 or total_bytes <= 0:
+        return 0.0
+
+    kilobytes = total_bytes / 1024.0
+
+    return round(kilobytes / elapsed_seconds, 2)
+
+
+def format_uptime_seconds(seconds: float) -> str:
+    """Convert raw seconds into formatted strings like '3 days, 4 hours, 12 minutes'.
+
+    Args:
+        seconds (float): Raw uptime in seconds.
+
+    Returns:
+        str: Human-readable uptime string.
+    """
+    if seconds < 0:
+        seconds = 0.0
+
+    total_seconds = int(round(seconds))
+
+    days = total_seconds // (24 * 3600)
+    total_seconds %= 24 * 3600
+
+    hours = total_seconds // 3600
+    total_seconds %= 3600
+
+    minutes = total_seconds // 60
+
+    parts = []
+    if days > 0:
+        parts.append(f"{days} day" + ("s" if days != 1 else ""))
+    if hours > 0:
+        parts.append(f"{hours} hour" + ("s" if hours != 1 else ""))
+    if minutes > 0 or not parts:
+        parts.append(f"{minutes} minute" + ("s" if minutes != 1 else ""))
+
+    return ", ".join(parts)

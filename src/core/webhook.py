@@ -1,25 +1,28 @@
-from __future__ import annotations
-
 """
+src/core/webhook.py
+-------------------
 Webhook notification delivery with transient-failure retries and HMAC signatures.
 
 Provides secure webhook delivery with:
 - Cryptographic HMAC-SHA256 signatures for payload authenticity
 - Transient-failure retries with exponential backoff
 - SSRF protection for outbound URLs
-- Configurable timeouts and retry policies
+- Thread-safe attempt counting for concurrent background tasks (Issue #1994)
 
-Recent Additions (Issue #1373):
-- Added HMAC-SHA256 signature generation for outgoing webhooks
-- Added X-Plagiarism-Signature header (t=timestamp,v1=signature)
-- Added verify_webhook_signature() helper for receivers to validate payloads
+Recent Additions (Issue #1994):
+- Replaced mutable global _attempt_counter with threading.local() to prevent
+  race conditions when multiple webhook deliveries run concurrently via
+  background_tasks thread pools.
 """
+
+from __future__ import annotations
 
 import hashlib
 import hmac
 import json
 import logging
 import os
+import threading
 import time
 from typing import Any, Optional
 
@@ -56,6 +59,12 @@ _RETRYABLE_STATUS_CODES = {
     503,
     504,
 }
+
+# Thread-local storage for tracking retry attempts per thread.
+# This replaces the previous mutable global `_attempt_counter` which caused
+# race conditions when multiple webhooks were dispatched concurrently
+# via FastAPI's BackgroundTasks or asyncio thread pools (Issue #1994).
+_thread_local = threading.local()
 
 
 def _is_retryable_request_error(exception: BaseException) -> bool:
@@ -216,7 +225,21 @@ def verify_webhook_signature(
     return is_valid
 
 
-_attempt_counter = 0
+def _get_attempt_counter() -> int:
+    """Safely retrieve the current thread's attempt counter."""
+    return getattr(_thread_local, "attempt_counter", 0)
+
+
+def _increment_attempt_counter() -> None:
+    """Safely increment the current thread's attempt counter."""
+    if not hasattr(_thread_local, "attempt_counter"):
+        _thread_local.attempt_counter = 0
+    _thread_local.attempt_counter += 1
+
+
+def _reset_attempt_counter() -> None:
+    """Safely reset the current thread's attempt counter to zero."""
+    _thread_local.attempt_counter = 0
 
 
 @retry(
@@ -238,9 +261,12 @@ def _post_webhook(
 
     Tenacity retries this function for transient request failures only.
     Adds X-Plagiarism-Signature header for payload authentication.
+
+    Thread Safety (Issue #1994):
+        Uses thread-local storage to track attempt counts, ensuring that
+        concurrent webhook deliveries do not clobber each other's counters.
     """
-    global _attempt_counter
-    _attempt_counter += 1
+    _increment_attempt_counter()
 
     # Serialize payload to JSON bytes for signature computation
     payload_bytes = json.dumps(payload, sort_keys=True).encode("utf-8")
@@ -277,30 +303,41 @@ def send_plagiarism_alert(
     doc_a: str,
     doc_b: str,
     similarity: float,
+    webhook_url: str | None = None,  # Added parameter for override (Issue #1995)
 ) -> tuple[bool, int]:
     """Send a plagiarism alert to the configured webhook with retry logic.
 
-    The webhook URL is validated once before any outbound request. Temporary
-    connection failures, timeouts, rate limiting, and selected 5xx responses
-    (500, 502, 503, 504) are retried up to 3 times with exponential backoff.
+    Thread Safety (Issue #1994):
+        The attempt counter is now tracked via thread-local storage, ensuring
+        that concurrent calls to this function from different threads (e.g.,
+        FastAPI BackgroundTasks) maintain isolated counters.
 
     Args:
         doc_a: Name of the first student document.
         doc_b: Name of the second student document.
         similarity: Cosine similarity score between 0.0 and 1.0.
+        webhook_url: Optional explicit webhook URL. If provided, this overrides
+                     the PLAGIARISM_WEBHOOK_URL environment variable. This is
+                     useful for routing alerts to different endpoints based on
+                     severity or tenant configuration.
 
     Returns:
         A tuple of `(success, total_attempts)` where `success` is a boolean
         indicating delivery success, and `total_attempts` is the total number
-        of HTTP delivery attempts made.
+        of HTTP delivery attempts made by the current thread.
     """
-    global _attempt_counter
-    _attempt_counter = 0
+    # Reset the thread-local counter before starting a new delivery sequence
+    _reset_attempt_counter()
 
-    webhook_url = os.getenv("PLAGIARISM_WEBHOOK_URL")
+    # Issue #1995: Use explicit webhook_url if provided, otherwise fallback to env var
+    if webhook_url is None:
+        webhook_url = os.getenv("PLAGIARISM_WEBHOOK_URL")
 
     if not webhook_url:
-        logger.warning("PLAGIARISM_WEBHOOK_URL is not configured in the environment.")
+        logger.warning(
+            "PLAGIARISM_WEBHOOK_URL is not configured in the environment and "
+            "no explicit webhook_url was provided."
+        )
         return False, 0
 
     base_url = os.getenv(
@@ -321,7 +358,6 @@ def send_plagiarism_alert(
     }
 
     try:
-        # Validate once. Retrying cannot make an unsafe URL safe.
         SSRFProtector.validate_webhook_url(webhook_url)
     except SSRFSecurityException as exception:
         logger.error(
@@ -332,9 +368,9 @@ def send_plagiarism_alert(
 
     try:
         _post_webhook(webhook_url, payload)
-        attempts = _attempt_counter
+        attempts = _get_attempt_counter()
     except requests.exceptions.RequestException as exception:
-        attempts = _attempt_counter
+        attempts = _get_attempt_counter()
         logger.error(
             "Failed to send webhook notification for pair %s <-> %s "
             "after %s attempt(s): %s",
@@ -355,12 +391,213 @@ def send_plagiarism_alert(
     return True, attempts
 
 
-# Alias or main function for dispatching plagiarism alerts
 def dispatch_plagiarism_alert(
     doc_a: str,
     doc_b: str,
     similarity: float,
     webhook_url: str | None = None,
 ) -> bool:
-    """Dispatch a plagiarism alert payload to the configured webhook endpoint."""
-    return send_plagiarism_alert(doc_a=doc_a, doc_b=doc_b, similarity=similarity)
+    """Dispatch a plagiarism alert payload to the configured webhook endpoint.
+    
+    Args:
+        doc_a: Name of the first student document.
+        doc_b: Name of the second student document.
+        similarity: Cosine similarity score between 0.0 and 1.0.
+        webhook_url: Optional explicit webhook URL to override the environment variable.
+        
+    Returns:
+        True if the alert was successfully delivered, False otherwise.
+    """
+    # Issue #1995: Pass webhook_url through to send_plagiarism_alert
+    success, _ = send_plagiarism_alert(
+        doc_a=doc_a,
+        doc_b=doc_b,
+        similarity=similarity,
+        webhook_url=webhook_url,  # Explicitly pass the override parameter
+    )
+    return success
+
+
+class EventDispatcher:
+    """Service for dispatching webhook events to registered external LMS systems.
+
+    Allows external LMS systems (Canvas, Blackboard, Moodle, custom REST clients)
+    that trigger background document analysis scans to receive POST notifications
+    with JSON payloads upon completion, eliminating the need for continuous polling.
+
+    Features:
+    - SSRF URL validation prior to HTTP dispatch (`SSRFProtector.validate_webhook_url`)
+    - Cryptographic HMAC-SHA256 payload signatures (`X-Plagiarism-Signature`)
+    - Transient-failure retries with exponential backoff
+    - LMS endpoint registry management
+    """
+
+    def __init__(
+        self,
+        default_webhook_url: Optional[str] = None,
+        secret_key: Optional[str] = None,
+    ) -> None:
+        self.default_webhook_url = (
+            default_webhook_url
+            or os.getenv("LMS_WEBHOOK_URL")
+            or os.getenv("PLAGIARISM_WEBHOOK_URL")
+        )
+        self.secret_key = secret_key or os.getenv("WEBHOOK_SECRET_KEY", "")
+        self._registry: dict[str, dict[str, str]] = {}
+
+    def register_lms_webhook(
+        self,
+        lms_id: str,
+        webhook_url: str,
+        secret_key: Optional[str] = None,
+    ) -> None:
+        """Register a webhook endpoint for a specific LMS tenant or system."""
+        SSRFProtector.validate_webhook_url(webhook_url)
+        self._registry[lms_id] = {
+            "webhook_url": webhook_url,
+            "secret_key": secret_key or self.secret_key or "",
+        }
+
+    def unregister_lms_webhook(self, lms_id: str) -> bool:
+        """Remove a registered LMS webhook endpoint."""
+        return self._registry.pop(lms_id, None) is not None
+
+    def get_registered_lms(self, lms_id: str) -> Optional[dict[str, str]]:
+        """Retrieve details of a registered LMS webhook endpoint."""
+        return self._registry.get(lms_id)
+
+    def dispatch(
+        self,
+        event_type: str,
+        payload: dict[str, Any],
+        webhook_url: Optional[str] = None,
+        secret_key: Optional[str] = None,
+        lms_id: Optional[str] = None,
+    ) -> tuple[bool, int]:
+        """Dispatch a webhook event payload to a target LMS webhook URL.
+
+        Args:
+            event_type: Name of the event (e.g. 'document.analysis.complete').
+            payload: JSON-serializable event data dictionary.
+            webhook_url: Explicit webhook URL target. If None, resolves from lms_id or default_webhook_url.
+            secret_key: Optional secret key for HMAC signature computation.
+            lms_id: Optional registered LMS tenant ID.
+
+        Returns:
+            Tuple of (success: bool, attempts: int).
+        """
+        target_url = webhook_url
+        target_secret = secret_key
+
+        if not target_url and lms_id and lms_id in self._registry:
+            reg_info = self._registry[lms_id]
+            target_url = reg_info.get("webhook_url")
+            if not target_secret:
+                target_secret = reg_info.get("secret_key")
+
+        if not target_url:
+            target_url = self.default_webhook_url
+
+        if not target_secret:
+            target_secret = self.secret_key or ""
+
+        if not target_url:
+            logger.warning(
+                "EventDispatcher.dispatch: No webhook URL configured or registered for event '%s'.",
+                event_type,
+            )
+            return False, 0
+
+        # Enforce SSRF validation
+        try:
+            SSRFProtector.validate_webhook_url(target_url)
+        except SSRFSecurityException as exc:
+            logger.error(
+                "EventDispatcher.dispatch SECURITY BLOCKED: Webhook URL '%s' failed SSRF validation: %s",
+                target_url,
+                exc,
+            )
+            return False, 0
+
+        # Standardized event envelope
+        full_payload = {
+            "event": event_type,
+            "timestamp": int(time.time()),
+            "data": payload,
+        }
+
+        _reset_attempt_counter()
+        old_secret = os.getenv("WEBHOOK_SECRET_KEY")
+        if target_secret:
+            os.environ["WEBHOOK_SECRET_KEY"] = target_secret
+        try:
+            _post_webhook(target_url, full_payload)
+            attempts = _get_attempt_counter()
+            logger.info(
+                "EventDispatcher: Successfully dispatched event '%s' to '%s' after %d attempt(s).",
+                event_type,
+                target_url,
+                attempts,
+            )
+            return True, attempts
+        except requests.exceptions.RequestException as exc:
+            attempts = _get_attempt_counter()
+            logger.error(
+                "EventDispatcher: Failed to dispatch event '%s' to '%s' after %d attempt(s): %s",
+                event_type,
+                target_url,
+                attempts,
+                exc,
+            )
+            return False, attempts
+        finally:
+            if old_secret is None:
+                os.environ.pop("WEBHOOK_SECRET_KEY", None)
+            else:
+                os.environ["WEBHOOK_SECRET_KEY"] = old_secret
+
+    def dispatch_analysis_complete(
+        self,
+        document_id: str,
+        filename: str,
+        similarity_score: float,
+        matches_count: int = 0,
+        status: str = "completed",
+        webhook_url: Optional[str] = None,
+        lms_id: Optional[str] = None,
+        extra_metadata: Optional[dict[str, Any]] = None,
+    ) -> tuple[bool, int]:
+        """Dispatch a 'document.analysis.complete' webhook notification once document analysis finishes.
+
+        Args:
+            document_id: Unique identifier for the analyzed document.
+            filename: Original filename of the processed document.
+            similarity_score: Highest similarity score detected (0.0 to 1.0).
+            matches_count: Total number of matching document/chunk pairs flagged.
+            status: Processing status ('completed', 'failed', 'flagged').
+            webhook_url: Optional target URL override.
+            lms_id: Optional LMS tenant ID.
+            extra_metadata: Optional dict of extra details to attach to the payload.
+
+        Returns:
+            Tuple of (success: bool, attempts: int).
+        """
+        payload = {
+            "document_id": str(document_id),
+            "filename": str(filename),
+            "status": status,
+            "similarity_score": float(similarity_score),
+            "similarity_percentage": round(float(similarity_score) * 100, 2),
+            "matches_count": int(matches_count),
+            "completed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        }
+        if extra_metadata:
+            payload["metadata"] = extra_metadata
+
+        return self.dispatch(
+            event_type="document.analysis.complete",
+            payload=payload,
+            webhook_url=webhook_url,
+            lms_id=lms_id,
+        )
+

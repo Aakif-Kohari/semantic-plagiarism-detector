@@ -1,43 +1,74 @@
 from .auth import (
+    AuthRepository,
     add_user,
+    auth_repo,
+    clear_revocation_cache,
     delete_user,
     disable_2fa,
     enable_2fa,
+    generate_sso_state,
     get_2fa_status,
     get_all_users,
+    get_recent_audit_events,
     get_user_active_status,
+    get_user_last_login,
     get_user_role,
     init_db,
+    is_token_revoked,
     is_user_active,
+    revoke_token,
+    set_password_change_required,
     set_user_active_status,
+    store_sso_state,
     update_password,
     update_user_profile,
+    validate_sso_state,
+    verify_sso_state,
     verify_user,
 )
+
+from .base import BaseRepository
+from .common import get_read_connection
+from .connection import create_connection, get_connection
 from .corpus_db import (
+    CorpusRepository,
     add_chunks,
     add_document,
     clear_all_data,
+    corpus_repo,
     delete_document,
     get_all_documents,
     get_all_embeddings,
     get_chunk_registry,
+    get_deleted_documents_count,
     get_document_by_hash,
     get_document_chunks_count,
     get_documents_by_class,
     get_total_document_count,
-    get_deleted_documents_count,
     get_unique_class_sections,
     init_corpus_db,
 )
 from .incidents import (
+    IncidentsRepository,
+    get_incidents_by_assignment,
+    get_incidents_repo,
     get_recent_incidents,
     log_incident,
+    bulk_update_incident_status,
 )
-from .common import with_sqlite_retry
 
 __all__ = [
-    "with_sqlite_retry",
+    "BaseRepository",
+    "AuthRepository",
+    "CorpusRepository",
+    "IncidentsRepository",
+    "create_connection",
+    "get_connection",
+    "auth_repo",
+    "corpus_repo",
+    "get_incidents_repo",
+    "incidents_repo",
+    "get_read_connection",
     "init_db",
     "verify_user",
     "get_user_role",
@@ -45,29 +76,37 @@ __all__ = [
     "add_user",
     "delete_user",
     "update_password",
+    "update_user_profile",
     "get_2fa_status",
     "enable_2fa",
     "disable_2fa",
     "get_user_active_status",
     "set_user_active_status",
     "is_user_active",
-    "update_user_profile",
+    "set_password_change_required",
+    "get_recent_audit_events",
+    "get_user_last_login",
     "init_corpus_db",
     "add_document",
     "get_document_by_hash",
     "get_all_documents",
+    "get_total_document_count",
+    "get_deleted_documents_count",
+    "get_documents_by_class",
     "add_chunks",
     "get_chunk_registry",
     "get_all_embeddings",
     "delete_document",
     "clear_all_data",
+    "clear_revocation_cache",
+    "is_token_revoked",
+    "revoke_token",
     "get_document_chunks_count",
     "get_unique_class_sections",
-    "get_documents_by_class",
-    "get_total_document_count",
-    "get_deleted_documents_count",
+    "get_incidents_by_assignment",
     "get_recent_incidents",
     "log_incident",
+    "bulk_update_incident_status",
 ]
 
 
@@ -92,3 +131,16 @@ __all__.extend(
         "table_exists",
     ]
 )
+
+
+def __getattr__(name: str):
+    """PEP 562 module-level lazy attribute access.
+
+    Preserves ``from src.db import incidents_repo`` for existing callers
+    without eagerly constructing ``IncidentsRepository`` at package import
+    time — forwards to :func:`src.db.incidents.get_incidents_repo`, which
+    creates the singleton lazily on first actual access.
+    """
+    if name == "incidents_repo":
+        return get_incidents_repo()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

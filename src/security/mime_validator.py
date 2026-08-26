@@ -5,96 +5,131 @@ from __future__ import annotations
 import io
 import logging
 import zipfile
-from typing import Optional
-from xml.etree import ElementTree
+from typing import Dict, List, Optional, Set, Tuple
 
+import defusedxml.ElementTree as ElementTree
+from defusedxml.common import DefusedXmlException
 
 logger = logging.getLogger(__name__)
 
 # Strict mapping of file extension to allowed MIME types/signatures.
-ALLOWED_MIME_TYPES = {
-    "pdf": {"application/pdf"},
-    "docx": {
+ALLOWED_MIME_TYPES: dict[str, list[str]] = {
+    "pdf": ["application/pdf"],
+    "docx": [
         "application/vnd.openxmlformats-officedocument."
         "wordprocessingml.document",
         "application/zip",
         "application/x-zip-compressed",
         "application/octet-stream",
-    },
-    "xlsx": {
+    ],
+    "xlsx": [
         "application/vnd.openxmlformats-officedocument."
         "spreadsheetml.sheet",
         "application/zip",
         "application/x-zip-compressed",
         "application/octet-stream",
-    },
-    "doc": {
+    ],
+    "doc": [
         "application/msword",
         "application/vnd.ms-office",
         "application/octet-stream",
-    },
-    "zip": {
+    ],
+    "zip": [
         "application/zip",
         "application/x-zip-compressed",
         "application/octet-stream",
-    },
-    "txt": {"text/plain", "text/x-python", "text/markdown"},
-    "csv": {"text/csv", "text/plain", "application/csv"},
-    "md": {
+    ],
+    "txt": ["text/plain", "text/x-python", "text/markdown"],
+    "csv": ["text/csv", "text/plain", "application/csv"],
+    "md": [
         "text/markdown",
         "text/plain",
         "application/octet-stream",
-    },
-    "rtf": {"application/rtf", "text/rtf", "text/plain"},
-    "epub": {
+    ],
+    "markdown": [
+        "text/markdown",
+        "text/plain",
+        "application/octet-stream",
+    ],
+    "mdown": [
+        "text/markdown",
+        "text/plain",
+        "application/octet-stream",
+    ],
+    "rtf": ["application/rtf", "text/rtf", "text/plain"],
+    "epub": [
         "application/epub+zip",
         "application/zip",
         "application/octet-stream",
-    },
-    "odt": {
+    ],
+    "odt": [
         "application/vnd.oasis.opendocument.text",
         "application/zip",
         "application/octet-stream",
-    },
-    "png": {"image/png"},
-    "jpg": {"image/jpeg"},
-    "jpeg": {"image/jpeg"},
+    ],
+    "png": ["image/png"],
+    "jpg": ["image/jpeg"],
+    "jpeg": ["image/jpeg"],
 }
 
-ALLOWED_MAGIC_HEADERS = {
+ALLOWED_MAGIC_HEADERS: dict[str, list[bytes]] = {
     "pdf": [b"%PDF-"],
     "zip": [b"PK\x03\x04"],
     "epub": [b"PK\x03\x04"],
     "odt": [b"PK\x03\x04"],
-    "doc": [b"\xd0\xcf\x11\xe0"],
+    "doc": [b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"],
     "rtf": [b"{\\rtf"],
     "png": [b"\x89PNG\r\n\x1a\n"],
     "jpg": [b"\xff\xd8\xff"],
     "jpeg": [b"\xff\xd8\xff"],
 }
 
-OOXML_EXTENSIONS = {"docx", "xlsx"}
-OOXML_REQUIRED_PARTS = {
+OOXML_EXTENSIONS: set[str] = {"docx", "xlsx"}
+OOXML_REQUIRED_PARTS: dict[str, set[str]] = {
     "docx": {"[Content_Types].xml", "word/document.xml"},
     "xlsx": {"[Content_Types].xml", "xl/workbook.xml"},
 }
-OOXML_MAIN_CONTENT_TYPES = {
+OOXML_MAIN_CONTENT_TYPES: dict[str, set[str]] = {
     "docx": {
         "application/vnd.openxmlformats-officedocument."
         "wordprocessingml.document.main+xml",
         "application/vnd.ms-word.document.macroEnabled.main+xml",
     },
     "xlsx": {
-        "application/vnd.openxmlformats-officedocument."
-        "spreadsheetml.sheet.main+xml",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml",
         "application/vnd.ms-excel.sheet.macroEnabled.main+xml",
     },
 }
 
 # Conservative limits for metadata-only archive inspection.
-MAX_OOXML_ARCHIVE_ENTRIES = 10_000
-MAX_OOXML_TOTAL_UNCOMPRESSED_SIZE = 250 * 1024 * 1024
-MAX_CONTENT_TYPES_XML_SIZE = 2 * 1024 * 1024
+MAX_OOXML_ARCHIVE_ENTRIES: int = 10_000
+MAX_OOXML_TOTAL_UNCOMPRESSED_SIZE: int = 250 * 1024 * 1024
+MAX_CONTENT_TYPES_XML_SIZE: int = 2 * 1024 * 1024
+
+BLOCKED_EXECUTABLE_EXTENSIONS: set[str] = {
+    "exe",
+    "sh",
+    "bat",
+    "js",
+    "vbs",
+    "dll",
+}
+
+# Magic-byte signatures that identify executable/script content regardless
+# of the declared file extension.
+EXECUTABLE_MAGIC_SIGNATURES: tuple[bytes, ...] = (
+    b"MZ",
+    b"#!/bin/sh",
+)
+
+
+def is_executable_upload(file_bytes: bytes, filename: str) -> bool:
+    """Return True if the upload looks like an executable or shell script."""
+    extension = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    if extension in BLOCKED_EXECUTABLE_EXTENSIONS:
+        return True
+
+    return file_bytes.startswith(EXECUTABLE_MAGIC_SIGNATURES)
 
 
 def _normalized_zip_name(name: str) -> str:
@@ -109,14 +144,11 @@ def _validate_ooxml_archive(
 ) -> bool:
     """Verify that a ZIP payload is the requested OOXML package type."""
     if extension not in OOXML_EXTENSIONS:
-        raise ValueError(
-            f"Unsupported OOXML extension: {extension}"
-        )
+        raise ValueError(f"Unsupported OOXML extension: {extension}")
 
     if not file_bytes.startswith(b"PK"):
         logger.warning(
-            "[mime_validator] Invalid ZIP signature for OOXML file "
-            "'%s'.",
+            "[mime_validator] Invalid ZIP signature for OOXML file '%s'.",
             filename,
         )
         return False
@@ -126,54 +158,36 @@ def _validate_ooxml_archive(
             members = archive.infolist()
             if len(members) > MAX_OOXML_ARCHIVE_ENTRIES:
                 logger.warning(
-                    "[mime_validator] OOXML archive '%s' contains "
-                    "too many entries.",
+                    "[mime_validator] OOXML archive '%s' contains too many entries.",
                     filename,
                 )
                 return False
 
-            total_uncompressed_size = sum(
-                member.file_size for member in members
-            )
-            if (
-                total_uncompressed_size
-                > MAX_OOXML_TOTAL_UNCOMPRESSED_SIZE
-            ):
+            total_uncompressed_size = sum(member.file_size for member in members)
+            if total_uncompressed_size > MAX_OOXML_TOTAL_UNCOMPRESSED_SIZE:
                 logger.warning(
-                    "[mime_validator] OOXML archive '%s' exceeds "
-                    "the uncompressed-size safety limit.",
+                    "[mime_validator] OOXML archive '%s' exceeds the uncompressed-size safety limit.",
                     filename,
                 )
                 return False
 
             normalized_names = {
-                _normalized_zip_name(member.filename): member
-                for member in members
+                _normalized_zip_name(member.filename): member for member in members
             }
-            required = {
-                name.casefold()
-                for name in OOXML_REQUIRED_PARTS[extension]
-            }
+            required = {name.casefold() for name in OOXML_REQUIRED_PARTS[extension]}
 
             if not required.issubset(normalized_names):
                 logger.warning(
-                    "[mime_validator] '%s' is missing required %s "
-                    "OOXML package parts.",
+                    "[mime_validator] '%s' is missing required %s OOXML package parts.",
                     filename,
                     extension.upper(),
                 )
                 return False
 
-            content_types_member = normalized_names[
-                "[content_types].xml".casefold()
-            ]
-            if (
-                content_types_member.file_size
-                > MAX_CONTENT_TYPES_XML_SIZE
-            ):
+            content_types_member = normalized_names["[content_types].xml".casefold()]
+            if content_types_member.file_size > MAX_CONTENT_TYPES_XML_SIZE:
                 logger.warning(
-                    "[mime_validator] [Content_Types].xml in '%s' "
-                    "exceeds the safety limit.",
+                    "[mime_validator] [Content_Types].xml in '%s' exceeds the safety limit.",
                     filename,
                 )
                 return False
@@ -186,13 +200,9 @@ def _validate_ooxml_archive(
                     MAX_CONTENT_TYPES_XML_SIZE + 1
                 )
 
-            if (
-                len(content_types_xml)
-                > MAX_CONTENT_TYPES_XML_SIZE
-            ):
+            if len(content_types_xml) > MAX_CONTENT_TYPES_XML_SIZE:
                 logger.warning(
-                    "[mime_validator] [Content_Types].xml in '%s' "
-                    "is too large.",
+                    "[mime_validator] [Content_Types].xml in '%s' is too large.",
                     filename,
                 )
                 return False
@@ -204,13 +214,9 @@ def _validate_ooxml_archive(
                 if element.tag.rsplit("}", 1)[-1] == "Override"
             }
 
-            if not (
-                declared_content_types
-                & OOXML_MAIN_CONTENT_TYPES[extension]
-            ):
+            if not (declared_content_types & OOXML_MAIN_CONTENT_TYPES[extension]):
                 logger.warning(
-                    "[mime_validator] '%s' does not declare a valid "
-                    "%s main content type.",
+                    "[mime_validator] '%s' does not declare a valid %s main content type.",
                     filename,
                     extension.upper(),
                 )
@@ -219,8 +225,7 @@ def _validate_ooxml_archive(
             bad_member = archive.testzip()
             if bad_member is not None:
                 logger.warning(
-                    "[mime_validator] Corrupt OOXML member '%s' in "
-                    "'%s'.",
+                    "[mime_validator] Corrupt OOXML member '%s' in '%s'.",
                     bad_member,
                     filename,
                 )
@@ -232,6 +237,7 @@ def _validate_ooxml_archive(
         zipfile.BadZipFile,
         zipfile.LargeZipFile,
         ElementTree.ParseError,
+        DefusedXmlException,
         KeyError,
         OSError,
         RuntimeError,
@@ -249,13 +255,7 @@ def _check_magic_bytes(
     extension: str,
     filename: str,
 ) -> Optional[bool]:
-    """Attempt MIME validation using python-magic.
-
-    Returns:
-        True when detected MIME is allowed.
-        False when a definite mismatch is detected.
-        None when python-magic is unavailable or fails.
-    """
+    """Attempt MIME validation using python-magic."""
     try:
         import magic
 
@@ -267,15 +267,16 @@ def _check_magic_bytes(
             if detected in allowed:
                 return True
 
-            if (
-                detected.startswith("text/")
-                and extension in {"txt", "csv", "md", "rtf"}
-            ):
+            if detected.startswith("text/") and extension in {
+                "txt",
+                "csv",
+                "md",
+                "rtf",
+            }:
                 return True
 
             logger.warning(
-                "[mime_validator] MIME type mismatch for '%s'. "
-                "Expected one of %s, got '%s'.",
+                "[mime_validator] MIME type mismatch for '%s'. Expected one of %s, got '%s'.",
                 filename,
                 allowed,
                 detected,
@@ -284,14 +285,12 @@ def _check_magic_bytes(
 
     except (ImportError, ModuleNotFoundError) as exception:
         logger.debug(
-            "[mime_validator] python-magic unavailable; using "
-            "fallback validation: %s",
+            "[mime_validator] python-magic unavailable; using fallback validation: %s",
             exception,
         )
     except Exception as exception:
         logger.debug(
-            "[mime_validator] python-magic failed; using fallback "
-            "validation: %s",
+            "[mime_validator] python-magic failed; using fallback validation: %s",
             exception,
         )
 
@@ -312,8 +311,7 @@ def _check_extension_fallback(
             return True
 
         logger.warning(
-            "[mime_validator] Fallback magic-byte check failed for "
-            "'%s'.",
+            "[mime_validator] Fallback magic-byte check failed for '%s'.",
             filename,
         )
         return False
@@ -321,8 +319,7 @@ def _check_extension_fallback(
     if extension in {"txt", "csv", "md"}:
         if b"\x00" in file_bytes:
             logger.warning(
-                "[mime_validator] Text validation failed for '%s': "
-                "binary null byte detected.",
+                "[mime_validator] Text validation failed for '%s': binary null byte detected.",
                 filename,
             )
             return False
@@ -335,8 +332,7 @@ def _check_extension_fallback(
                 continue
 
         logger.warning(
-            "[mime_validator] Text validation failed for '%s': "
-            "not valid UTF-8 or UTF-16.",
+            "[mime_validator] Text validation failed for '%s': not valid UTF-8 or UTF-16.",
             filename,
         )
         return False
@@ -344,25 +340,30 @@ def _check_extension_fallback(
     return False
 
 
-def validate_mime_type(file_bytes: bytes, filename: str) -> bool:
-    """Validate uploaded bytes against the declared file extension.
+def validate_single_extension(filename: str) -> bool:
+    """Reject filenames with executable double extensions."""
+    parts = filename.lower().split(".")
 
-    OOXML documents are always inspected internally before MIME-library
-    results are trusted because DOCX, XLSX, and ordinary ZIP files
-    share the same leading magic bytes.
-    """
+    if len(parts) < 3:
+        return True
+
+    return parts[-1] not in BLOCKED_EXECUTABLE_EXTENSIONS
+
+
+def validate_mime_type(file_bytes: bytes, filename: str) -> bool:
+    """Validate uploaded bytes against the declared file extension."""
     if not file_bytes:
         return False
 
-    extension = (
-        filename.rsplit(".", 1)[-1].lower()
-        if "." in filename
-        else ""
-    )
-    if (
-        not extension
-        or extension not in ALLOWED_MIME_TYPES
-    ):
+    if not validate_single_extension(filename):
+        logger.warning(
+            "[mime_validator] Blocked executable double extension: '%s'.",
+            filename,
+        )
+        return False
+
+    extension = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    if not extension or extension not in ALLOWED_MIME_TYPES:
         logger.warning(
             "[mime_validator] Unsupported extension '%s' for '%s'.",
             extension,
@@ -377,12 +378,16 @@ def validate_mime_type(file_bytes: bytes, filename: str) -> bool:
             filename,
         )
 
-    # PDF validation is intentionally strict even when libmagic is
-    # permissive or unavailable.
-    if (
-        extension == "pdf"
-        and not file_bytes.startswith(b"%PDF-")
-    ):
+    if extension == "doc":
+        ole_header = ALLOWED_MAGIC_HEADERS["doc"][0]
+        if not file_bytes.startswith(ole_header):
+            logger.warning(
+                "[mime_validator] Invalid OLE Compound File header for '%s'.",
+                filename,
+            )
+            return False
+
+    if extension == "pdf" and not file_bytes.startswith(b"%PDF-"):
         logger.warning(
             "[mime_validator] Invalid PDF magic header for '%s'.",
             filename,

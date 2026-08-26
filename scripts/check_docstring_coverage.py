@@ -11,10 +11,9 @@ Usage:
 """
 
 import ast
-import os
 import sys
 from pathlib import Path
-from typing import List, Tuple, Dict, Any
+from typing import Any, List, Tuple
 
 
 class DocstringVisitor(ast.NodeVisitor):
@@ -24,7 +23,7 @@ class DocstringVisitor(ast.NodeVisitor):
         self.filename = filename
         self.total_nodes = 0
         self.documented_nodes = 0
-        self.undocumented_items: List[str] = []
+        self.undocumented_items: list[str] = []
 
     def _check_docstring(self, node: Any, node_type: str) -> None:
         """Helper to check if a node has a docstring."""
@@ -67,7 +66,7 @@ class DocstringVisitor(ast.NodeVisitor):
         self.generic_visit(node)
 
 
-def analyze_directory(target_dir: str) -> Tuple[int, int, List[str]]:
+def analyze_directory(target_dir: str) -> tuple[int, int, list[str]]:
     """
     Recursively analyze all Python files in the target directory.
 
@@ -76,7 +75,7 @@ def analyze_directory(target_dir: str) -> Tuple[int, int, List[str]]:
     """
     total_nodes = 0
     documented_nodes = 0
-    all_undocumented: List[str] = []
+    all_undocumented: list[str] = []
 
     target_path = Path(target_dir)
     if not target_path.exists():

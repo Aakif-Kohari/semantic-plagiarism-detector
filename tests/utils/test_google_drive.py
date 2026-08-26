@@ -1,45 +1,81 @@
 import os
-from unittest.mock import Mock, patch
+from types import SimpleNamespace
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
 from src.utils.google_drive import (
+    LARGE_FILE_THRESHOLD_BYTES,
+    RESUMABLE_UPLOAD_CHUNK_SIZE,
+    build_resumable_media,
     bulk_download_drive_folder,
+    bulk_upload_files_resumable,
     check_folder_access,
     download_file_bytes,
+    extract_folder_id,
     extract_google_drive_folder_id,
     get_drive_service,
     list_files_in_folder,
+    should_use_resumable_upload,
+    upload_file_resumable,
+    validate_service_account_key,
 )
+
 
 def test_extract_google_drive_folder_id_valid_id():
     valid_id = "1A2B3C4D5E6F7G8H9I0J1K2L3M4N5O6P7"
     assert len(valid_id) == 33
     assert extract_google_drive_folder_id(valid_id) == valid_id
 
+
 def test_extract_google_drive_folder_id_valid_url():
     valid_id = "1A2B3C4D5E6F7G8H9I0J1K2L3M4N5O6P7"
     url = f"https://drive.google.com/drive/folders/{valid_id}"
     assert extract_google_drive_folder_id(url) == valid_id
+
 
 def test_extract_google_drive_folder_id_valid_url_with_query():
     valid_id = "1A2B3C4D5E6F7G8H9I0J1K2L3M4N5O6P7"
     url = f"https://drive.google.com/drive/folders/{valid_id}?usp=sharing"
     assert extract_google_drive_folder_id(url) == valid_id
 
+
 def test_extract_google_drive_folder_id_malformed_url():
     url = "https://drive.google.com/drive/folders/shortid"
     assert extract_google_drive_folder_id(url) is None
 
+
 def test_extract_google_drive_folder_id_empty_string():
     assert extract_google_drive_folder_id("") is None
+
 
 def test_extract_google_drive_folder_id_random_string():
     assert extract_google_drive_folder_id("random_garbage_string_not_an_id") is None
 
+
+def test_extract_folder_id_valid_id():
+    valid_id = "1A2B3C4D5E6F7G8H9I0J1K2L3M4N5O6P7"
+    assert extract_folder_id(valid_id) == valid_id
+
+
+def test_extract_folder_id_valid_url():
+    valid_id = "1A2B3C4D5E6F7G8H9I0J1K2L3M4N5O6P7"
+    url = f"https://drive.google.com/drive/folders/{valid_id}"
+    assert extract_folder_id(url) == valid_id
+
+
+def test_extract_folder_id_too_short_returns_none():
+    assert extract_folder_id("short_id_123") is None
+
+
+def test_extract_folder_id_non_string_returns_none():
+    assert extract_folder_id(None) is None
+
+
 def test_extract_google_drive_folder_id_unsupported_url():
     url = "https://google.com"
     assert extract_google_drive_folder_id(url) is None
+
 
 def test_extract_google_drive_folder_id_whitespace():
     valid_id = "1A2B3C4D5E6F7G8H9I0J1K2L3M4N5O6P7"
@@ -47,20 +83,19 @@ def test_extract_google_drive_folder_id_whitespace():
     url = f"  https://drive.google.com/drive/folders/{valid_id}?usp=sharing  "
     assert extract_google_drive_folder_id(url) == valid_id
 
+
 def test_extract_google_drive_folder_id_invalid_type():
     assert extract_google_drive_folder_id(None) is None
     assert extract_google_drive_folder_id(12345) is None
 
 
-# ── get_drive_service tests ──────────────────────────────────────────────
+# â”€â”€ get_drive_service tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 @patch("src.utils.google_drive.build")
 def test_get_drive_service_with_api_key(mock_build):
     service = get_drive_service(api_key="test-api-key")
-    mock_build.assert_called_once_with(
-        "drive", "v3", developerKey="test-api-key"
-    )
+    mock_build.assert_called_once_with("drive", "v3", developerKey="test-api-key")
     assert service == mock_build.return_value
 
 
@@ -96,21 +131,23 @@ def test_get_drive_service_no_credentials(mock_build):
             get_drive_service()
 
 
-# ── list_files_in_folder tests ───────────────────────────────────────────
+# â”€â”€ list_files_in_folder tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 def _mock_service_for_list(files):
     service = Mock()
-    service.files.return_value.list.return_value.execute.return_value = {
-        "files": files
-    }
+    service.files.return_value.list.return_value.execute.return_value = {"files": files}
     return service
 
 
 def test_list_files_in_folder_returns_supported():
     files = [
         {"id": "1", "name": "report.pdf", "mimeType": "application/pdf"},
-        {"id": "2", "name": "essay.docx", "mimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"},
+        {
+            "id": "2",
+            "name": "essay.docx",
+            "mimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        },
         {"id": "3", "name": "notes.txt", "mimeType": "text/plain"},
         {"id": "4", "name": "script.exe", "mimeType": "application/x-msdownload"},
     ]
@@ -147,8 +184,9 @@ def test_list_files_in_folder_no_supported_extensions():
 
 def test_list_files_in_folder_handles_api_error():
     service = Mock()
-    service.files.return_value.list.return_value.execute.side_effect = \
-        Exception("403 Forbidden")
+    service.files.return_value.list.return_value.execute.side_effect = Exception(
+        "403 Forbidden"
+    )
 
     with pytest.raises(Exception, match="403 Forbidden"):
         list_files_in_folder(service, "folder123")
@@ -156,14 +194,15 @@ def test_list_files_in_folder_handles_api_error():
 
 def test_list_files_in_folder_handles_not_found():
     service = Mock()
-    service.files.return_value.list.return_value.execute.side_effect = \
-        Exception("404 Not Found")
+    service.files.return_value.list.return_value.execute.side_effect = Exception(
+        "404 Not Found"
+    )
 
     with pytest.raises(Exception, match="404 Not Found"):
         list_files_in_folder(service, "folder123")
 
 
-# ── download_file_bytes tests ────────────────────────────────────────────
+# â”€â”€ download_file_bytes tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 @patch("src.utils.google_drive.MediaIoBaseDownload")
@@ -195,7 +234,9 @@ def test_download_file_bytes_calls_progress_callback(mock_downloader_cls):
     service.files.return_value.get_media.return_value = Mock()
 
     calls = []
-    download_file_bytes(service, "file123", progress_callback=lambda d, t: calls.append((d, t)))
+    download_file_bytes(
+        service, "file123", progress_callback=lambda d, t: calls.append((d, t))
+    )
 
     # One callback per chunk, plus a guaranteed final 100% callback.
     assert calls[0] == (50, 100)
@@ -230,7 +271,7 @@ def test_download_file_bytes_handles_api_error(mock_downloader_cls):
         download_file_bytes(service, "file456")
 
 
-# ── bulk_download_drive_folder tests ─────────────────────────────────────
+# â”€â”€ bulk_download_drive_folder tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 @patch("src.utils.google_drive.download_file_bytes")
@@ -359,6 +400,7 @@ def test_check_folder_access_not_accessible(mock_head):
 @patch("src.utils.google_drive.requests.head")
 def test_check_folder_access_request_exception(mock_head):
     from requests import RequestException
+
     mock_head.side_effect = RequestException("Timeout")
 
     result = check_folder_access("error-folder-id")
@@ -368,3 +410,184 @@ def test_check_folder_access_request_exception(mock_head):
 def test_check_folder_access_invalid_folder_id():
     assert check_folder_access("") is False
     assert check_folder_access("folder/with/slashes") is False
+
+
+def test_validate_service_account_key_valid():
+    key_dict = {
+        "type": "service_account",
+        "project_id": "my-project",
+        "private_key": "some-private-key",
+        "client_email": "service-account@my-project.iam.gserviceaccount.com",
+    }
+    assert validate_service_account_key(key_dict) is True
+
+
+def test_validate_service_account_key_missing_fields(caplog):
+    key_dict = {
+        "type": "service_account",
+        "project_id": "my-project",
+        "private_key": "some-private-key",
+    }
+    with caplog.at_level("WARNING"):
+        assert validate_service_account_key(key_dict) is False
+        assert "Google Drive service account key is missing or empty" in caplog.text
+
+
+def test_validate_service_account_key_empty_fields(caplog):
+    key_dict = {
+        "type": "service_account",
+        "project_id": "",
+        "private_key": "some-private-key",
+        "client_email": "service-account@my-project.iam.gserviceaccount.com",
+    }
+    with caplog.at_level("WARNING"):
+        assert validate_service_account_key(key_dict) is False
+        assert "Google Drive service account key is missing or empty" in caplog.text
+
+
+def test_validate_service_account_key_invalid_type(caplog):
+    with caplog.at_level("WARNING"):
+        assert validate_service_account_key(None) is False
+        assert "Invalid key type: expected a dictionary" in caplog.text
+        assert validate_service_account_key("string-key") is False
+
+
+# ── Resumable / chunked upload support (#3462) ───────────────────────────────
+
+
+def _make_upload_service(chunks, final_response, total_size=1024):
+    """Build a mock Drive service whose files().create() yields the given chunks."""
+    statuses = [
+        SimpleNamespace(resumable_progress=b, total_size=total_size) for b in chunks
+    ]
+    sequence = [(s, None) for s in statuses] + [(None, final_response)]
+    request = MagicMock(name="HttpRequest")
+    request.next_chunk.side_effect = sequence
+    service = MagicMock(name="DriveService")
+    service.files.return_value.create.return_value = request
+    return service, request
+
+
+@patch("src.utils.google_drive.MediaFileUpload")
+def test_build_resumable_media_uses_256kb_chunks(mock_media, tmp_path):
+    build_resumable_media(str(tmp_path / "f.pdf"), mime_type="application/pdf")
+    mock_media.assert_called_once_with(
+        str(tmp_path / "f.pdf"),
+        mimetype="application/pdf",
+        resumable=True,
+        chunksize=RESUMABLE_UPLOAD_CHUNK_SIZE,
+    )
+
+
+@patch("src.utils.google_drive.MediaFileUpload")
+def test_upload_file_resumable_creates_file_with_metadata(mock_media, tmp_path):
+    mock_media.return_value.size.return_value = 512
+    file_path = tmp_path / "report.pdf"
+    file_path.write_bytes(b"x" * 512)
+    service, request = _make_upload_service(
+        [0, 256], {"id": "abc123", "name": "report.pdf"}
+    )
+
+    response = upload_file_resumable(service, str(file_path), folder_id="folder1")
+
+    assert response == {"id": "abc123", "name": "report.pdf"}
+    _, kwargs = service.files.return_value.create.call_args
+    assert kwargs["body"] == {"name": "report.pdf", "parents": ["folder1"]}
+    assert "id" in kwargs["fields"]
+    request.next_chunk.assert_called_with(num_retries=3)
+
+
+@patch("src.utils.google_drive.MediaFileUpload")
+def test_upload_file_resumable_defaults_name_to_basename(mock_media, tmp_path):
+    mock_media.return_value.size.return_value = 4
+    file_path = tmp_path / "essay.docx"
+    file_path.write_bytes(b"data")
+    service, _ = _make_upload_service([0], {"id": "id1", "name": "essay.docx"})
+
+    upload_file_resumable(service, str(file_path))
+
+    body = service.files.return_value.create.call_args.kwargs["body"]
+    assert body["name"] == "essay.docx"
+    assert "parents" not in body
+
+
+@patch("src.utils.google_drive.MediaFileUpload")
+def test_upload_file_resumable_reports_progress_and_final_callback(
+    mock_media, tmp_path
+):
+    mock_media.return_value.size.return_value = 1024
+    file_path = tmp_path / "big.bin"
+    file_path.write_bytes(b"z" * 10)
+    service, _ = _make_upload_service([0, 4, 8], {"id": "big1"})
+    calls = []
+
+    def record(done, total):
+        calls.append((done, total))
+
+    upload_file_resumable(service, str(file_path), progress_callback=record)
+
+    assert (0, 1024) in calls
+    assert (8, 1024) in calls
+    # Final guaranteed 100% callback.
+    assert calls[-1] == (1024, 1024)
+
+
+@patch("src.utils.google_drive.MediaFileUpload")
+def test_upload_file_resumable_passes_num_retries(mock_media, tmp_path):
+    mock_media.return_value.size.return_value = 2
+    file_path = tmp_path / "a.txt"
+    file_path.write_text("hi")
+    service, request = _make_upload_service([], {"id": "n1"})
+
+    upload_file_resumable(service, str(file_path), num_retries=5)
+
+    request.next_chunk.assert_called_with(num_retries=5)
+
+
+@patch("src.utils.google_drive.MediaFileUpload")
+def test_upload_file_resumable_missing_file_raises(mock_media):
+    service, _ = _make_upload_service([], {})
+    with pytest.raises(FileNotFoundError):
+        upload_file_resumable(service, "does/not/exist.pdf")
+
+
+@pytest.mark.parametrize("bad_path", ["", "   ", None])
+@patch("src.utils.google_drive.MediaFileUpload")
+def test_upload_file_resumable_invalid_path_raises(mock_media, bad_path):
+    service, _ = _make_upload_service([], {})
+    with pytest.raises(ValueError):
+        upload_file_resumable(service, bad_path)
+
+
+def test_should_use_resumable_upload_thresholds():
+    assert should_use_resumable_upload(LARGE_FILE_THRESHOLD_BYTES + 1) is True
+    assert should_use_resumable_upload(LARGE_FILE_THRESHOLD_BYTES) is False
+    assert should_use_resumable_upload(1024) is False
+    assert should_use_resumable_upload(None) is False
+    assert should_use_resumable_upload(0) is False
+
+
+@patch("src.utils.google_drive.MediaFileUpload")
+def test_bulk_upload_files_resumable_aggregates_progress(mock_media, tmp_path):
+    paths = []
+    for name in ("one.pdf", "two.pdf"):
+        p = tmp_path / name
+        p.write_bytes(b"d")
+        paths.append(str(p))
+    created = []
+
+    def create_side_effect(**kwargs):
+        created.append(kwargs)
+        return _make_upload_service([0], {"id": "id%d" % len(created)})[1]
+
+    service = MagicMock(name="DriveService")
+    service.files.return_value.create.side_effect = create_side_effect
+    calls = []
+
+    results = bulk_upload_files_resumable(
+        service, paths, progress_callback=lambda d, t: calls.append((d, t))
+    )
+
+    assert len(results) == 2
+    assert len(created) == 2
+    assert calls[-1] == (2, 2)  # Both 1-byte files fully uploaded.

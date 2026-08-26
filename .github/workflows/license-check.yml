@@ -36,6 +36,6 @@ jobs:
         run: |
           echo "Auditing open-source dependency licenses..."
           pip-licenses --format=markdown
-          
+
           # Fail if any GPL / AGPL / LGPL copyleft licenses are detected
           pip-licenses --fail-on "GPL;GPLv2;GPLv3;AGPL;AGPLv3;LGPL;LGPLv2;LGPLv3;GNU General Public License;GNU Affero General Public License;GNU Lesser General Public License"

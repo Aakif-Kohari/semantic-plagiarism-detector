@@ -8,6 +8,8 @@ import json
 import os
 from unittest.mock import patch
 
+import pytest
+
 from src.i18n.translator import _I18N_DIR, _SUPPORTED_LANGUAGES, _translations, get_text
 
 # A key that genuinely exists in the English translations
@@ -221,6 +223,32 @@ def test_is_valid_language_code():
     assert is_valid_language_code(None) is False
 
 
+def test_validate_target_language_code_valid():
+    from src.core.translator import validate_target_language_code
+
+    assert validate_target_language_code("en") is True
+    assert validate_target_language_code("es") is True
+    assert validate_target_language_code("fr") is True
+    assert validate_target_language_code("ES") is True
+    assert validate_target_language_code("  de  ") is True
+
+
+def test_validate_target_language_code_invalid():
+    from src.core.translator import validate_target_language_code
+
+    with pytest.raises(ValueError) as excinfo:
+        validate_target_language_code("xyz")
+    assert "Unsupported target language code: xyz" in str(excinfo.value)
+
+    with pytest.raises(ValueError) as excinfo:
+        validate_target_language_code("")
+    assert "Unsupported target language code:" in str(excinfo.value)
+
+    with pytest.raises(ValueError) as excinfo:
+        validate_target_language_code(None)
+    assert "Unsupported target language code: None" in str(excinfo.value)
+
+
 def test_get_supported_language_codes():
     from src.core.translator import get_supported_language_codes
 
@@ -304,3 +332,35 @@ def test_get_common_translation_pairs():
     assert len(pairs) >= 5
     assert ("es", "en") in pairs
     assert ("fr", "en") in pairs
+
+
+def test_get_language_display_name():
+    from src.core.translator import get_language_display_name
+
+    assert get_language_display_name("de") == "German"
+    assert get_language_display_name("en") == "English"
+    assert get_language_display_name("xyz") == "XYZ"
+    assert get_language_display_name("") == ""
+    assert get_language_display_name(None) == ""
+
+
+def test_new_languages_supported():
+    """Test that Portuguese and Chinese are present in supported languages and translations load correctly.
+
+    This used to pin ``app_title``, which was the only key either stub file
+    carried. ``app_title`` is not an i18n key at all -- it appears in no other
+    locale, the window title comes from ``get_app_title()``, and no production
+    code ever looked it up -- so the assertion proved only that the stub was
+    still a stub. It now checks a key the UI actually renders (Issue #3048).
+    """
+    from src.i18n.translator import _SUPPORTED_LANGUAGES, get_text
+
+    assert "pt" in _SUPPORTED_LANGUAGES
+    assert "zh" in _SUPPORTED_LANGUAGES
+
+    assert _SUPPORTED_LANGUAGES["pt"] == "Português"
+    assert _SUPPORTED_LANGUAGES["zh"] == "中文"
+
+    # Both locales translate the title rather than falling back to English.
+    assert get_text("title", lang="pt") == "🔍 Sistema de Detecção de Plágio Semântico"
+    assert get_text("title", lang="zh") == "🔍 语义查重检测系统"

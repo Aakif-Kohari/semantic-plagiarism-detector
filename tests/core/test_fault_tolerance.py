@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 test_fault_tolerance.py
 -----------------------
@@ -18,13 +16,15 @@ Acceptance Criteria (Issue #1380):
 - Mock Webhook HTTP 500 error and assert fallback queue logging.
 """
 
+from __future__ import annotations
+
 import logging
 import os
 import sqlite3
 import sys
 import time
 from pathlib import Path
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 import requests
@@ -34,16 +34,14 @@ ROOT_DIR = Path(__file__).resolve().parent.parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
+from src.core.webhook import send_plagiarism_alert
+
 # Import modules under test
 from src.utils.redis_cache import (
     RedisCache,
-    get_cache,
     RedisConnectionError,
     RedisTimeoutError,
 )
-from src.core.webhook import send_plagiarism_alert, _post_webhook
-from src.core.embedding_model import EmbeddingModelManager, _get_model
-
 
 # ── Fixtures ───────────────────────────────────────────────────────────────────
 
@@ -203,6 +201,54 @@ class TestRedisFaultTolerance:
 
             # Should retrieve from fallback cache
             assert result == "fallback_value"
+
+    def test_redis_connection_drop_mid_session_failover(
+        self, reset_redis_cache, mock_redis_module
+    ):
+        """
+        Verify seamless failover to in-memory fallback when Redis drops mid-session (#2817).
+
+        Simulates a redis.exceptions.ConnectionError on the second .get() call,
+        ensuring the application recovers without crashing and subsequent .set() calls
+        safely store user uploaded files/data into in-memory fallback cache.
+        """
+        import pickle
+
+        cache = RedisCache()
+        mock_client = MagicMock()
+        mock_client.ping.return_value = True
+
+        uploaded_doc1 = {"doc_id": "doc_101", "content": "Sample student essay text", "user": "alice"}
+        uploaded_doc2 = {"doc_id": "doc_102", "content": "Sample secondary essay text", "user": "alice"}
+
+        # First call succeeds returning doc1 from Redis
+        # Second call raises ConnectionError (simulating connection drop mid-session)
+        mock_client.get.side_effect = [
+            pickle.dumps(uploaded_doc1),
+            mock_redis_module.ConnectionError("Connection dropped by peer mid-session"),
+        ]
+
+        cache._client = mock_client
+
+        # 1. First get() succeeds from Redis
+        result_doc1 = cache.get("spd:v1:upload:doc_101")
+        assert result_doc1 == uploaded_doc1
+
+        # 2. Second get() encounters ConnectionError, seamlessly recovers and falls back
+        result_doc2_initial = cache.get("spd:v1:upload:doc_102")
+        assert result_doc2_initial is None
+
+        # 3. Subsequent set() should succeed by storing into memory without dropping data
+        mock_client.set.side_effect = mock_redis_module.ConnectionError("Connection refused")
+        mock_client.setex.side_effect = mock_redis_module.ConnectionError("Connection refused")
+        set_result = cache.set("spd:v1:upload:doc_102", uploaded_doc2, ttl=300)
+        assert set_result is True
+
+        # 4. Subsequent get() successfully returns stored upload from fallback in-memory cache
+        mock_client.get.side_effect = mock_redis_module.ConnectionError("Connection refused")
+        recovered_doc2 = cache.get("spd:v1:upload:doc_102")
+        assert recovered_doc2 == uploaded_doc2
+        assert recovered_doc2["content"] == "Sample secondary essay text"
 
     def test_redis_connection_refused_error_type(self, reset_redis_cache):
         """
@@ -499,7 +545,7 @@ class TestDatabaseFaultTolerance:
         permissions, the system should log the error and potentially
         fall back to a temp directory.
         """
-        from src.db.corpus_db import init_corpus_db, configure_db_path
+        from src.db.corpus_db import configure_db_path, init_corpus_db
 
         # Create a read-only directory
         readonly_dir = tmp_path / "readonly"
@@ -540,7 +586,7 @@ class TestDatabaseFaultTolerance:
             with caplog.at_level(logging.ERROR):
                 # Attempting to connect should handle the error
                 try:
-                    with _connect() as conn:
+                    with _connect():
                         pass
                 except sqlite3.OperationalError:
                     # If it propagates, that's also acceptable as long as it's logged
