@@ -256,6 +256,34 @@ def test_send_email_success(mock_smtp):
         "FROM_EMAIL": "test@example.com",
     },
 )
+
+def test_send_email_includes_anti_spam_headers(mock_smtp):
+    """Issue #3447: automated summary emails must carry Auto-Submitted and
+    X-Auto-Response-Suppress headers so Outlook/Gmail spam filters and
+    auto-responders treat them correctly."""
+    mock_server = MagicMock()
+    mock_smtp.return_value.__enter__.return_value = mock_server
+
+    result = send_email(["recipient@example.com"], "Test Subject", "<p>Test Body</p>")
+
+    assert result is True
+    sent_message = mock_server.send_message.call_args[0][0]
+    assert sent_message["Auto-Submitted"] == "auto-generated"
+    assert sent_message["X-Auto-Response-Suppress"] == "All"
+
+
+@patch("smtplib.SMTP")
+@patch.dict(
+    "os.environ",
+    {
+        "SMTP_SERVER": "smtp.example.com",
+        "SMTP_PORT": "587",
+        "SMTP_USERNAME": "test@example.com",
+        "SMTP_PASSWORD": "password",
+        "FROM_EMAIL": "test@example.com",
+    },
+)
+
 def test_send_email_custom_attachment_filename(mock_smtp):
     """Test custom CSV attachment filename."""
     mock_server = MagicMock()
