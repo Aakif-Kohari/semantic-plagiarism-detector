@@ -142,16 +142,30 @@ def verify_sso_state(state: str) -> bool:
     """
     if not state:
         logger.warning("SSO state verification failed: Empty state parameter.")
+        try:
+            from src.db.auth import log_security_event
+            log_security_event("SSO_CSRF_REJECTED", username="anonymous", details=f"Invalid state: {state}")
+        except Exception as audit_err:
+            logger.warning(f"Failed to log security event for SSO CSRF rejection: {audit_err}")
         return False
 
     try:
-        from src.db.auth import validate_sso_state
+        from src.db.auth import log_security_event, validate_sso_state
         is_valid = validate_sso_state(state)
         if not is_valid:
             logger.warning(f"CSRF protection: Invalid or expired SSO state parameter '{state}'")
+            try:
+                log_security_event("SSO_CSRF_REJECTED", username="anonymous", details=f"Invalid state: {state}")
+            except Exception as audit_err:
+                logger.warning(f"Failed to log security event for SSO CSRF rejection: {audit_err}")
         return is_valid
     except Exception as e:
         logger.error(f"Error during SSO state verification: {e}")
+        try:
+            from src.db.auth import log_security_event
+            log_security_event("SSO_CSRF_REJECTED", username="anonymous", details=f"Invalid state: {state}")
+        except Exception as audit_err:
+            logger.warning(f"Failed to log security event for SSO CSRF rejection: {audit_err}")
         return False
 
 
