@@ -61,6 +61,13 @@ RESTRICTED_IPV4_CIDR_BLOCKS: tuple[str, ...] = (
     "192.168.0.0/16",
 )
 
+RESTRICTED_IPV6_CIDR_BLOCKS: tuple[str, ...] = (
+    "::1/128",
+    "fc00::/7",
+    "fe80::/10",
+    "ff00::/8",
+)
+
 
 def is_ip_in_cidr_block(ip_str: str, cidr_block: str) -> bool:
     """Return whether an IP address belongs to a CIDR network under strict typing."""
@@ -126,6 +133,7 @@ class SSRFProtector:
     DNS_CACHE_TTL_SECONDS: int = 300
     DNS_CACHE_MAX_SIZE: int = 1000
     RESTRICTED_IPV4_CIDR_BLOCKS: tuple[str, ...] = RESTRICTED_IPV4_CIDR_BLOCKS
+    RESTRICTED_IPV6_CIDR_BLOCKS: tuple[str, ...] = RESTRICTED_IPV6_CIDR_BLOCKS
     MAX_REDIRECT_DEPTH: int = 5
     DEFAULT_USER_AGENT: str = DEFAULT_USER_AGENT
 
@@ -324,6 +332,26 @@ class SSRFProtector:
             ip = ipaddress.ip_address(ip_str)
         except ValueError as e:
             raise SSRFSecurityException(SSRF_INVALID_IP_FORMAT.format(error=e))
+
+        if ip.version == 6:
+            for cidr_block in cls.RESTRICTED_IPV6_CIDR_BLOCKS:
+                if is_ip_in_cidr_block(ip_str, cidr_block):
+                    if cidr_block == "::1/128":
+                        raise SSRFSecurityException(
+                            SSRF_BLOCKED_LOOPBACK.format(ip=ip_str)
+                        )
+                    if cidr_block == "fc00::/7":
+                        raise SSRFSecurityException(
+                            SSRF_BLOCKED_PRIVATE.format(ip=ip_str)
+                        )
+                    if cidr_block == "fe80::/10":
+                        raise SSRFSecurityException(
+                            SSRF_BLOCKED_LINK_LOCAL.format(ip=ip_str)
+                        )
+                    if cidr_block == "ff00::/8":
+                        raise SSRFSecurityException(
+                            SSRF_BLOCKED_MULTICAST.format(ip=ip_str)
+                        )
 
         if ip.version == 6:
             mapped = getattr(ip, "ipv4_mapped", None)
