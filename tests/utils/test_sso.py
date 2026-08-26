@@ -5,8 +5,10 @@ import requests
 
 from src.utils.sso import (
     SSOUserProfile,
+    exchange_azure_code,
     exchange_github_code,
     exchange_google_code,
+    get_azure_auth_url,
     get_github_auth_url,
     get_google_auth_url,
 )
@@ -403,5 +405,91 @@ def test_exchange_github_code_rejects_login_with_no_public_email(mock_post, mock
 
     with pytest.raises(ValueError, match="GitHub login failed: A verified public email is required"):
         exchange_github_code("valid_code")
+
+
+def test_get_azure_auth_url_missing_client_id(monkeypatch):
+    monkeypatch.delenv("AZURE_CLIENT_ID", raising=False)
+    with pytest.raises(
+        ValueError, match="AZURE_CLIENT_ID environment variable is not configured"
+    ):
+        get_azure_auth_url()
+
+
+def test_get_azure_auth_url_success(monkeypatch):
+    monkeypatch.setenv("AZURE_CLIENT_ID", "dummy_azure_client_id")
+    monkeypatch.delenv("AZURE_TENANT_ID", raising=False)
+    url, state = get_azure_auth_url()
+    assert "dummy_azure_client_id" in url
+    assert "login.microsoftonline.com/common/oauth2/v2.0/authorize" in url
+    assert state.startswith("azure_")
+
+
+def test_get_azure_auth_url_custom_tenant(monkeypatch):
+    monkeypatch.setenv("AZURE_CLIENT_ID", "dummy_azure_client_id")
+    monkeypatch.setenv("AZURE_TENANT_ID", "contoso-tenant-id")
+    url, state = get_azure_auth_url()
+    assert "login.microsoftonline.com/contoso-tenant-id/oauth2/v2.0/authorize" in url
+
+
+def test_exchange_azure_code_missing_client_id(monkeypatch):
+    monkeypatch.delenv("AZURE_CLIENT_ID", raising=False)
+    monkeypatch.setenv("AZURE_CLIENT_SECRET", "dummy_secret")
+    with pytest.raises(
+        ValueError, match="AZURE_CLIENT_ID environment variable is not configured"
+    ):
+        exchange_azure_code("dummy_code")
+
+
+def test_exchange_azure_code_missing_client_secret(monkeypatch):
+    monkeypatch.setenv("AZURE_CLIENT_ID", "dummy_client_id")
+    monkeypatch.delenv("AZURE_CLIENT_SECRET", raising=False)
+    with pytest.raises(
+        ValueError, match="AZURE_CLIENT_SECRET environment variable is not configured"
+    ):
+        exchange_azure_code("dummy_code")
+
+
+@patch("src.utils.sso.requests.get")
+@patch("src.utils.sso.requests.post")
+def test_exchange_azure_code_success(mock_post, mock_get, monkeypatch):
+    monkeypatch.setenv("AZURE_CLIENT_ID", "dummy_client_id")
+    monkeypatch.setenv("AZURE_CLIENT_SECRET", "dummy_secret")
+    monkeypatch.setenv("AZURE_TENANT_ID", "custom_tenant")
+
+    mock_post.return_value.ok = True
+    mock_post.return_value.status_code = 200
+    mock_post.return_value.json.return_value = {"access_token": "azure_token_123"}
+
+    mock_get.return_value.ok = True
+    mock_get.return_value.status_code = 200
+    mock_get.return_value.json.return_value = {
+        "mail": "john.doe@university.edu",
+        "displayName": "John Doe",
+        "userPrincipalName": "john.doe@university.edu",
+    }
+
+    user_data, error_msg = exchange_azure_code("valid_code")
+    assert user_data == SSOUserProfile(
+        email="john.doe@university.edu",
+        username="john_doe",
+        name="John Doe",
+        avatar="",
+    )
+    assert error_msg is None
+    mock_post.assert_called_once()
+    mock_get.assert_called_once()
+
+
+@patch("src.utils.sso.requests.post")
+def test_azure_oauth_token_exchange_timeout(mock_post, monkeypatch):
+    monkeypatch.setenv("AZURE_CLIENT_ID", "dummy_client_id")
+    monkeypatch.setenv("AZURE_CLIENT_SECRET", "dummy_secret")
+
+    mock_post.side_effect = requests.Timeout()
+
+    user_data, error_msg = exchange_azure_code("valid_code")
+    assert user_data is None
+    assert error_msg == "SSO provider timed out. Please try again."
+
 
 
