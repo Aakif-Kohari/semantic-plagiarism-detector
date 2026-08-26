@@ -10,6 +10,7 @@ from src.db.database_backup import (
     SQLITE_HEADER,
     create_sqlite_snapshot,
     get_database_file_size_bytes,
+    verify_backup_file,
 )
 
 
@@ -298,5 +299,44 @@ def test_create_database_backup_respects_gzip_compression_level_env(tmp_path, mo
         create_database_backup(source, backup_dir=backup_dir, compress_backup=True)
         assert len(passed_compresslevel) == 1
         assert passed_compresslevel[0] == 3
+
+
+def test_verify_backup_file_valid_gzip(tmp_path):
+    import gzip
+    source = tmp_path / "source.db"
+    create_test_database(source)
+
+    backup = tmp_path / "backup.db.gz"
+    with open(source, "rb") as f_in:
+        with gzip.open(backup, "wb") as f_out:
+            f_out.write(f_in.read())
+
+    assert verify_backup_file(backup) is True
+
+
+def test_verify_backup_file_valid_uncompressed(tmp_path):
+    source = tmp_path / "source.db"
+    create_test_database(source)
+    assert verify_backup_file(source) is True
+
+
+def test_verify_backup_file_corrupted_gzip(tmp_path):
+    backup = tmp_path / "corrupt.db.gz"
+    # Write invalid gzip data starting with magic bytes
+    backup.write_bytes(b"\x1f\x8b\x08\x00\x00\x00\x00\x00\x00\xffinvalidjunkdata")
+    assert verify_backup_file(backup) is False
+
+
+def test_verify_backup_file_invalid_header(tmp_path):
+    import gzip
+    backup = tmp_path / "invalid_header.db.gz"
+    with gzip.open(backup, "wb") as f:
+        f.write(b"not a sqlite database file header but it has 100 bytes of content so it is read without issues")
+    assert verify_backup_file(backup) is False
+
+
+def test_verify_backup_file_nonexistent():
+    assert verify_backup_file("nonexistent_backup_file_path.db.gz") is False
+
 
 
