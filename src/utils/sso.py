@@ -1,12 +1,19 @@
+# src/utils/sso.py
+
 import logging
 import os
 import secrets
+import time
 import urllib.parse
+from typing import Optional, Tuple, Dict, Any
 
 import requests
 from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
+
+# State expiration constant - 10 minutes
+STATE_EXPIRATION_SECONDS = 600
 
 
 def _load_env() -> None:
@@ -19,14 +26,79 @@ def _get_redirect_uri() -> str:
     return os.getenv("APP_BASE_URL", "http://localhost:8501")
 
 
-def get_google_auth_url() -> tuple[str, str]:
-    """Return the Google OAuth authorization URL and state."""
+def verify_sso_state(state: str, stored_state: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
+    """
+    Verify that the state token is valid and not expired.
+    
+    Args:
+        state: The state parameter received from the OAuth callback
+        stored_state: The stored state data containing token and timestamp
+    
+    Returns:
+        tuple[bool, Optional[str]]: (is_valid, error_message)
+    """
+    if not stored_state:
+        return False, "Invalid state parameter"
+    
+    # Check if stored_state has the expected structure
+    if not isinstance(stored_state, dict):
+        return False, "Invalid state data format"
+    
+    # Get the state token and timestamp
+    stored_token = stored_state.get("token")
+    if not stored_token:
+        return False, "Invalid state data: missing token"
+    
+    # Verify the state token matches
+    if state != stored_token:
+        return False, "Invalid state token"
+    
+    # Check expiration
+    created_at = stored_state.get("created_at")
+    if not created_at:
+        # If no timestamp, treat as invalid for security
+        return False, "Invalid state data: missing timestamp"
+    
+    # Handle both string and integer timestamps
+    if isinstance(created_at, str):
+        try:
+            created_at = float(created_at)
+        except ValueError:
+            return False, "Invalid state timestamp format"
+    elif not isinstance(created_at, (int, float)):
+        return False, "Invalid state timestamp type"
+    
+    # Check if state has expired
+    current_time = time.time()
+    elapsed_seconds = current_time - created_at
+    
+    if elapsed_seconds > STATE_EXPIRATION_SECONDS:
+        return False, f"State token expired (elapsed: {elapsed_seconds:.0f}s, max: {STATE_EXPIRATION_SECONDS}s)"
+    
+    return True, None
+
+
+def get_google_auth_url() -> Tuple[str, str, Dict[str, Any]]:
+    """
+    Return the Google OAuth authorization URL, state, and state data.
+    
+    Returns:
+        tuple[str, str, dict]: (authorization_url, state_token, state_data)
+    """
     _load_env()
     client_id = os.getenv("GOOGLE_CLIENT_ID")
     if not client_id:
         raise ValueError("GOOGLE_CLIENT_ID environment variable is not configured")
+    
     redirect_uri = _get_redirect_uri()
     state = f"google_{secrets.token_urlsafe(16)}"
+    
+    # Create state data with timestamp for expiration checking
+    state_data = {
+        "token": state,
+        "created_at": time.time(),
+        "provider": "google"
+    }
 
     query_params = {
         "response_type": "code",
@@ -39,10 +111,10 @@ def get_google_auth_url() -> tuple[str, str]:
     encoded_args = urllib.parse.urlencode(query_params)
     url = f"https://accounts.google.com/o/oauth2/v2/auth?{encoded_args}"
 
-    return url, state
+    return url, state, state_data
 
 
-def exchange_google_code(code: str) -> tuple[dict | None, str | None]:
+def exchange_google_code(code: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     """Exchange code for access token and fetch user info."""
     _load_env()
     client_id = os.getenv("GOOGLE_CLIENT_ID")
@@ -103,14 +175,27 @@ def exchange_google_code(code: str) -> tuple[dict | None, str | None]:
     return user_info_resp.json(), None
 
 
-def get_github_auth_url() -> tuple[str, str]:
-    """Return the GitHub OAuth authorization URL and state."""
+def get_github_auth_url() -> Tuple[str, str, Dict[str, Any]]:
+    """
+    Return the GitHub OAuth authorization URL, state, and state data.
+    
+    Returns:
+        tuple[str, str, dict]: (authorization_url, state_token, state_data)
+    """
     _load_env()
     client_id = os.getenv("GITHUB_CLIENT_ID")
     if not client_id:
         raise ValueError("GITHUB_CLIENT_ID environment variable is not configured")
+    
     redirect_uri = _get_redirect_uri()
     state = f"github_{secrets.token_urlsafe(16)}"
+    
+    # Create state data with timestamp for expiration checking
+    state_data = {
+        "token": state,
+        "created_at": time.time(),
+        "provider": "github"
+    }
 
     query_params = {
         "client_id": client_id,
@@ -122,10 +207,10 @@ def get_github_auth_url() -> tuple[str, str]:
     encoded_args = urllib.parse.urlencode(query_params)
     url = f"https://github.com/login/oauth/authorize?{encoded_args}"
 
-    return url, state
+    return url, state, state_data
 
 
-def exchange_github_code(code: str) -> tuple[dict | None, str | None]:
+def exchange_github_code(code: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     """Exchange code for access token and fetch user info."""
     _load_env()
     client_id = os.getenv("GITHUB_CLIENT_ID")
@@ -232,3 +317,48 @@ def exchange_github_code(code: str) -> tuple[dict | None, str | None]:
         raise ValueError("GitHub login failed: A verified public email is required. Please update your GitHub settings.")
 
     return user_data, None
+
+
+def create_state_token(provider: str) -> Tuple[str, Dict[str, Any]]:
+    """
+    Create a new state token with timestamp.
+    
+    Args:
+        provider: The OAuth provider ("google" or "github")
+    
+    Returns:
+        tuple[str, dict]: (state_token, state_data)
+    """
+    token = f"{provider}_{secrets.token_urlsafe(16)}"
+    state_data = {
+        "token": token,
+        "created_at": time.time(),
+        "provider": provider
+    }
+    return token, state_data
+
+
+def cleanup_expired_states(states: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    """
+    Clean up expired state tokens from the database or in-memory store.
+    
+    Args:
+        states: Dictionary of stored states {state_token: state_data}
+    
+    Returns:
+        dict: Filtered dictionary with expired states removed
+    """
+    current_time = time.time()
+    expiration_threshold = current_time - STATE_EXPIRATION_SECONDS
+    
+    # Filter out expired states
+    valid_states = {
+        token: data for token, data in states.items()
+        if data.get("created_at", 0) > expiration_threshold
+    }
+    
+    expired_count = len(states) - len(valid_states)
+    if expired_count > 0:
+        logger.info(f"Cleaned up {expired_count} expired OAuth state tokens")
+    
+    return valid_states
