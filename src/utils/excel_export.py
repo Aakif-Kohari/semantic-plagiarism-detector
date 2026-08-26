@@ -22,8 +22,6 @@ from openpyxl.cell import WriteOnlyCell
 from openpyxl.comments import Comment
 from openpyxl.formatting.rule import ColorScaleRule
 from openpyxl.styles import Alignment, Font, PatternFill
-fix/excel-sheet-title-sanitization
-from openpyxl.comments import Comment
 def sanitize_sheet_title(title: str) -> str:
     """
     Sanitize a worksheet title to comply with Excel's naming rules.
