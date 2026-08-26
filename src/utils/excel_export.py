@@ -22,26 +22,55 @@ from openpyxl.cell import WriteOnlyCell
 from openpyxl.comments import Comment
 from openpyxl.formatting.rule import ColorScaleRule
 from openpyxl.styles import Alignment, Font, PatternFill
-fix/excel-sheet-title-sanitization
-from openpyxl.comments import Comment
-def sanitize_sheet_title(title: str) -> str:
-    """
-    Sanitize a worksheet title to comply with Excel's naming rules.
-
-    Excel worksheet titles:
-    - Cannot exceed 31 characters
-    - Cannot contain [, ], *, ?, :, /, or .
-    """
-    sanitized_title = re.sub(r"[\[\]\*\?:/\.]", "", str(title))
-    sanitized_title = sanitized_title[:31]
-
-    return sanitized_title or "Sheet"
 from openpyxl.utils import get_column_letter
 
 from src.utils.export_sanitizer import (
     FORMULA_TRIGGER_PREFIXES,
     sanitize_spreadsheet_value,
 )
+
+# Excel rejects these characters outright in a worksheet title, and caps the
+# title at 31 characters. Titles can originate from a course or assignment
+# name, so they are not trustworthy input. The set is the one established in
+# #3673 plus the backslash, which Excel rejects as well but which that pass
+# missed.
+_INVALID_SHEET_TITLE_CHARS = re.compile(r"[\[\]\*\?:/\\.]")
+
+#: Excel's hard limit on worksheet title length.
+MAX_SHEET_TITLE_LENGTH = 31
+
+#: Used when sanitization consumes the whole title.
+DEFAULT_SHEET_TITLE = "Sheet"
+
+#: Default worksheet title for an exported similarity matrix.
+DEFAULT_WORKSHEET_TITLE = "Similarity Matrix"
+
+
+def sanitize_sheet_title(title) -> str:
+    """Coerce a worksheet title into something Excel will accept.
+
+    Excel worksheet titles cannot exceed 31 characters and cannot contain
+    ``[``, ``]``, ``*``, ``?``, ``:``, ``/``, ``\\`` or ``.``. openpyxl raises
+    when handed a title that breaks either rule, which would abort the export.
+
+    Args:
+        title: The desired title. Coerced to ``str``, so a non-string label
+            (e.g. an integer assignment ID) does not raise.
+
+    Returns:
+        A title that satisfies both rules. Falls back to
+        :data:`DEFAULT_SHEET_TITLE` when sanitization leaves nothing usable,
+        because openpyxl also rejects an empty title.
+    """
+    sanitized = _INVALID_SHEET_TITLE_CHARS.sub("", str(title))
+    # Excel additionally rejects a title that is only whitespace, and trims
+    # surrounding whitespace itself; do it here so the length cap is applied
+    # to what actually lands in the file.
+    sanitized = sanitized.strip()[:MAX_SHEET_TITLE_LENGTH].strip()
+
+    return sanitized or DEFAULT_SHEET_TITLE
+
+
 def _create_managed_temp_file(suffix: str = ".xlsx", prefix: str = "temp_") -> str:
     """Helper to create a temporary file that is automatically deleted on exit."""
     fd, temp_path = tempfile.mkstemp(suffix=suffix, prefix=prefix)
@@ -77,7 +106,10 @@ def _truncate_title(title, max_length: int = 60) -> str:
 
 
 def build_similarity_workbook(
-    df: pd.DataFrame, threshold: float = 0.59, write_only: bool = False
+    df: pd.DataFrame,
+    threshold: float = 0.59,
+    write_only: bool = False,
+    sheet_title: str = DEFAULT_WORKSHEET_TITLE,
 ) -> Workbook:
     """Helper function that builds and styles the openpyxl Workbook.
 
@@ -86,17 +118,22 @@ def build_similarity_workbook(
         threshold: Score threshold for conditional formatting color scale.
         write_only: If True, uses openpyxl write_only mode with ws.append() for
             memory-efficient streaming of large matrices. Defaults to False.
+        sheet_title: Worksheet title. Passed through
+            :func:`sanitize_sheet_title`, so a caller may hand in an untrusted
+            label (a course or assignment name) without the export aborting.
 
     Returns:
         Workbook: Configured openpyxl Workbook instance.
     """
+    safe_sheet_title = sanitize_sheet_title(sheet_title)
+
     if write_only:
         wb = Workbook(write_only=True)
         wb.properties.title = "Semantic Plagiarism Similarity Report"
         wb.properties.creator = "Semantic Plagiarism Detector"
         wb.properties.created = datetime.now(timezone.utc)
 
-        ws = wb.create_sheet(title="Similarity Matrix")
+        ws = wb.create_sheet(title=safe_sheet_title)
 
         header_fill = PatternFill(
             start_color="1F2937", end_color="1F2937", fill_type="solid"
@@ -194,7 +231,7 @@ def build_similarity_workbook(
     wb.properties.created = datetime.now(timezone.utc)
 
     ws = wb.active
-    ws.title = sanitize_sheet_title("Similarity Matrix")
+    ws.title = safe_sheet_title
 
     # Write headers and index labels with truncated titles, preserving full names in comments.
     # Labels originate from uploaded filenames, so they are sanitized before
@@ -276,17 +313,25 @@ def build_similarity_workbook(
 
 
 def export_similarity_matrix_to_excel(
-    df: pd.DataFrame, threshold: float = 0.59, write_only: bool = False
+    df: pd.DataFrame,
+    threshold: float = 0.59,
+    write_only: bool = False,
+    sheet_title: str = DEFAULT_WORKSHEET_TITLE,
 ) -> bytes:
     """Exports a similarity matrix DataFrame into an in-memory Excel file (.xlsx) with formatting."""
-    wb = build_similarity_workbook(df, threshold=threshold, write_only=write_only)
+    wb = build_similarity_workbook(
+        df, threshold=threshold, write_only=write_only, sheet_title=sheet_title
+    )
     output = io.BytesIO()
     wb.save(output)
     return output.getvalue()
 
 
 def export_similarity_matrix_to_temp_file(
-    df: pd.DataFrame, threshold: float = 0.59, write_only: bool = False
+    df: pd.DataFrame,
+    threshold: float = 0.59,
+    write_only: bool = False,
+    sheet_title: str = DEFAULT_WORKSHEET_TITLE,
 ) -> str:
     """
     Exports the similarity matrix to a temporary .xlsx file on disk.
@@ -295,7 +340,9 @@ def export_similarity_matrix_to_temp_file(
     Returns:
         str: Absolute path to the created temporary Excel file.
     """
-    wb = build_similarity_workbook(df, threshold=threshold, write_only=write_only)
+    wb = build_similarity_workbook(
+        df, threshold=threshold, write_only=write_only, sheet_title=sheet_title
+    )
     temp_path = _create_managed_temp_file(suffix=".xlsx", prefix="similarity_matrix_")
     wb.save(temp_path)
     return temp_path
