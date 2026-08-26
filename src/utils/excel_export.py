@@ -11,6 +11,7 @@ import atexit
 import csv
 import io
 import os
+import re
 import tempfile
 from datetime import datetime, timezone
 from typing import Generator
@@ -21,14 +22,26 @@ from openpyxl.cell import WriteOnlyCell
 from openpyxl.comments import Comment
 from openpyxl.formatting.rule import ColorScaleRule
 from openpyxl.styles import Alignment, Font, PatternFill
+fix/excel-sheet-title-sanitization
+from openpyxl.comments import Comment
+def sanitize_sheet_title(title: str) -> str:
+    """
+    Sanitize a worksheet title to comply with Excel's naming rules.
+
+    Excel worksheet titles:
+    - Cannot exceed 31 characters
+    - Cannot contain [, ], *, ?, :, /, or .
+    """
+    sanitized_title = re.sub(r"[\[\]\*\?:/\.]", "", str(title))
+    sanitized_title = sanitized_title[:31]
+
+    return sanitized_title or "Sheet"
 from openpyxl.utils import get_column_letter
 
 from src.utils.export_sanitizer import (
     FORMULA_TRIGGER_PREFIXES,
     sanitize_spreadsheet_value,
 )
-
-
 def _create_managed_temp_file(suffix: str = ".xlsx", prefix: str = "temp_") -> str:
     """Helper to create a temporary file that is automatically deleted on exit."""
     fd, temp_path = tempfile.mkstemp(suffix=suffix, prefix=prefix)
@@ -181,7 +194,7 @@ def build_similarity_workbook(
     wb.properties.created = datetime.now(timezone.utc)
 
     ws = wb.active
-    ws.title = "Similarity Matrix"
+    ws.title = sanitize_sheet_title("Similarity Matrix")
 
     # Write headers and index labels with truncated titles, preserving full names in comments.
     # Labels originate from uploaded filenames, so they are sanitized before
@@ -322,3 +335,38 @@ def generate_csv_matrix_stream(matrix_df: pd.DataFrame) -> Generator[str, None, 
         yield buffer.getvalue()
         buffer.seek(0)
         buffer.truncate(0)
+
+
+def generate_tsv_matrix_stream(matrix_df: pd.DataFrame) -> Generator[str, None, None]:
+    """
+    Yields TSV formatted lines line-by-line from a similarity matrix DataFrame.
+
+    Memory-efficient generator for exporting large result sets (>10,000 document pairs)
+    using tab-delimited formatting for R and Pandas workflows.
+
+    Args:
+        matrix_df (pd.DataFrame): Similarity matrix DataFrame with document labels as index and columns.
+
+    Yields:
+        str: TSV formatted string row (including newline character).
+    """
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, delimiter="\t")
+
+    # Yield header row
+    header = ["Document"] + [sanitize_spreadsheet_value(c) for c in matrix_df.columns]
+    writer.writerow(header)
+    yield buffer.getvalue()
+    buffer.seek(0)
+    buffer.truncate(0)
+
+    # Yield data rows line by line
+    for index, row in matrix_df.iterrows():
+        writer.writerow(
+            [sanitize_spreadsheet_value(index)]
+            + [sanitize_spreadsheet_value(v) for v in row.tolist()]
+        )
+        yield buffer.getvalue()
+        buffer.seek(0)
+        buffer.truncate(0)
+

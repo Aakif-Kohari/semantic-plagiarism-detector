@@ -9,12 +9,17 @@ from __future__ import annotations
 from io import BytesIO
 
 import pytest
-from PyPDF2 import PdfReader
+
+try:
+    from pypdf import PdfReader
+except ImportError:
+    from PyPDF2 import PdfReader
 
 from src.utils.pdf_report import (
     generate_audit_summary_html,
     generate_audit_summary_pdf,
     generate_audit_summary_report,
+    generate_batch_plagiarism_report,
 )
 
 

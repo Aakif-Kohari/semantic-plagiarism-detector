@@ -6,7 +6,7 @@ import sqlite3
 
 from .common import column_exists, run_migrations, table_exists
 
-CORPUS_SCHEMA_VERSION = 17
+CORPUS_SCHEMA_VERSION = 18
 
 
 def migration_001_create_base_schema(
@@ -401,6 +401,20 @@ def migration_017_add_incident_date_flagged_index(
     )
 
 
+def migration_018_add_false_positives_audit_columns(
+    connection: sqlite3.Connection,
+) -> None:
+    """Add dismissed_by and dismissal_reason audit columns to false_positives table."""
+    if not column_exists(connection, "false_positives", "dismissed_by"):
+        connection.execute(
+            "ALTER TABLE false_positives ADD COLUMN dismissed_by TEXT DEFAULT 'admin'"
+        )
+    if not column_exists(connection, "false_positives", "dismissal_reason"):
+        connection.execute(
+            "ALTER TABLE false_positives ADD COLUMN dismissal_reason TEXT"
+        )
+
+
 CORPUS_MIGRATIONS = {
     1: migration_001_create_base_schema,
     2: migration_002_add_document_metadata,
@@ -419,6 +433,7 @@ CORPUS_MIGRATIONS = {
     15: migration_015_pattern_recognition,
     16: migration_016_add_scheduler_runs,
     17: migration_017_add_incident_date_flagged_index,
+    18: migration_018_add_false_positives_audit_columns,
 }
 
 
@@ -526,6 +541,14 @@ def down_017_add_incident_date_flagged_index(connection: sqlite3.Connection) -> 
     connection.execute("DROP INDEX IF EXISTS idx_incidents_date_flagged")
 
 
+def down_018_add_false_positives_audit_columns(
+    connection: sqlite3.Connection,
+) -> None:
+    """Remove dismissed_by and dismissal_reason audit columns from false_positives table."""
+    _drop_column_if_exists(connection, "false_positives", "dismissed_by")
+    _drop_column_if_exists(connection, "false_positives", "dismissal_reason")
+
+
 CORPUS_DOWN_MIGRATIONS = {
     1: down_001_create_base_schema,
     2: down_002_add_document_metadata,
@@ -544,6 +567,7 @@ CORPUS_DOWN_MIGRATIONS = {
     15: down_015_pattern_recognition,
     16: down_016_add_scheduler_runs,
     17: down_017_add_incident_date_flagged_index,
+    18: down_018_add_false_positives_audit_columns,
 }
 
 
