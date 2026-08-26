@@ -8,6 +8,7 @@ import pytest
 from src.db.database_backup import (
     _ALLOWED_DB_DIR,
     SQLITE_HEADER,
+    BackupRestoreSecurityError,
     create_sqlite_snapshot,
     get_database_file_size_bytes,
 )
