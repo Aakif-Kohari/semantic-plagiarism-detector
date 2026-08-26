@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 import secrets
 import urllib.parse
 from dataclasses import dataclass
@@ -122,9 +123,11 @@ def exchange_google_code(code: str, state: str | None = None) -> tuple[SSOUserPr
 
     user_data = user_info_resp.json()
     email = user_data.get("email", "")
+    raw_username = email.split("@")[0] if email else ""
+    username = re.sub(r"[^a-zA-Z0-9_-]", "_", raw_username)
     profile = SSOUserProfile(
         email=email,
-        username=email.split("@")[0] if email else "",
+        username=username,
         name=user_data.get("name", ""),
         avatar=user_data.get("picture", "")
     )

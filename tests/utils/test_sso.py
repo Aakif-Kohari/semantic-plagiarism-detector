@@ -71,6 +71,35 @@ def test_exchange_google_code_success(mock_post, mock_get, monkeypatch):
     mock_get.assert_called_once()
 
 
+@patch("src.utils.sso.requests.get")
+@patch("src.utils.sso.requests.post")
+def test_exchange_google_code_sanitizes_username(mock_post, mock_get, monkeypatch):
+    """Test that email with special characters (dots, pluses) produces a sanitized username."""
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "dummy_client_id")
+    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "dummy_secret")
+
+    mock_post.return_value.ok = True
+    mock_post.return_value.status_code = 200
+    mock_post.return_value.json.return_value = {"access_token": "google_token_123"}
+
+    mock_get.return_value.ok = True
+    mock_get.return_value.status_code = 200
+    mock_get.return_value.json.return_value = {
+        "email": "john.doe+class@school.edu",
+        "name": "John Doe",
+        "picture": "https://example.com/avatar.png",
+    }
+
+    user_data, error_msg = exchange_google_code("valid_code")
+    assert user_data == SSOUserProfile(
+        email="john.doe+class@school.edu",
+        username="john_doe_class",
+        name="John Doe",
+        avatar="https://example.com/avatar.png",
+    )
+    assert error_msg is None
+
+
 @patch("src.utils.sso.requests.post")
 def test_exchange_google_code_unauthorized(mock_post, monkeypatch):
     """Test Google OAuth returns 4xx error message when authorization code is rejected."""
