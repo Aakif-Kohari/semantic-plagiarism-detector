@@ -31,7 +31,7 @@ from src.db.schemas import MatchResult
 # to work (tests/conftest.py, tests/infrastructure/test_fixtures.py,
 # app/components/incident_export.py, src/utils/daily_summary_email.py).
 DEFAULT_DB_PATH = CORPUS_DB_PATH
-VALID_REVIEW_STATUSES = {"Pending", "Resolved"}
+VALID_REVIEW_STATUSES = {"Pending", "Resolved", "Dismissed"}
 CSV_COLUMNS = [
     "Incident ID",
     "Document A",
@@ -763,7 +763,7 @@ def update_review_status(
 
     if status not in VALID_REVIEW_STATUSES:
         raise ValueError(
-            f"review_status must be one of {sorted(VALID_REVIEW_STATUSES)}"
+            f"Invalid review status: {review_status}. Must be one of {VALID_REVIEW_STATUSES}"
         )
 
     init_incident_db(db_path)
@@ -795,7 +795,7 @@ def bulk_update_incident_status(
 
     if status not in VALID_REVIEW_STATUSES:
         raise ValueError(
-            f"new_status must be one of {sorted(VALID_REVIEW_STATUSES)}"
+            f"Invalid review status: {new_status}. Must be one of {VALID_REVIEW_STATUSES}"
         )
 
     if not incident_ids:
