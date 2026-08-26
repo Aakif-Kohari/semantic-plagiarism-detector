@@ -55,6 +55,8 @@ from .incidents import (
     get_recent_incidents,
     log_incident,
     bulk_update_incident_status,
+    add_false_positive,
+    dismiss_incident,
 )
 
 __all__ = [
@@ -107,6 +109,8 @@ __all__ = [
     "get_recent_incidents",
     "log_incident",
     "bulk_update_incident_status",
+    "add_false_positive",
+    "dismiss_incident",
 ]
 
 

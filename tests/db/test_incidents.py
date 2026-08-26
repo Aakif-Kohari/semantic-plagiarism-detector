@@ -1264,3 +1264,50 @@ def test_get_incident_by_id_returns_dict_type(test_db):
     assert result is not None
     assert isinstance(result, dict)
     assert not isinstance(result, sqlite3.Row)
+
+
+def test_add_false_positive_audit_metadata(test_db):
+    """Verify add_false_positive persists dismissed_by and dismissal_reason."""
+    from src.db.incidents import add_false_positive
+    import sqlite3
+
+    add_false_positive(
+        doc_a="doc_first.pdf",
+        doc_b="doc_second.pdf",
+        db_path=test_db,
+        dismissed_by="admin_john",
+        dismissal_reason="Known testing false positive",
+    )
+
+    with sqlite3.connect(test_db) as conn:
+        cursor = conn.execute(
+            "SELECT dismissed_by, dismissal_reason FROM false_positives WHERE document_a = 'doc_first.pdf'"
+        )
+        row = cursor.fetchone()
+        assert row is not None
+        assert row[0] == "admin_john"
+        assert row[1] == "Known testing false positive"
+
+
+def test_dismiss_incident_audit_metadata(test_db):
+    """Verify dismiss_incident persists dismissed_by and dismissal_reason and handles updates."""
+    from src.db.incidents import dismiss_incident
+    import sqlite3
+
+    dismiss_incident(
+        doc_a="doc_alpha.pdf",
+        doc_b="doc_beta.pdf",
+        db_path=test_db,
+        dismissed_by="admin_jane",
+        dismissal_reason="Incorrect match",
+    )
+
+    with sqlite3.connect(test_db) as conn:
+        cursor = conn.execute(
+            "SELECT dismissed_by, dismissal_reason FROM false_positives WHERE document_a = 'doc_alpha.pdf'"
+        )
+        row = cursor.fetchone()
+        assert row is not None
+        assert row[0] == "admin_jane"
+        assert row[1] == "Incorrect match"
+
