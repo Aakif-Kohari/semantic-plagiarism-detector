@@ -433,3 +433,22 @@ def reset_analysis_state() -> None:
     """Alias for reset_analysis_data() to preserve authentication state while clearing document analysis."""
     reset_analysis_data()
 
+
+def reset_analysis_session_state() -> None:
+    """Reset document lists, matrices, and scan flags for a new analysis.
+
+    Keeps SessionKeys.THEME and SessionKeys.SESSION_ID.
+    """
+    for key in (
+        SessionKeys.FAILED_DOCUMENTS,
+        SessionKeys.DRIVE_FILES_DICT,
+        SessionKeys.SELECTED_DOCUMENT_ID,
+        SessionKeys.ANALYSIS_RESULTS,
+        SessionKeys.ANALYSIS_FILE_SIGNATURE,
+        SessionKeys.SCANNING,
+        SessionKeys.AUDIT_REPORT_GENERATED,
+        SessionKeys.SENT_ALERTS,
+    ):
+        if key in st.session_state:
+            del st.session_state[key]
+

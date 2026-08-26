@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Admin DB repair CLI with `--check` / `--vacuum` / `--reindex` for `corpus.db` and `users.db` (`scripts/repair_db.py`).
 - Daily storage snapshots and projected days-until-full estimate via `storage_history` (`src/utils/storage_metrics.py`).
 - Prometheus gauge `spd_active_threads` updated from `threading.active_count()` on each `/metrics` scrape (`src/core/metrics.py`).
+- `reset_analysis_session_state()` clears document lists, matrices, and scan flags while keeping theme and session id (`app/state_manager.py`).
 
 ### Fixed
 - Embed bundled DejaVu Sans / Roboto TTF in ReportLab PDF reports so non-ASCII document names render correctly (`src/utils/pdf_report.py`).
