@@ -1494,7 +1494,7 @@ class TestPlainTextMimeSummaryEmail:
             "os.environ",
             {
                 "SMTP_SERVER": "smtp.example.com",
-                "SMTP_PORT": "587",
+                "SMTP_PORT": non_integer_port,
                 "SMTP_USERNAME": "user@example.com",
                 "SMTP_PASSWORD": "password",
             },
@@ -1657,11 +1657,11 @@ class TestPlainTextMimeSummaryEmail:
         mock_server = MagicMock()
         mock_smtp.return_value.__enter__.return_value = mock_server
 
-        with patch.dict(
+        with patch("src.utils.daily_summary_email.logger.warning") as mock_warn, patch.dict(
             "os.environ",
             {
                 "SMTP_SERVER": "smtp.example.com",
-                "SMTP_PORT": "587",
+                "SMTP_PORT": "587.5",
                 "SMTP_USERNAME": "user@example.com",
                 "SMTP_PASSWORD": "password",
             },
@@ -1692,7 +1692,7 @@ class TestPlainTextMimeSummaryEmail:
             "os.environ",
             {
                 "SMTP_SERVER": "smtp.example.com",
-                "SMTP_PORT": "587",
+                "SMTP_PORT": "0",
                 "SMTP_USERNAME": "user@example.com",
                 "SMTP_PASSWORD": "password",
             },

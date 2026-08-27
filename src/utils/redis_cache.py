@@ -79,7 +79,8 @@ RedisTimeoutError = (
 
 
 # Redis connection configuration
-REDIS_HOST = os.getenv("REDIS_HOST", "localhost")try:
+REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
+try:
     REDIS_DB = int(os.getenv("REDIS_DB", "0"))
 except ValueError:
     logger.warning(

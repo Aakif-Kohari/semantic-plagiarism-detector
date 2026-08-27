@@ -12,12 +12,33 @@ from typing import Optional, Tuple, Dict, Any
 from dataclasses import dataclass
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util import Retry
 from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
 
 # State expiration constant - 10 minutes
 STATE_EXPIRATION_SECONDS = 600
+
+
+def _get_oauth_session() -> requests.Session:
+    """Create and return a requests.Session configured with retry logic for transient errors.
+
+    Acceptance Criteria (Issue #3455):
+    - Uses urllib3.util.Retry(total=3, backoff_factor=0.5, status_forcelist=[500, 502, 503, 504])
+    """
+    session = requests.Session()
+    retries = Retry(
+        total=3,
+        backoff_factor=0.5,
+        status_forcelist=[500, 502, 503, 504],
+        raise_on_status=False,  # Keep status code responses accessible so we can log/handle them.
+    )
+    adapter = HTTPAdapter(max_retries=retries)
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+    return session
 
 
 @dataclass
@@ -142,11 +163,13 @@ def get_google_auth_url() -> Tuple[str, str, Dict[str, Any]]:
     except Exception as e:
         logger.warning(f"Failed to store Google SSO state parameter: {e}")
 
+    google_scopes = os.getenv("GOOGLE_OAUTH_SCOPES", "email profile")
+
     query_params = {
         "response_type": "code",
         "client_id": client_id,
         "redirect_uri": redirect_uri,
-        "scope": "email profile",
+        "scope": google_scopes,
         "state": state,
         "prompt": "select_account",
         "code_challenge": code_challenge,
@@ -193,8 +216,11 @@ def exchange_google_code(code: str, state: str | None = None, code_verifier: str
     if code_verifier is not None:
         token_data["code_verifier"] = code_verifier
 
+    # Setup retrying OAuth session
+    session = _get_oauth_session()
+
     try:
-        token_resp = requests.post(
+        token_resp = session.post(
             "https://oauth2.googleapis.com/token",
             data=token_data,
             timeout=10,
@@ -217,7 +243,7 @@ def exchange_google_code(code: str, state: str | None = None, code_verifier: str
         return None, "Invalid or expired SSO authorization code"
 
     try:
-        user_info_resp = requests.get(
+        user_info_resp = session.get(
             "https://www.googleapis.com/oauth2/v2/userinfo",
             headers={"Authorization": f"Bearer {access_token}"},
             timeout=10,
@@ -238,11 +264,18 @@ def exchange_google_code(code: str, state: str | None = None, code_verifier: str
     email = user_data.get("email", "")
     raw_username = email.split("@")[0] if email else ""
     username = re.sub(r"[^a-zA-Z0-9_-]", "_", raw_username)
+
+    # Fallback avatar generation (Issue #3459)
+    avatar_url = user_data.get("picture")
+    if not avatar_url:
+        name_param = urllib.parse.quote(user_data.get("name") or raw_username or email)
+        avatar_url = f"https://ui-avatars.com/api/?name={name_param}"
+
     profile = SSOUserProfile(
         email=email,
         username=username,
         name=user_data.get("name", ""),
-        avatar=user_data.get("picture", "")
+        avatar=avatar_url
     )
     return profile, None
 
@@ -313,10 +346,12 @@ def get_github_auth_url() -> Tuple[str, str, Dict[str, Any]]:
     except Exception as e:
         logger.warning(f"Failed to store GitHub SSO state parameter: {e}")
 
+    github_scopes = os.getenv("GITHUB_OAUTH_SCOPES", "user:email")
+
     query_params = {
         "client_id": client_id,
         "redirect_uri": redirect_uri,
-        "scope": "user:email",
+        "scope": github_scopes,
         "state": state,
     }
 
@@ -338,11 +373,14 @@ def exchange_github_code(code: str, state: str | None = None) -> tuple[SSOUserPr
         raise ValueError("GITHUB_CLIENT_ID environment variable is not configured")
     client_secret = os.getenv("GITHUB_CLIENT_SECRET")
     if not client_secret:
-        raise ValueError("GITHUB_CLIENT_SECRET environment variable is not configured")
+        raise ValueError("GOOGLE_CLIENT_SECRET environment variable is not configured")
     redirect_uri = _get_redirect_uri()
 
+    # Setup retrying OAuth session
+    session = _get_oauth_session()
+
     try:
-        token_resp = requests.post(
+        token_resp = session.post(
             "https://github.com/login/oauth/access_token",
             data={
                 "client_id": client_id,
@@ -375,7 +413,7 @@ def exchange_github_code(code: str, state: str | None = None) -> tuple[SSOUserPr
         return None, "Invalid or expired SSO authorization code"
 
     try:
-        user_info_resp = requests.get(
+        user_info_resp = session.get(
             "https://api.github.com/user",
             headers={"Authorization": f"Bearer {access_token}"},
             timeout=10,
@@ -401,7 +439,7 @@ def exchange_github_code(code: str, state: str | None = None) -> tuple[SSOUserPr
     # GitHub might not return email in /user if it's private, fetch explicitly
     if not user_data.get("email"):
         try:
-            emails_resp = requests.get(
+            emails_resp = session.get(
                 "https://api.github.com/user/emails",
                 headers={"Authorization": f"Bearer {access_token}"},
                 timeout=10,
@@ -436,11 +474,17 @@ def exchange_github_code(code: str, state: str | None = None) -> tuple[SSOUserPr
         # We raise a ValueError to reject login with message requesting a public email.
         raise ValueError("GitHub login failed: A verified public email is required. Please update your GitHub settings.")
 
+    # Fallback avatar generation (Issue #3459)
+    avatar_url = user_data.get("avatar_url")
+    if not avatar_url:
+        name_param = urllib.parse.quote(user_data.get("name") or user_data.get("login") or user_data["email"])
+        avatar_url = f"https://ui-avatars.com/api/?name={name_param}"
+
     profile = SSOUserProfile(
         email=user_data["email"],
         username=user_data.get("login", ""),
-        name=user_data.get("name") or user_data.get("login") or "",
-        avatar=user_data.get("avatar_url", ""),
+        name=user_data.get("name", ""),
+        avatar=avatar_url
     )
     return profile, None
 
@@ -601,4 +645,3 @@ def exchange_azure_code(code: str, state: str | None = None) -> tuple[SSOUserPro
         avatar="",
     )
     return profile, None
-
