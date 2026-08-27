@@ -93,8 +93,15 @@ def _get_env_int(
 get_env_int = _get_env_int
 
 
-def get_valid_roles() -> set[str]:
-    """Return the set of valid user roles.
+# ─── Port configuration (issue #3742) ──────────────────────────────────────
+# Validated via ``_get_env_int`` so a non-numeric value in the environment
+# (e.g. a malformed .env file) falls back to the default instead of raising
+# an unhandled ValueError at import time.
+API_PORT: Final[int] = _get_env_int("API_PORT", 8000, min_val=1, max_val=65535)
+REDIS_PORT: Final[int] = _get_env_int("REDIS_PORT", 6379, min_val=1, max_val=65535)
+
+
+def get_valid_roles() -> set[str]:    """Return the set of valid user roles.
 
     Configured via the ``ALLOWED_USER_ROLES`` environment variable as a
     comma-separated string (e.g. ``ALLOWED_USER_ROLES="admin,teacher,teaching_assistant"``).
@@ -246,27 +253,12 @@ def get_api_support_contact() -> dict[str, str]:
 
 def get_lock_timeout() -> int:
     """Return the configured lock timeout in seconds (default 30)."""
-    try:
-        timeout = int(os.getenv("LOCK_TIMEOUT_SECONDS", "30"))
-        return max(1, timeout)
-    except ValueError:
-        return 30
-
+    return _get_env_int("LOCK_TIMEOUT_SECONDS", 30, min_val=1)
 
 def get_backup_idle_timeout() -> int:
     """Return the configured backup idle timeout in seconds (default 30 minutes)."""
-    try:
-        timeout_minutes = int(os.getenv("BACKUP_IDLE_TIMEOUT_MINUTES", "30"))
-        if timeout_minutes < 1:
-            logger.warning(
-                "Invalid backup timeout %d, defaulting to 30",
-                timeout_minutes,
-            )
-            return 30 * 60
-        return timeout_minutes * 60
-    except ValueError:
-        return 30 * 60
-
+    timeout_minutes = _get_env_int("BACKUP_IDLE_TIMEOUT_MINUTES", 30, min_val=1)
+    return timeout_minutes * 60
 
 def get_allowed_webhook_domains() -> list[str]:
     """Return the list of allowed webhook domain hostnames.
