@@ -7,11 +7,13 @@ import pytest
 from src.core.app_config import (
     DEFAULT_APP_TITLE,
     BrandingConfig,
+    _get_env_int,
     clear_branding_config_cache,
     get_api_support_contact,
     get_app_title,
     get_backup_idle_timeout,
     get_branding_config,
+    get_env_int,
     get_lock_timeout,
     load_branding_config,
 )
@@ -377,4 +379,62 @@ def test_get_backup_idle_timeout_zero_logs_warning_and_defaults_to_30(
 
     assert result == 30 * 60
     assert "Invalid backup timeout 0, defaulting to 30" in caplog.text
+
+
+# ---------------------------------------------------------------------------
+# Tests for _get_env_int / get_env_int bounds enforcement (Issue #3750)
+# ---------------------------------------------------------------------------
+
+
+def test_get_env_int_valid_value(monkeypatch):
+    monkeypatch.setenv("TEST_INT_VAR", "42")
+    assert _get_env_int("TEST_INT_VAR", default=10) == 42
+    assert get_env_int("TEST_INT_VAR", default=10) == 42
+
+
+def test_get_env_int_valid_with_bounds(monkeypatch):
+    monkeypatch.setenv("TEST_INT_VAR", "50")
+    assert _get_env_int("TEST_INT_VAR", default=10, min_val=0, max_val=100) == 50
+    assert get_env_int("TEST_INT_VAR", default=10, min_val=0, max_val=100) == 50
+
+
+def test_get_env_int_missing_variable_returns_default(monkeypatch):
+    monkeypatch.delenv("TEST_INT_VAR", raising=False)
+    assert _get_env_int("TEST_INT_VAR", default=15) == 15
+    assert get_env_int("TEST_INT_VAR", default=15) == 15
+
+
+@pytest.mark.parametrize("invalid_val", ["", "   ", "abc", "12.34", "NaN", "null", "none"])
+def test_get_env_int_non_numeric_returns_default(monkeypatch, invalid_val):
+    monkeypatch.setenv("TEST_INT_VAR", invalid_val)
+    assert _get_env_int("TEST_INT_VAR", default=25) == 25
+    assert get_env_int("TEST_INT_VAR", default=25) == 25
+
+
+def test_get_env_int_less_than_min_val_returns_default(monkeypatch):
+    monkeypatch.setenv("TEST_INT_VAR", "-5")
+    assert _get_env_int("TEST_INT_VAR", default=10, min_val=0) == 10
+    assert get_env_int("TEST_INT_VAR", default=10, min_val=0) == 10
+
+    monkeypatch.setenv("TEST_INT_VAR", "4")
+    assert _get_env_int("TEST_INT_VAR", default=20, min_val=5) == 20
+    assert get_env_int("TEST_INT_VAR", default=20, min_val=5) == 20
+
+
+def test_get_env_int_greater_than_max_val_returns_default(monkeypatch):
+    monkeypatch.setenv("TEST_INT_VAR", "105")
+    assert _get_env_int("TEST_INT_VAR", default=50, max_val=100) == 50
+    assert get_env_int("TEST_INT_VAR", default=50, max_val=100) == 50
+
+    monkeypatch.setenv("TEST_INT_VAR", "500")
+    assert _get_env_int("TEST_INT_VAR", default=30, min_val=1, max_val=100) == 30
+    assert get_env_int("TEST_INT_VAR", default=30, min_val=1, max_val=100) == 30
+
+
+def test_get_env_int_exact_boundaries(monkeypatch):
+    monkeypatch.setenv("TEST_INT_VAR", "10")
+    assert _get_env_int("TEST_INT_VAR", default=0, min_val=10, max_val=20) == 10
+
+    monkeypatch.setenv("TEST_INT_VAR", "20")
+    assert _get_env_int("TEST_INT_VAR", default=0, min_val=10, max_val=20) == 20
 
