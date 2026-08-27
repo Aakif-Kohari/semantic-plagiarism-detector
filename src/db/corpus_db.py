@@ -215,7 +215,7 @@ def init_corpus_db() -> None:
                 similarity_score REAL NOT NULL,
                 severity_rank TEXT NOT NULL,
                 review_status TEXT NOT NULL DEFAULT 'Pending'
-                    CHECK (review_status IN ('Pending', 'Resolved')),
+                    CHECK (review_status IN ('Pending', 'Resolved', 'Dismissed')),
                 date_flagged TEXT NOT NULL,
                 last_seen TEXT NOT NULL,
                 threshold_at_time_of_flag REAL DEFAULT 0.0
