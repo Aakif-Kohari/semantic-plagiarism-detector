@@ -123,6 +123,37 @@ def _get_env_int(
 get_env_int = _get_env_int
 
 
+def _get_env_bool(key: str, default: bool = False) -> bool:
+    """Parse a boolean environment variable.
+
+    Accepts "true"/"false", "1"/"0", and "yes"/"no" (case-insensitive,
+    surrounding whitespace ignored). Falls back to ``default`` if the
+    environment variable is not set, empty, or not one of the recognized
+    values.
+
+    Args:
+        key: The environment variable name.
+        default: Default boolean returned on missing or invalid input.
+
+    Returns:
+        bool: Parsed boolean, or ``default``.
+    """
+    raw = os.getenv(key)
+    if raw is None:
+        return default
+    raw_str = raw.strip().lower()
+    if not raw_str:
+        return default
+    if raw_str in ("true", "1", "yes"):
+        return True
+    if raw_str in ("false", "0", "no"):
+        return False
+    return default
+
+
+# Public alias
+get_env_bool = _get_env_bool
+
 # ─── Port configuration (issue #3742) ──────────────────────────────────────
 # Validated via ``_get_env_int`` so a non-numeric value in the environment
 # (e.g. a malformed .env file) falls back to the default instead of raising
