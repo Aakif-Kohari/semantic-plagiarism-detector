@@ -148,13 +148,14 @@ def _start_api_server():
 
     fastapi_app.add_middleware(ActivityMiddleware)
 
+    from src.core.app_config import API_PORT
+
     uvicorn.run(
         fastapi_app,
         host=os.getenv("API_HOST", "0.0.0.0"),
-        port=int(os.getenv("API_PORT", 8000)),
+        port=API_PORT,
         log_level="warning",
     )
-
 
 def init_api_server_daemon():
     """Ensure background REST API server is started once in a thread-safe manner."""

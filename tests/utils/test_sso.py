@@ -8,6 +8,7 @@ from src.utils.sso import (
     exchange_azure_code,
     exchange_github_code,
     exchange_google_code,
+    generate_pkce_pair,
     get_azure_auth_url,
     get_github_auth_url,
     get_google_auth_url,
@@ -24,10 +25,13 @@ def test_get_google_auth_url_missing_client_id(monkeypatch):
 
 def test_get_google_auth_url_success(monkeypatch):
     monkeypatch.setenv("GOOGLE_CLIENT_ID", "dummy_google_client_id")
-    url, state = get_google_auth_url()
+    url, state, state_data = get_google_auth_url()
     assert "dummy_google_client_id" in url
     assert "prompt=select_account" in url
+    assert "code_challenge=" in url
+    assert "code_challenge_method=S256" in url
     assert state.startswith("google_")
+    assert "code_verifier" in state_data
 
 
 def test_exchange_google_code_missing_client_id(monkeypatch):
@@ -128,7 +132,7 @@ def test_get_github_auth_url_missing_client_id(monkeypatch):
 
 def test_get_github_auth_url_success(monkeypatch):
     monkeypatch.setenv("GITHUB_CLIENT_ID", "dummy_github_client_id")
-    url, state = get_github_auth_url()
+    url, state, *rest = get_github_auth_url()
     assert "dummy_github_client_id" in url
     assert state.startswith("github_")
 
@@ -405,6 +409,52 @@ def test_exchange_github_code_rejects_login_with_no_public_email(mock_post, mock
 
     with pytest.raises(ValueError, match="GitHub login failed: A verified public email is required"):
         exchange_github_code("valid_code")
+
+
+@patch("src.utils.sso.requests.get")
+@patch("src.utils.sso.requests.post")
+def test_exchange_github_code_private_email_fallback_issue_3454(mock_post, mock_get, monkeypatch):
+    """Test Issue #3454: When user email is private (email is None), make secondary request to /user/emails and extract primary verified email."""
+    monkeypatch.setenv("GITHUB_CLIENT_ID", "dummy_client_id")
+    monkeypatch.setenv("GITHUB_CLIENT_SECRET", "dummy_secret")
+
+    mock_post.return_value.ok = True
+    mock_post.return_value.status_code = 200
+    mock_post.return_value.json.return_value = {"access_token": "github_token_123"}
+
+    # Response from GET /user (private email marked on GitHub -> email is None)
+    user_response = MagicMock()
+    user_response.ok = True
+    user_response.status_code = 200
+    user_response.json.return_value = {
+        "login": "private_user",
+        "email": None,
+        "name": "Private User",
+        "avatar_url": "https://example.com/avatar.png",
+    }
+
+    # Response from secondary GET /user/emails
+    emails_response = MagicMock()
+    emails_response.ok = True
+    emails_response.status_code = 200
+    emails_response.json.return_value = [
+        {"email": "unverified@example.com", "primary": False, "verified": False},
+        {"email": "primary_verified@example.com", "primary": True, "verified": True},
+        {"email": "secondary_verified@example.com", "primary": False, "verified": True},
+    ]
+
+    mock_get.side_effect = [user_response, emails_response]
+
+    profile, error_msg = exchange_github_code("valid_code")
+
+    assert error_msg is None
+    assert profile is not None
+    assert profile.email == "primary_verified@example.com"
+    assert profile.username == "private_user"
+    assert mock_get.call_count == 2
+    # Check secondary GET /user/emails call arguments
+    second_call_url = mock_get.call_args_list[1][0][0]
+    assert second_call_url == "https://api.github.com/user/emails"
 
 
 def test_get_azure_auth_url_missing_client_id(monkeypatch):

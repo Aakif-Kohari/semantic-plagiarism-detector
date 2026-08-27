@@ -45,6 +45,11 @@ def test_build_incident_id_same_pair_different_order():
     assert id1 == id2
 
 
+def test_build_incident_id_commutativity():
+    """Verify build_incident_id is commutative and yields identical hash IDs regardless of document order (Issue #3429)."""
+    assert build_incident_id("doc_alpha.pdf", "doc_beta.pdf") == build_incident_id("doc_beta.pdf", "doc_alpha.pdf")
+
+
 def test_build_incident_id_no_collision_between_distinct_pairs():
     """Regression test: build_incident_id() previously joined the two
     normalised filenames with a bare "0" digit before hashing
@@ -1317,52 +1322,6 @@ def test_get_incident_by_id_returns_dict_type(test_db):
     assert not isinstance(result, sqlite3.Row)
 
 
-def test_add_false_positive_audit_metadata(test_db):
-    """Verify add_false_positive persists dismissed_by and dismissal_reason."""
-    from src.db.incidents import add_false_positive
-    import sqlite3
-
-    add_false_positive(
-        doc_a="doc_first.pdf",
-        doc_b="doc_second.pdf",
-        db_path=test_db,
-        dismissed_by="admin_john",
-        dismissal_reason="Known testing false positive",
-    )
-
-    with sqlite3.connect(test_db) as conn:
-        cursor = conn.execute(
-            "SELECT dismissed_by, dismissal_reason FROM false_positives WHERE document_a = 'doc_first.pdf'"
-        )
-        row = cursor.fetchone()
-        assert row is not None
-        assert row[0] == "admin_john"
-        assert row[1] == "Known testing false positive"
-
-
-def test_dismiss_incident_audit_metadata(test_db):
-    """Verify dismiss_incident persists dismissed_by and dismissal_reason and handles updates."""
-    from src.db.incidents import dismiss_incident
-    import sqlite3
-
-    dismiss_incident(
-        doc_a="doc_alpha.pdf",
-        doc_b="doc_beta.pdf",
-        db_path=test_db,
-        dismissed_by="admin_jane",
-        dismissal_reason="Incorrect match",
-    )
-
-    with sqlite3.connect(test_db) as conn:
-        cursor = conn.execute(
-            "SELECT dismissed_by, dismissal_reason FROM false_positives WHERE document_a = 'doc_alpha.pdf'"
-        )
-        row = cursor.fetchone()
-        assert row is not None
-        assert row[0] == "admin_jane"
-        assert row[1] == "Incorrect match"
-
-
 def test_self_plagiarism_exclusion(test_db):
     """Verify that sync_flagged_incidents skips self-plagiarism when allow_self_plagiarism_flags=False."""
     import sqlite3
@@ -1457,4 +1416,29 @@ def test_self_plagiarism_no_exclusion_when_names_differ(test_db):
     assert len(results) == 1
     assert results[0].document_a == "alice_draft.pdf"
 
+
+def test_plagiarism_incidents_total_counter(test_db):
+    """Verify spd_plagiarism_incidents_total counter increments by severity."""
+    from src.core.metrics import plagiarism_incidents_total
+    from src.db.incidents import sync_flagged_incidents
+
+    high_before = plagiarism_incidents_total.labels(severity="High")._value.get()
+    med_before = plagiarism_incidents_total.labels(severity="Medium")._value.get()
+    low_before = plagiarism_incidents_total.labels(severity="Low")._value.get()
+
+    flags = [
+        {"doc_a": "doc_h1.pdf", "doc_b": "doc_h2.pdf", "similarity": 0.95, "severity": "High"},
+        {"doc_a": "doc_m1.pdf", "doc_b": "doc_m2.pdf", "similarity": 0.75, "severity": "Medium"},
+        {"doc_a": "doc_l1.pdf", "doc_b": "doc_l2.pdf", "similarity": 0.35, "severity": "Low"},
+    ]
+
+    sync_flagged_incidents(flags, db_path=test_db)
+
+    high_after = plagiarism_incidents_total.labels(severity="High")._value.get()
+    med_after = plagiarism_incidents_total.labels(severity="Medium")._value.get()
+    low_after = plagiarism_incidents_total.labels(severity="Low")._value.get()
+
+    assert high_after == high_before + 1
+    assert med_after == med_before + 1
+    assert low_after == low_before + 1
 

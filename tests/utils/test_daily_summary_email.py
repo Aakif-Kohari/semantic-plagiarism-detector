@@ -4,6 +4,7 @@ test_daily_summary_email.py
 Tests for daily summary email functionality and HTML template generation.
 """
 
+import html
 import re
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
@@ -1410,5 +1411,357 @@ class TestIncidentCsvAttachment:
         assert len(lines) == 51  # Header + 50 rows
         for i in range(50):
             assert f"INC-{i:03d}" in csv_text
+
+
+# ---------------------------------------------------------------------------
+# Unit tests for SMTP port number range validation and fallback (#3446)
+# ---------------------------------------------------------------------------
+
+
+class TestSmtpPortValidation:
+    """Test suite verifying validation of SMTP_PORT range (1 <= port <= 65535) and fallback (#3446)."""
+
+    @patch("smtplib.SMTP")
+    def test_smtp_port_valid_boundary_ports(self, mock_smtp):
+        """Verify valid ports across range boundaries (1, 25, 587, 65535) are accepted as-is."""
+        mock_server = MagicMock()
+        mock_smtp.return_value.__enter__.return_value = mock_server
+
+        valid_ports = [1, 25, 80, 465, 587, 2525, 8080, 65535]
+        for port in valid_ports:
+            mock_smtp.reset_mock()
+            with patch.dict(
+                "os.environ",
+                {
+                    "SMTP_SERVER": "smtp.example.com",
+                    "SMTP_PORT": str(port),
+                    "SMTP_USERNAME": "user@example.com",
+                    "SMTP_PASSWORD": "password",
+                },
+            ):
+                if port == 465:
+                    with patch("smtplib.SMTP_SSL") as mock_ssl:
+                        mock_ssl.return_value.__enter__.return_value = mock_server
+                        res = send_email(["admin@example.com"], "Test", "<p>Body</p>")
+                        assert res is True
+                        mock_ssl.assert_called_once_with("smtp.example.com", 465, timeout=10.0)
+                else:
+                    res = send_email(["admin@example.com"], "Test", "<p>Body</p>")
+                    assert res is True
+                    mock_smtp.assert_called_once_with("smtp.example.com", port, timeout=10.0)
+
+    @pytest.mark.parametrize(
+        "invalid_port",
+        [
+            "-1",
+            "0",
+            "65536",
+            "999999",
+            "-587",
+            "100000",
+        ],
+    )
+    @patch("smtplib.SMTP")
+    def test_smtp_port_out_of_range_falls_back_to_587(self, mock_smtp, invalid_port):
+        """Verify out-of-range ports (< 1 or > 65535) log a warning and fall back to 587."""
+        mock_server = MagicMock()
+        mock_smtp.return_value.__enter__.return_value = mock_server
+
+        with patch("src.utils.daily_summary_email.logger.warning") as mock_warn, patch.dict(
+            "os.environ",
+            {
+                "SMTP_SERVER": "smtp.example.com",
+                "SMTP_PORT": invalid_port,
+                "SMTP_USERNAME": "user@example.com",
+                "SMTP_PASSWORD": "password",
+            },
+        ):
+            res = send_email(["admin@example.com"], "Test", "<p>Body</p>")
+            assert res is True
+            mock_smtp.assert_called_once_with("smtp.example.com", 587, timeout=10.0)
+            assert any(
+                "out of range" in str(call_args) or "Invalid SMTP_PORT" in str(call_args)
+                for call_args in mock_warn.call_args_list
+            )
+
+    @pytest.mark.parametrize(
+        "non_integer_port",
+        [
+            "invalid_string",
+            "five_eight_seven",
+            "587a",
+            "port587",
+            "12.34",
+            "None",
+            "null",
+            "",
+            "   ",
+        ],
+    )
+    @patch("smtplib.SMTP")
+    def test_smtp_port_non_integer_falls_back_to_587(self, mock_smtp, non_integer_port):
+        """Verify non-integer string ports log a warning and fall back to 587."""
+        mock_server = MagicMock()
+        mock_smtp.return_value.__enter__.return_value = mock_server
+
+        with patch("src.utils.daily_summary_email.logger.warning") as mock_warn, patch.dict(
+            "os.environ",
+            {
+                "SMTP_SERVER": "smtp.example.com",
+                "SMTP_PORT": non_integer_port,
+                "SMTP_USERNAME": "user@example.com",
+                "SMTP_PASSWORD": "password",
+            },
+        ):
+            res = send_email(["admin@example.com"], "Test", "<p>Body</p>")
+            assert res is True
+            mock_smtp.assert_called_once_with("smtp.example.com", 587, timeout=10.0)
+            assert any(
+                "Invalid" in str(call_args) and "SMTP_PORT" in str(call_args)
+                for call_args in mock_warn.call_args_list
+            )
+
+    @patch("smtplib.SMTP")
+    def test_smtp_port_whitespace_padded_integer(self, mock_smtp):
+        """Verify whitespace padded valid port string '  587  ' is parsed properly."""
+        mock_server = MagicMock()
+        mock_smtp.return_value.__enter__.return_value = mock_server
+
+        with patch.dict(
+            "os.environ",
+            {
+                "SMTP_SERVER": "smtp.example.com",
+                "SMTP_PORT": "  2525  ",
+                "SMTP_USERNAME": "user@example.com",
+                "SMTP_PASSWORD": "password",
+            },
+        ):
+            res = send_email(["admin@example.com"], "Test", "<p>Body</p>")
+            assert res is True
+            mock_smtp.assert_called_once_with("smtp.example.com", 2525, timeout=10.0)
+
+    @patch("smtplib.SMTP")
+    def test_send_daily_summary_with_invalid_smtp_port_falls_back(self, mock_smtp):
+        """Verify send_daily_summary end-to-end flow with invalid SMTP_PORT=999999 completes without crashing."""
+        with patch("src.utils.daily_summary_email.get_admin_emails") as mock_admins, \
+             patch("src.utils.daily_summary_email.get_incidents_last_24h") as mock_incidents, \
+             patch("src.utils.daily_summary_email.logger.warning") as mock_warn, \
+             patch.dict(
+                 "os.environ",
+                 {
+                     "SMTP_SERVER": "smtp.example.com",
+                     "SMTP_PORT": "999999",
+                     "SMTP_USERNAME": "user@example.com",
+                     "SMTP_PASSWORD": "password",
+                 },
+             ):
+            mock_admins.return_value = ["admin@example.com"]
+            mock_incidents.return_value = []
+            mock_server = MagicMock()
+            mock_smtp.return_value.__enter__.return_value = mock_server
+
+            result = send_daily_summary()
+            assert result is True
+            mock_smtp.assert_called_once_with("smtp.example.com", 587, timeout=10.0)
+            assert any("out of range" in str(call) for call in mock_warn.call_args_list)
+
+    @patch("smtplib.SMTP")
+    def test_smtp_port_unhandled_exception_prevented_on_startup(self, mock_smtp):
+        """Verify startup does not raise unhandled ValueError or TypeError when bad port provided."""
+        mock_server = MagicMock()
+        mock_smtp.return_value.__enter__.return_value = mock_server
+
+        for malformed in ["bad_port_string", "-99999", "65536", ""]:
+            with patch.dict(
+                "os.environ",
+                {
+                    "SMTP_SERVER": "smtp.example.com",
+                    "SMTP_PORT": malformed,
+                    "SMTP_USERNAME": "user@example.com",
+                    "SMTP_PASSWORD": "password",
+                },
+            ):
+                try:
+                    res = send_email(["admin@example.com"], "Subject", "<p>Body</p>")
+                    assert res is True
+                except Exception as exc:
+                    pytest.fail(f"Unhandled exception raised for SMTP_PORT={malformed}: {exc}")
+
+    @pytest.mark.parametrize(
+        "port_candidate,expected_port",
+        [
+            ("1", 1),
+            ("25", 25),
+            ("80", 80),
+            ("110", 110),
+            ("143", 143),
+            ("465", 465),
+            ("587", 587),
+            ("993", 993),
+            ("995", 995),
+            ("2525", 2525),
+            ("8080", 8080),
+            ("65534", 65534),
+            ("65535", 65535),
+            ("-1", 587),
+            ("-587", 587),
+            ("0", 587),
+            ("65536", 587),
+            ("70000", 587),
+            ("100000", 587),
+            ("999999", 587),
+            ("999999999999", 587),
+            ("smtp_port_placeholder", 587),
+            ("587.0", 587),
+            ("0x24B", 587),
+            ("True", 587),
+            ("False", 587),
+        ],
+    )
+    @patch("smtplib.SMTP")
+    def test_smtp_port_matrix_validation_and_fallback(self, mock_smtp, port_candidate, expected_port):
+        """Verify complete validation matrix for integer, out-of-range, and malformed port strings."""
+        mock_server = MagicMock()
+        mock_smtp.return_value.__enter__.return_value = mock_server
+
+        with patch.dict(
+            "os.environ",
+            {
+                "SMTP_SERVER": "smtp.example.com",
+                "SMTP_PORT": port_candidate,
+                "SMTP_USERNAME": "user@example.com",
+                "SMTP_PASSWORD": "password",
+            },
+        ):
+            if expected_port == 465:
+                with patch("smtplib.SMTP_SSL") as mock_ssl:
+                    mock_ssl.return_value.__enter__.return_value = mock_server
+                    res = send_email(["recipient@example.com"], "Test", "<p>Body</p>")
+                    assert res is True
+                    mock_ssl.assert_called_once_with("smtp.example.com", 465, timeout=10.0)
+            else:
+                res = send_email(["recipient@example.com"], "Test", "<p>Body</p>")
+                assert res is True
+                mock_smtp.assert_called_once_with("smtp.example.com", expected_port, timeout=10.0)
+
+    @patch("smtplib.SMTP")
+    def test_smtp_port_fallback_warning_message_formatting(self, mock_smtp):
+        """Verify warning message contents clearly state the invalid port and fallback port."""
+        mock_server = MagicMock()
+        mock_smtp.return_value.__enter__.return_value = mock_server
+
+        with patch("src.utils.daily_summary_email.logger.warning") as mock_warn, patch.dict(
+            "os.environ",
+            {
+                "SMTP_SERVER": "smtp.example.com",
+                "SMTP_PORT": "123456",
+                "SMTP_USERNAME": "user@example.com",
+                "SMTP_PASSWORD": "password",
+            },
+        ):
+            send_email(["recipient@example.com"], "Test", "<p>Body</p>")
+            mock_warn.assert_called_once()
+            log_msg = mock_warn.call_args[0][0] % (mock_warn.call_args[0][1],)
+            assert "123456" in log_msg
+            assert "587" in log_msg
+            assert "out of range" in log_msg
+
+    @patch("smtplib.SMTP")
+    def test_smtp_port_none_env_defaults_to_587(self, mock_smtp):
+        """Verify when SMTP_PORT is not present in os.environ, default 587 is used without warnings."""
+        mock_server = MagicMock()
+        mock_smtp.return_value.__enter__.return_value = mock_server
+
+        with patch("src.utils.daily_summary_email.logger.warning") as mock_warn, patch.dict(
+            "os.environ",
+            {
+                "SMTP_SERVER": "smtp.example.com",
+                "SMTP_USERNAME": "user@example.com",
+                "SMTP_PASSWORD": "password",
+            },
+            clear=True,
+        ):
+            send_email(["recipient@example.com"], "Test", "<p>Body</p>")
+            mock_smtp.assert_called_once_with("smtp.example.com", 587, timeout=10.0)
+            mock_warn.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "invalid_port_input",
+        [
+            "-99999",
+            "9999999",
+            "NaN",
+            "port_invalid",
+            "587_000",
+            "###",
+        ],
+    )
+    @patch("smtplib.SMTP")
+    def test_send_daily_summary_invalid_port_variations(self, mock_smtp, invalid_port_input):
+        """Verify send_daily_summary executes gracefully without exception across various invalid port strings."""
+        with patch("src.utils.daily_summary_email.get_admin_emails") as mock_admins, \
+             patch("src.utils.daily_summary_email.get_incidents_last_24h") as mock_incidents, \
+             patch.dict(
+                 "os.environ",
+                 {
+                     "SMTP_SERVER": "smtp.example.com",
+                     "SMTP_PORT": invalid_port_input,
+                     "SMTP_USERNAME": "user@example.com",
+                     "SMTP_PASSWORD": "password",
+                 },
+             ):
+            mock_admins.return_value = ["admin@example.com"]
+            mock_incidents.return_value = []
+            mock_server = MagicMock()
+            mock_smtp.return_value.__enter__.return_value = mock_server
+
+            result = send_daily_summary()
+            assert result is True
+            mock_smtp.assert_called_once_with("smtp.example.com", 587, timeout=10.0)
+
+    @patch("smtplib.SMTP")
+    def test_smtp_port_float_string_fallback(self, mock_smtp):
+        """Verify floating point string '587.5' triggers integer conversion fallback and warning."""
+        mock_server = MagicMock()
+        mock_smtp.return_value.__enter__.return_value = mock_server
+
+        with patch("src.utils.daily_summary_email.logger.warning") as mock_warn, patch.dict(
+            "os.environ",
+            {
+                "SMTP_SERVER": "smtp.example.com",
+                "SMTP_PORT": "587.5",
+                "SMTP_USERNAME": "user@example.com",
+                "SMTP_PASSWORD": "password",
+            },
+        ):
+            res = send_email(["recipient@example.com"], "Test", "<p>Body</p>")
+            assert res is True
+            mock_smtp.assert_called_once_with("smtp.example.com", 587, timeout=10.0)
+            mock_warn.assert_called_once()
+            assert "Invalid non-integer SMTP_PORT" in mock_warn.call_args[0][0]
+
+    @patch("smtplib.SMTP")
+    def test_smtp_port_zero_fallback(self, mock_smtp):
+        """Verify port 0 (reserved/invalid) logs out-of-range warning and defaults to 587."""
+        mock_server = MagicMock()
+        mock_smtp.return_value.__enter__.return_value = mock_server
+
+        with patch("src.utils.daily_summary_email.logger.warning") as mock_warn, patch.dict(
+            "os.environ",
+            {
+                "SMTP_SERVER": "smtp.example.com",
+                "SMTP_PORT": "0",
+                "SMTP_USERNAME": "user@example.com",
+                "SMTP_PASSWORD": "password",
+            },
+        ):
+            res = send_email(["recipient@example.com"], "Test", "<p>Body</p>")
+            assert res is True
+            mock_smtp.assert_called_once_with("smtp.example.com", 587, timeout=10.0)
+            mock_warn.assert_called_once()
+            assert "out of range" in mock_warn.call_args[0][0]
+
+
+
 
 

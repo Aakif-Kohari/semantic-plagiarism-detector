@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import io
+import logging
 import math
 import os
 import sqlite3
@@ -20,10 +21,13 @@ from src.core.config import (
     normalize_severity_label,
     severity_from_score,
 )
+from src.core.metrics import plagiarism_incidents_total
 from src.db.base import BaseRepository
 from src.db.migrations import migrate_corpus_database, table_exists
 from src.db.migrations.common import column_exists
 from src.db.schemas import MatchResult
+
+logger = logging.getLogger(__name__)
 
 # Seed the incidents default DB path from the centralized app_config.
 # ``DEFAULT_DB_PATH`` is intentionally kept as a module-level constant so
@@ -261,7 +265,7 @@ def _fetch_all_incidents(
 
     return [
         MatchResult(
-            incident_id=_parse_incident_id(row["incident_id"]),
+            incident_id=row["incident_id"],
             document_a=row["document_a"],
             document_b=row["document_b"],
             similarity_score=row["similarity_score"],
@@ -374,6 +378,10 @@ def sync_flagged_incidents(
                 conn.commit()
                 get_recent_incidents.cache_clear()
 
+                for record in bulk_records:
+                    sev = str(record[4] or "Medium")
+                    plagiarism_incidents_total.labels(severity=sev).inc()
+
             rows = conn.execute("""
                 SELECT pi.incident_id, pi.document_a, pi.document_b,
                        pi.similarity_score, pi.severity_rank,
@@ -389,7 +397,7 @@ def sync_flagged_incidents(
 
             return [
                 MatchResult(
-                    incident_id=_parse_incident_id(row["incident_id"]),
+                    incident_id=row["incident_id"],
                     document_a=row["document_a"],
                     document_b=row["document_b"],
                     similarity_score=row["similarity_score"],
@@ -499,6 +507,7 @@ def get_incident_by_id(
     if db_path is None:
         db_path = DEFAULT_DB_PATH
     init_incident_db(db_path)
+    alt_id = f"INC-{hex(incident_id)[2:].upper()}" if isinstance(incident_id, int) else str(incident_id)
     with closing(_get_connection(db_path)) as conn:
         conn.row_factory = sqlite3.Row
         row = conn.execute(
@@ -510,11 +519,11 @@ def get_incident_by_id(
             FROM plagiarism_incidents pi
             LEFT JOIN documents da ON pi.document_a = da.filename
             LEFT JOIN documents db ON pi.document_b = db.filename
-            WHERE (pi.incident_id = ? OR pi.incident_id = ?)
+            WHERE (pi.incident_id = ? OR pi.incident_id = ? OR pi.incident_id = ?)
               AND (da.is_deleted IS NULL OR da.is_deleted = 0)
               AND (db.is_deleted IS NULL OR db.is_deleted = 0)
             """,
-            (incident_id, str(incident_id)),
+            (incident_id, str(incident_id), alt_id),
         ).fetchone()
 
         if row is None:
@@ -794,11 +803,13 @@ def update_review_status(
 
     init_incident_db(db_path)
 
+    alt_id = f"INC-{hex(incident_id)[2:].upper()}" if isinstance(incident_id, int) else str(incident_id)
+
     with closing(sqlite3.connect(str(db_path))) as conn:
         try:
             cursor = conn.execute(
-                "UPDATE plagiarism_incidents SET review_status = ? WHERE incident_id = ?",
-                (status, str(incident_id).strip()),
+                "UPDATE plagiarism_incidents SET review_status = ? WHERE (incident_id = ? OR incident_id = ? OR incident_id = ?)",
+                (status, incident_id, str(incident_id).strip(), alt_id),
             )
 
             conn.commit()

@@ -5,6 +5,7 @@ Scheduled task to aggregate daily plagiarism incidents and send a summary email 
 Features modular, inline-CSS styled HTML template generation for maximum email client compatibility.
 """
 
+import html
 import logging
 import os
 import re
@@ -101,24 +102,30 @@ def build_incident_row_html(inc: dict[str, Any]) -> str:
     Returns:
         str: HTML <tr> element with inline styles.
     """
-    doc_a = inc.get("document_a", "Unknown")
-    doc_b = inc.get("document_b", "Unknown")
+    doc_a = str(inc.get("document_a", "Unknown"))
+    doc_b = str(inc.get("document_b", "Unknown"))
     similarity = inc.get("similarity_score", 0.0)
-    date_flagged = inc.get("date_flagged", "Unknown")
+    date_flagged = str(inc.get("date_flagged", "Unknown"))
     incident_id = inc.get("incident_id")
     app_base_url = os.getenv("APP_BASE_URL", "http://localhost:8501").rstrip("/")
 
+    # Issue #3442: Wrap filenames and user-controllable text in html.escape to prevent HTML injection / XSS in email clients
+    escaped_doc_a = html.escape(doc_a)
+    escaped_doc_b = html.escape(doc_b)
+    escaped_date_flagged = html.escape(date_flagged)
+
     if incident_id:
-        doc_a_display = f'<a href="{app_base_url}/incident/{incident_id}" style="color: #007bff; text-decoration: none;">{doc_a}</a>'
+        escaped_incident_id = html.escape(str(incident_id))
+        doc_a_display = f'<a href="{app_base_url}/incident/{escaped_incident_id}" style="color: #007bff; text-decoration: none;">{escaped_doc_a}</a>'
     else:
-        doc_a_display = doc_a
+        doc_a_display = escaped_doc_a
 
     return f"""
     <tr>
         <td style="padding: 12px; border-bottom: 1px solid #eeeeee; color: #333333;">{doc_a_display}</td>
-        <td style="padding: 12px; border-bottom: 1px solid #eeeeee; color: #333333;">{doc_b}</td>
+        <td style="padding: 12px; border-bottom: 1px solid #eeeeee; color: #333333;">{escaped_doc_b}</td>
         <td style="padding: 12px; border-bottom: 1px solid #eeeeee; color: #333333; font-weight: bold;">{similarity:.2%}</td>
-        <td style="padding: 12px; border-bottom: 1px solid #eeeeee; color: #666666;">{date_flagged}</td>
+        <td style="padding: 12px; border-bottom: 1px solid #eeeeee; color: #666666;">{escaped_date_flagged}</td>
     </tr>
     """
 
@@ -299,8 +306,8 @@ def generate_daily_summary_html(stats: dict[str, Any]) -> str:
     # Build top pairs HTML rows
     top_pairs_html = ""
     for pair in top_pairs[:5]:  # Limit to top 5
-        doc_a = pair.get("doc_a", "Unknown")
-        doc_b = pair.get("doc_b", "Unknown")
+        doc_a = html.escape(str(pair.get("doc_a", "Unknown")))
+        doc_b = html.escape(str(pair.get("doc_b", "Unknown")))
         similarity = pair.get("similarity", 0.0)
 
         top_pairs_html += f"""
@@ -512,10 +519,41 @@ def send_email(
         raise ValueError(f"Invalid reply-to email address: {reply_to}")
 
     smtp_server = os.getenv("SMTP_SERVER")
-    smtp_port = int(os.getenv("SMTP_PORT", "587"))
+    
+    # Issue #3446: Validate SMTP port number range (1 <= port <= 65535) with fallback to default 587
+    raw_smtp_port = os.getenv("SMTP_PORT", "587")
+    try:
+        smtp_port = int(raw_smtp_port)
+        if not (1 <= smtp_port <= 65535):
+            logger.warning(
+                "Invalid SMTP_PORT '%s' out of range (1-65535). Falling back to default port 587.",
+                raw_smtp_port,
+            )
+            smtp_port = 587
+    except (ValueError, TypeError):
+        logger.warning(
+            "Invalid non-integer SMTP_PORT '%s'. Falling back to default port 587.",
+            raw_smtp_port,
+        )
+        smtp_port = 587
+
     smtp_username = os.getenv("SMTP_USERNAME")
     smtp_password = os.getenv("SMTP_PASSWORD")
     from_email = os.getenv("FROM_EMAIL", smtp_username)
+
+    # Issue #3443: Support explicit SSL/TLS configuration toggles
+    smtp_use_ssl_env = os.getenv("SMTP_USE_SSL")
+    smtp_use_tls_env = os.getenv("SMTP_USE_TLS")
+
+    if smtp_use_ssl_env is not None:
+        use_ssl = smtp_use_ssl_env.lower().strip() in ("true", "1", "yes", "on")
+    else:
+        use_ssl = smtp_port == 465
+
+    if smtp_use_tls_env is not None:
+        use_tls = smtp_use_tls_env.lower().strip() in ("true", "1", "yes", "on")
+    else:
+        use_tls = not use_ssl
 
     if not all([smtp_server, smtp_username, smtp_password]):
         msg = "SMTP configuration incomplete. Please set SMTP_SERVER, SMTP_USERNAME, and SMTP_PASSWORD."
@@ -557,7 +595,7 @@ def send_email(
                 )
                 msg_obj.attach(attachment)
 
-            if smtp_port == 465:
+            if use_ssl:
                 logger.debug(
                     "Using SMTP_SSL (implicit SSL) on port %d with timeout %.1fs (attempt %d/%d)",
                     smtp_port,
@@ -572,14 +610,16 @@ def send_email(
                     server.send_message(msg_obj)
             else:
                 logger.debug(
-                    "Using SMTP with STARTTLS on port %d with timeout %.1fs (attempt %d/%d)",
+                    "Using SMTP (STARTTLS=%s) on port %d with timeout %.1fs (attempt %d/%d)",
+                    use_tls,
                     smtp_port,
                     timeout,
                     attempt + 1,
                     max_retries + 1,
                 )
                 with smtplib.SMTP(smtp_server, smtp_port, timeout=timeout) as server:
-                    server.starttls()
+                    if use_tls:
+                        server.starttls()
                     server.login(smtp_username, smtp_password)
                     server.send_message(msg_obj)
 
