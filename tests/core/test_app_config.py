@@ -7,11 +7,13 @@ import pytest
 from src.core.app_config import (
     DEFAULT_APP_TITLE,
     BrandingConfig,
+    _get_env_bool,
     clear_branding_config_cache,
     get_api_support_contact,
     get_app_title,
     get_backup_idle_timeout,
     get_branding_config,
+    get_env_bool,
     get_lock_timeout,
     load_branding_config,
 )
@@ -377,4 +379,45 @@ def test_get_backup_idle_timeout_zero_logs_warning_and_defaults_to_30(
 
     assert result == 30 * 60
     assert "Invalid backup timeout 0, defaulting to 30" in caplog.text
+
+
+# ---------------------------------------------------------------------------
+# Tests for _get_env_bool / get_env_bool (Issue #3744)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "val",
+    ["1", "true", "TRUE", "True", "yes", "YES", "Yes", "on", "ON", "  true  ", " 1 "],
+)
+def test_get_env_bool_truthy_values(monkeypatch, val):
+    monkeypatch.setenv("TEST_FLAG", val)
+    assert _get_env_bool("TEST_FLAG") is True
+    assert get_env_bool("TEST_FLAG") is True
+
+
+@pytest.mark.parametrize(
+    "val",
+    ["0", "false", "FALSE", "False", "no", "NO", "off", "OFF", "random_string", "none"],
+)
+def test_get_env_bool_falsy_values(monkeypatch, val):
+    monkeypatch.setenv("TEST_FLAG", val)
+    assert _get_env_bool("TEST_FLAG", default=True) is False
+    assert get_env_bool("TEST_FLAG", default=True) is False
+
+
+def test_get_env_bool_unset_uses_default(monkeypatch):
+    monkeypatch.delenv("TEST_FLAG", raising=False)
+    assert _get_env_bool("TEST_FLAG", default=False) is False
+    assert _get_env_bool("TEST_FLAG", default=True) is True
+
+
+def test_get_env_bool_empty_or_whitespace_uses_default(monkeypatch):
+    monkeypatch.setenv("TEST_FLAG", "")
+    assert _get_env_bool("TEST_FLAG", default=False) is False
+    assert _get_env_bool("TEST_FLAG", default=True) is True
+
+    monkeypatch.setenv("TEST_FLAG", "   ")
+    assert _get_env_bool("TEST_FLAG", default=False) is False
+    assert _get_env_bool("TEST_FLAG", default=True) is True
 

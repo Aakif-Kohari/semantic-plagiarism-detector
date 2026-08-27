@@ -51,6 +51,36 @@ DEFAULT_PDF_FOOTER_TEXT: Final[str] = ""
 DEFAULT_VALID_ROLES: Final[set[str]] = {"admin", "teacher"}
 
 
+_TRUTHY_ENV_STRINGS: Final[set[str]] = {"1", "true", "yes", "on"}
+
+
+def _get_env_bool(key: str, default: bool = False) -> bool:
+    """Strictly parse a boolean environment variable.
+
+    Checks the environment variable identified by ``key`` against truthy values
+    ``{"1", "true", "yes", "on"}`` (case-insensitive and stripped of whitespace).
+    If the variable is not set or empty, returns ``default``.
+
+    Args:
+        key: The environment variable name.
+        default: Default boolean returned if variable is unset or blank.
+
+    Returns:
+        bool: Parsed boolean value.
+    """
+    raw = os.getenv(key)
+    if raw is None:
+        return default
+    cleaned = raw.strip().lower()
+    if not cleaned:
+        return default
+    return cleaned in _TRUTHY_ENV_STRINGS
+
+
+# Public alias
+get_env_bool = _get_env_bool
+
+
 def get_valid_roles() -> set[str]:
     """Return the set of valid user roles.
 
