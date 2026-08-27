@@ -1,5 +1,7 @@
 # src/utils/sso.py
 
+import base64
+import hashlib
 import logging
 import os
 import re
@@ -10,12 +12,33 @@ from typing import Optional, Tuple, Dict, Any
 from dataclasses import dataclass
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util import Retry
 from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
 
 # State expiration constant - 10 minutes
 STATE_EXPIRATION_SECONDS = 600
+
+
+def _get_oauth_session() -> requests.Session:
+    """Create and return a requests.Session configured with retry logic for transient errors.
+
+    Acceptance Criteria (Issue #3455):
+    - Uses urllib3.util.Retry(total=3, backoff_factor=0.5, status_forcelist=[500, 502, 503, 504])
+    """
+    session = requests.Session()
+    retries = Retry(
+        total=3,
+        backoff_factor=0.5,
+        status_forcelist=[500, 502, 503, 504],
+        raise_on_status=False,  # Keep status code responses accessible so we can log/handle them.
+    )
+    adapter = HTTPAdapter(max_retries=retries)
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+    return session
 
 
 @dataclass
@@ -88,6 +111,22 @@ def verify_sso_state(state: str, stored_state: Dict[str, Any]) -> Tuple[bool, Op
     return True, None
 
 
+def generate_pkce_pair() -> Tuple[str, str]:
+    """Generate a PKCE code_verifier and code_challenge pair.
+
+    Uses ``secrets.token_urlsafe(32)`` for the verifier and SHA-256 with
+    base64url encoding (no padding) for the challenge, as specified by
+    RFC 7636.
+
+    Returns:
+        tuple[str, str]: (code_verifier, code_challenge)
+    """
+    code_verifier = secrets.token_urlsafe(32)
+    digest = hashlib.sha256(code_verifier.encode("ascii")).digest()
+    code_challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+    return code_verifier, code_challenge
+
+
 def get_google_auth_url() -> Tuple[str, str, Dict[str, Any]]:
     """
     Return the Google OAuth authorization URL, state, and state data.
@@ -102,12 +141,16 @@ def get_google_auth_url() -> Tuple[str, str, Dict[str, Any]]:
     
     redirect_uri = _get_redirect_uri()
     state = f"google_{secrets.token_urlsafe(16)}"
+
+    # PKCE: generate code_verifier / code_challenge pair (Issue #3453)
+    code_verifier, code_challenge = generate_pkce_pair()
     
     # Create state data with timestamp for expiration checking
     state_data = {
         "token": state,
         "created_at": time.time(),
-        "provider": "google"
+        "provider": "google",
+        "code_verifier": code_verifier,
     }
 
     try:
@@ -116,13 +159,17 @@ def get_google_auth_url() -> Tuple[str, str, Dict[str, Any]]:
     except Exception as e:
         logger.warning(f"Failed to store Google SSO state parameter: {e}")
 
+    google_scopes = os.getenv("GOOGLE_OAUTH_SCOPES", "email profile")
+
     query_params = {
         "response_type": "code",
         "client_id": client_id,
         "redirect_uri": redirect_uri,
-        "scope": "email profile",
+        "scope": google_scopes,
         "state": state,
         "prompt": "select_account",
+        "code_challenge": code_challenge,
+        "code_challenge_method": "S256",
     }
 
     encoded_args = urllib.parse.urlencode(query_params)
@@ -131,9 +178,16 @@ def get_google_auth_url() -> Tuple[str, str, Dict[str, Any]]:
     return url, state, state_data
 
 
-def exchange_google_code(code: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
-def exchange_google_code(code: str, state: str | None = None) -> tuple[SSOUserProfile | None, str | None]:
-    """Exchange code for access token and fetch user info."""
+def exchange_google_code(code: str, state: str | None = None, code_verifier: str | None = None) -> tuple[SSOUserProfile | None, str | None]:
+    """Exchange code for access token and fetch user info.
+
+    Args:
+        code: The authorization code from the OAuth callback.
+        state: Optional CSRF state token for validation.
+        code_verifier: Optional PKCE code_verifier (Issue #3453).  When
+            supplied, it is included in the token exchange request so that
+            Google can verify the proof key.
+    """
     if state is not None:
         if not verify_sso_state(state):
             return None, "Invalid or expired SSO state parameter (CSRF protection failed)."
@@ -147,16 +201,24 @@ def exchange_google_code(code: str, state: str | None = None) -> tuple[SSOUserPr
         raise ValueError("GOOGLE_CLIENT_SECRET environment variable is not configured")
     redirect_uri = _get_redirect_uri()
 
+    token_data = {
+        "code": code,
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "redirect_uri": redirect_uri,
+        "grant_type": "authorization_code",
+    }
+    # PKCE: include code_verifier in token exchange (Issue #3453)
+    if code_verifier is not None:
+        token_data["code_verifier"] = code_verifier
+
+    # Setup retrying OAuth session
+    session = _get_oauth_session()
+
     try:
-        token_resp = requests.post(
+        token_resp = session.post(
             "https://oauth2.googleapis.com/token",
-            data={
-                "code": code,
-                "client_id": client_id,
-                "client_secret": client_secret,
-                "redirect_uri": redirect_uri,
-                "grant_type": "authorization_code",
-            },
+            data=token_data,
             timeout=10,
         )
     except requests.Timeout:
@@ -177,7 +239,7 @@ def exchange_google_code(code: str, state: str | None = None) -> tuple[SSOUserPr
         return None, "Invalid or expired SSO authorization code"
 
     try:
-        user_info_resp = requests.get(
+        user_info_resp = session.get(
             "https://www.googleapis.com/oauth2/v2/userinfo",
             headers={"Authorization": f"Bearer {access_token}"},
             timeout=10,
@@ -273,10 +335,12 @@ def get_github_auth_url() -> Tuple[str, str, Dict[str, Any]]:
     except Exception as e:
         logger.warning(f"Failed to store GitHub SSO state parameter: {e}")
 
+    github_scopes = os.getenv("GITHUB_OAUTH_SCOPES", "user:email")
+
     query_params = {
         "client_id": client_id,
         "redirect_uri": redirect_uri,
-        "scope": "user:email",
+        "scope": github_scopes,
         "state": state,
     }
 
@@ -286,7 +350,6 @@ def get_github_auth_url() -> Tuple[str, str, Dict[str, Any]]:
     return url, state, state_data
 
 
-def exchange_github_code(code: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
 def exchange_github_code(code: str, state: str | None = None) -> tuple[SSOUserProfile | None, str | None]:
     """Exchange code for access token and fetch user info."""
     if state is not None:
@@ -299,11 +362,14 @@ def exchange_github_code(code: str, state: str | None = None) -> tuple[SSOUserPr
         raise ValueError("GITHUB_CLIENT_ID environment variable is not configured")
     client_secret = os.getenv("GITHUB_CLIENT_SECRET")
     if not client_secret:
-        raise ValueError("GITHUB_CLIENT_SECRET environment variable is not configured")
+        raise ValueError("GOOGLE_CLIENT_SECRET environment variable is not configured")
     redirect_uri = _get_redirect_uri()
 
+    # Setup retrying OAuth session
+    session = _get_oauth_session()
+
     try:
-        token_resp = requests.post(
+        token_resp = session.post(
             "https://github.com/login/oauth/access_token",
             data={
                 "client_id": client_id,
@@ -336,7 +402,7 @@ def exchange_github_code(code: str, state: str | None = None) -> tuple[SSOUserPr
         return None, "Invalid or expired SSO authorization code"
 
     try:
-        user_info_resp = requests.get(
+        user_info_resp = session.get(
             "https://api.github.com/user",
             headers={"Authorization": f"Bearer {access_token}"},
             timeout=10,
@@ -362,7 +428,7 @@ def exchange_github_code(code: str, state: str | None = None) -> tuple[SSOUserPr
     # GitHub might not return email in /user if it's private, fetch explicitly
     if not user_data.get("email"):
         try:
-            emails_resp = requests.get(
+            emails_resp = session.get(
                 "https://api.github.com/user/emails",
                 headers={"Authorization": f"Bearer {access_token}"},
                 timeout=10,
@@ -397,7 +463,13 @@ def exchange_github_code(code: str, state: str | None = None) -> tuple[SSOUserPr
         # We raise a ValueError to reject login with message requesting a public email.
         raise ValueError("GitHub login failed: A verified public email is required. Please update your GitHub settings.")
 
-    return user_data, None
+    profile = SSOUserProfile(
+        email=user_data["email"],
+        username=user_data.get("login", ""),
+        name=user_data.get("name", ""),
+        avatar=user_data.get("avatar_url", "")
+    )
+    return profile, None
 
 
 def create_state_token(provider: str) -> Tuple[str, Dict[str, Any]]:
@@ -443,13 +515,6 @@ def cleanup_expired_states(states: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[
         logger.info(f"Cleaned up {expired_count} expired OAuth state tokens")
     
     return valid_states
-    profile = SSOUserProfile(
-        email=user_data["email"],
-        username=user_data.get("login", ""),
-        name=user_data.get("name", ""),
-        avatar=user_data.get("avatar_url", "")
-    )
-    return profile, None
 
 
 def get_azure_auth_url() -> tuple[str, str]:
@@ -563,4 +628,3 @@ def exchange_azure_code(code: str, state: str | None = None) -> tuple[SSOUserPro
         avatar="",
     )
     return profile, None
-
