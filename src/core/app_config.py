@@ -51,6 +51,48 @@ DEFAULT_PDF_FOOTER_TEXT: Final[str] = ""
 DEFAULT_VALID_ROLES: Final[set[str]] = {"admin", "teacher"}
 
 
+def _get_env_int(
+    key: str,
+    default: int,
+    min_val: int | None = None,
+    max_val: int | None = None,
+) -> int:
+    """Parse an integer environment variable with optional bounds enforcement.
+
+    Falls back to ``default`` if the environment variable is not set, empty,
+    non-numeric, or outside the optional ``[min_val, max_val]`` range.
+
+    Args:
+        key: The environment variable name.
+        default: Default integer returned on missing or invalid input.
+        min_val: Optional minimum allowed value (inclusive).
+        max_val: Optional maximum allowed value (inclusive).
+
+    Returns:
+        int: Parsed integer within valid bounds, or ``default``.
+    """
+    raw = os.getenv(key)
+    if raw is None:
+        return default
+    raw_str = raw.strip()
+    if not raw_str:
+        return default
+    try:
+        val = int(raw_str)
+    except (ValueError, TypeError):
+        return default
+
+    if min_val is not None and val < min_val:
+        return default
+    if max_val is not None and val > max_val:
+        return default
+    return val
+
+
+# Public alias
+get_env_int = _get_env_int
+
+
 def get_valid_roles() -> set[str]:
     """Return the set of valid user roles.
 
