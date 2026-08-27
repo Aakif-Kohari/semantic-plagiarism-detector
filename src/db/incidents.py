@@ -21,6 +21,7 @@ from src.core.config import (
     normalize_severity_label,
     severity_from_score,
 )
+from src.core.metrics import plagiarism_incidents_total
 from src.db.base import BaseRepository
 from src.db.migrations import migrate_corpus_database, table_exists
 from src.db.migrations.common import column_exists
@@ -264,7 +265,7 @@ def _fetch_all_incidents(
 
     return [
         MatchResult(
-            incident_id=_parse_incident_id(row["incident_id"]),
+            incident_id=row["incident_id"],
             document_a=row["document_a"],
             document_b=row["document_b"],
             similarity_score=row["similarity_score"],
@@ -377,6 +378,10 @@ def sync_flagged_incidents(
                 conn.commit()
                 get_recent_incidents.cache_clear()
 
+                for record in bulk_records:
+                    sev = str(record[4] or "Medium")
+                    plagiarism_incidents_total.labels(severity=sev).inc()
+
             rows = conn.execute("""
                 SELECT pi.incident_id, pi.document_a, pi.document_b,
                        pi.similarity_score, pi.severity_rank,
@@ -392,7 +397,7 @@ def sync_flagged_incidents(
 
             return [
                 MatchResult(
-                    incident_id=_parse_incident_id(row["incident_id"]),
+                    incident_id=row["incident_id"],
                     document_a=row["document_a"],
                     document_b=row["document_b"],
                     similarity_score=row["similarity_score"],

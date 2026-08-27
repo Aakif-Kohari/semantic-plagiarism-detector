@@ -33,6 +33,12 @@ flagged_incidents_total = Counter(
     "Total number of flagged plagiarism incidents",
 )
 
+plagiarism_incidents_total = Counter(
+    "spd_plagiarism_incidents_total",
+    "Total plagiarism incidents flagged",
+    ["severity"],
+)
+
 uploads_total = Counter(
     "uploads_total",
     "Total number of file upload batches processed",
