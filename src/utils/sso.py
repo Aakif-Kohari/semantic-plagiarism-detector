@@ -131,7 +131,6 @@ def get_google_auth_url() -> Tuple[str, str, Dict[str, Any]]:
     return url, state, state_data
 
 
-def exchange_google_code(code: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
 def exchange_google_code(code: str, state: str | None = None) -> tuple[SSOUserProfile | None, str | None]:
     """Exchange code for access token and fetch user info."""
     if state is not None:
@@ -286,7 +285,6 @@ def get_github_auth_url() -> Tuple[str, str, Dict[str, Any]]:
     return url, state, state_data
 
 
-def exchange_github_code(code: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
 def exchange_github_code(code: str, state: str | None = None) -> tuple[SSOUserProfile | None, str | None]:
     """Exchange code for access token and fetch user info."""
     if state is not None:
@@ -397,7 +395,13 @@ def exchange_github_code(code: str, state: str | None = None) -> tuple[SSOUserPr
         # We raise a ValueError to reject login with message requesting a public email.
         raise ValueError("GitHub login failed: A verified public email is required. Please update your GitHub settings.")
 
-    return user_data, None
+    profile = SSOUserProfile(
+        email=user_data["email"],
+        username=user_data.get("login", ""),
+        name=user_data.get("name") or user_data.get("login") or "",
+        avatar=user_data.get("avatar_url", ""),
+    )
+    return profile, None
 
 
 def create_state_token(provider: str) -> Tuple[str, Dict[str, Any]]:
@@ -421,13 +425,13 @@ def create_state_token(provider: str) -> Tuple[str, Dict[str, Any]]:
 
 def cleanup_expired_states(states: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
     """
-    Clean up expired state tokens from the database or in-memory store.
+    Remove expired state tokens from memory dictionary.
     
     Args:
-        states: Dictionary of stored states {state_token: state_data}
-    
+        states: Dictionary mapping state tokens to state metadata
+        
     Returns:
-        dict: Filtered dictionary with expired states removed
+        dict: Cleaned states dictionary
     """
     current_time = time.time()
     expiration_threshold = current_time - STATE_EXPIRATION_SECONDS
@@ -443,13 +447,6 @@ def cleanup_expired_states(states: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[
         logger.info(f"Cleaned up {expired_count} expired OAuth state tokens")
     
     return valid_states
-    profile = SSOUserProfile(
-        email=user_data["email"],
-        username=user_data.get("login", ""),
-        name=user_data.get("name", ""),
-        avatar=user_data.get("avatar_url", "")
-    )
-    return profile, None
 
 
 def get_azure_auth_url() -> tuple[str, str]:
