@@ -93,6 +93,24 @@ def test_build_similarity_workbook_metadata_properties():
     assert before <= wb.properties.created <= after
 
 
+def test_build_similarity_workbook_custom_color_thresholds():
+    df = pd.DataFrame(
+        {"a.txt": [1.0, 0.4], "b.txt": [0.4, 1.0]},
+        index=["a.txt", "b.txt"],
+    )
+    wb = build_similarity_workbook(
+        df,
+        low_threshold=0.1,
+        mid_threshold=0.4,
+        high_threshold=0.9,
+    )
+    rules = list(wb.active.conditional_formatting._cf_rules.values())
+    rule = rules[0][0]
+    assert float(rule.colorScale.cfvo[0].val) == 0.1
+    assert float(rule.colorScale.cfvo[1].val) == 0.4
+    assert float(rule.colorScale.cfvo[2].val) == 0.9
+
+
 def test_export_similarity_matrix_to_excel_persists_metadata():
     """Verify export_similarity_matrix_to_excel persists metadata in the saved XLSX file (#3438)."""
     df = pd.DataFrame(
