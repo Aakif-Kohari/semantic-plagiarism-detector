@@ -51,6 +51,12 @@ cache_misses_total = Counter(
     labelnames=["cache_type"],
 )
 
+ocr_invocations_total = Counter(
+    "spd_ocr_invocations_total",
+    "Total OCR extraction attempts",
+    ["status"],
+)
+
 # ── Gauges ─────────────────────────────────────────────────────────────────────
 
 corpus_size_gauge = Gauge(
