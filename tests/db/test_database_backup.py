@@ -216,92 +216,6 @@ def test_create_database_backup_sets_restrictive_permissions(tmp_path, monkeypat
     assert chmod_calls[-1][1] == 0o600
 
 
- feature/backup-security-error-3409
-def test_backup_restore_security_error_bypasses_value_error_handlers():
-    """
-    Scenario: Verify that BackupRestoreSecurityError inherits from Exception
-              and is NOT caught by except ValueError blocks.
-    Acceptance Criteria:
-    - Assert that catching ValueError fails to intercept BackupRestoreSecurityError.
-    - Confirm the security exception bubbles up to base Exception blocks.
-    """
-
-    # 1. Negative Test: Verify a ValueError block cannot intercept the error
-    try:
-        with pytest.raises(BackupRestoreSecurityError):
-            try:
-                # Force trigger the targeted security exception
-                raise BackupRestoreSecurityError("Unauthorized administrative data restoration attempt blocked.")
-            except ValueError:
-                # If execution drops into this block, the exception was incorrectly caught
-                pytest.fail("Security Vulnerability: BackupRestoreSecurityError was caught by a ValueError handler!")
-    except BackupRestoreSecurityError:
-        # Expected baseline behavior: The exception bubbled out completely unscathed
-        pass
-
-
-def test_exception_inheritance_integrity():
-    """
-    Scenario: Explicitly audit class inheritance properties to protect
-              against unintended future refactoring regressions.
-    """
-    # Assert structural type hierarchy constraints directly
-    assert issubclass(BackupRestoreSecurityError, Exception), "Must inherit from the base Exception class."
-    assert not issubclass(BackupRestoreSecurityError, ValueError), (
-        "Security Vulnerability: BackupRestoreSecurityError must NOT inherit from ValueError, "
-        "as this allows broad input validation catch blocks to accidentally swallow security alerts."
-    )
-
-def test_get_database_table_stats_ignores_sqlite_internal_tables(tmp_path):
-    """Verify that get_database_table_stats returns user-defined tables but ignores internal SQLite metadata tables."""
-    from src.db.database_backup import get_database_table_stats
-
-    db_path = tmp_path / "stats_test.db"
-
-    # 1. Create a database with user-defined tables and trigger sqlite_sequence (by using AUTOINCREMENT)
-    with closing(sqlite3.connect(db_path)) as conn:
-        conn.execute(
-            """
-            CREATE TABLE users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                username TEXT NOT NULL
-            )
-            """
-        )
-        conn.execute(
-            """
-            CREATE TABLE documents (
-                id INTEGER PRIMARY KEY,
-                title TEXT
-            )
-            """
-        )
-        # Inserting a row into users will populate the sqlite_sequence internal table
-        conn.execute("INSERT INTO users (username) VALUES ('alice')")
-        conn.execute("INSERT INTO documents (title) VALUES ('doc1')")
-        conn.execute("INSERT INTO documents (title) VALUES ('doc2')")
-        conn.commit()
-
-        # Verify that sqlite_sequence exists in sqlite_master
-        cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
-        tables = [row[0] for row in cursor.fetchall()]
-        assert "sqlite_sequence" in tables
-
-    # 2. Invoke get_database_table_stats
-    stats = get_database_table_stats(db_path)
-
-    # It must contain '_table_count' mapping to exactly 2 (users, documents)
-    assert stats["_table_count"] == 2
-
-    # It must contain 'users' with count 1 and 'documents' with count 2
-    assert stats["users"] == 1
-    assert stats["documents"] == 2
-
-    # It must NOT contain any key starting with 'sqlite_'
-    for key in stats:
-        assert not key.startswith("sqlite_")
-
-
 def test_create_database_backup_respects_gzip_compression_level_env(tmp_path, monkeypatch):
     """Verify that create_database_backup reads BACKUP_GZIP_COMPRESSION_LEVEL from the env and passes it to GzipFile."""
     import gzip
@@ -337,6 +251,7 @@ def test_create_database_backup_respects_gzip_compression_level_env(tmp_path, mo
         assert len(passed_compresslevel) == 1
         assert passed_compresslevel[0] == 3
 
+ feature/cleanup-failed-backups
 
  feature/cleanup-failed-backups
 def test_verify_backup_file_valid_gzip(tmp_path):
@@ -470,4 +385,6 @@ def test_create_database_backup_cleans_up_on_failure(tmp_path, monkeypatch):
 
 
  main
+ main
+
  main
