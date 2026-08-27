@@ -7,17 +7,18 @@ import pytest
 from src.core.app_config import (
     DEFAULT_APP_TITLE,
     BrandingConfig,
+    _get_env_bool,
     _get_env_int,
     clear_branding_config_cache,
     get_api_support_contact,
     get_app_title,
     get_backup_idle_timeout,
     get_branding_config,
+    get_env_bool,
     get_env_int,
     get_lock_timeout,
     load_branding_config,
 )
-
 # ---------------------------------------------------------------------------
 # Tests for get_app_title
 # ---------------------------------------------------------------------------
@@ -382,6 +383,47 @@ def test_get_backup_idle_timeout_zero_logs_warning_and_defaults_to_30(
 
 
 # ---------------------------------------------------------------------------
+# Tests for _get_env_bool / get_env_bool (Issue #3744)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "val",
+    ["1", "true", "TRUE", "True", "yes", "YES", "Yes", "on", "ON", "  true  ", " 1 "],
+)
+def test_get_env_bool_truthy_values(monkeypatch, val):
+    monkeypatch.setenv("TEST_FLAG", val)
+    assert _get_env_bool("TEST_FLAG") is True
+    assert get_env_bool("TEST_FLAG") is True
+
+
+@pytest.mark.parametrize(
+    "val",
+    ["0", "false", "FALSE", "False", "no", "NO", "off", "OFF", "random_string", "none"],
+)
+def test_get_env_bool_falsy_values(monkeypatch, val):
+    monkeypatch.setenv("TEST_FLAG", val)
+    assert _get_env_bool("TEST_FLAG", default=True) is False
+    assert get_env_bool("TEST_FLAG", default=True) is False
+
+
+def test_get_env_bool_unset_uses_default(monkeypatch):
+    monkeypatch.delenv("TEST_FLAG", raising=False)
+    assert _get_env_bool("TEST_FLAG", default=False) is False
+    assert _get_env_bool("TEST_FLAG", default=True) is True
+
+
+def test_get_env_bool_empty_or_whitespace_uses_default(monkeypatch):
+    monkeypatch.setenv("TEST_FLAG", "")
+    assert _get_env_bool("TEST_FLAG", default=False) is False
+    assert _get_env_bool("TEST_FLAG", default=True) is True
+
+    monkeypatch.setenv("TEST_FLAG", "   ")
+    assert _get_env_bool("TEST_FLAG", default=False) is False
+    assert _get_env_bool("TEST_FLAG", default=True) is True
+
+
+# ---------------------------------------------------------------------------
 # Tests for _get_env_int / get_env_int bounds enforcement (Issue #3750)
 # ---------------------------------------------------------------------------
 
@@ -438,3 +480,42 @@ def test_get_env_int_exact_boundaries(monkeypatch):
     monkeypatch.setenv("TEST_INT_VAR", "20")
     assert _get_env_int("TEST_INT_VAR", default=0, min_val=10, max_val=20) == 20
 
+
+# ---------------------------------------------------------------------------
+# Tests for _get_env_bool (Issue #3749)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("truthy_val", ["true", "True", "TRUE", "1", "yes", "Yes", "YES"])
+def test_get_env_bool_truthy_values(monkeypatch, truthy_val):
+    monkeypatch.setenv("TEST_BOOL_VAR", truthy_val)
+    assert _get_env_bool("TEST_BOOL_VAR", default=False) is True
+
+
+@pytest.mark.parametrize("falsy_val", ["false", "False", "FALSE", "0", "no", "No", "NO"])
+def test_get_env_bool_falsy_values(monkeypatch, falsy_val):
+    monkeypatch.setenv("TEST_BOOL_VAR", falsy_val)
+    assert _get_env_bool("TEST_BOOL_VAR", default=True) is False
+
+
+def test_get_env_bool_missing_variable_returns_default(monkeypatch):
+    monkeypatch.delenv("TEST_BOOL_VAR", raising=False)
+    assert _get_env_bool("TEST_BOOL_VAR", default=True) is True
+    assert _get_env_bool("TEST_BOOL_VAR", default=False) is False
+
+
+def test_get_env_bool_empty_string_returns_default(monkeypatch):
+    monkeypatch.setenv("TEST_BOOL_VAR", "")
+    assert _get_env_bool("TEST_BOOL_VAR", default=True) is True
+    assert _get_env_bool("TEST_BOOL_VAR", default=False) is False
+
+
+def test_get_env_bool_whitespace_only_returns_default(monkeypatch):
+    monkeypatch.setenv("TEST_BOOL_VAR", "   ")
+    assert _get_env_bool("TEST_BOOL_VAR", default=True) is True
+
+
+def test_get_env_bool_unrecognized_value_returns_default(monkeypatch):
+    monkeypatch.setenv("TEST_BOOL_VAR", "maybe")
+    assert _get_env_bool("TEST_BOOL_VAR", default=True) is True
+    assert _get_env_bool("TEST_BOOL_VAR", default=False) is False
