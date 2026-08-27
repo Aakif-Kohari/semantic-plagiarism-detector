@@ -163,11 +163,13 @@ def get_google_auth_url() -> Tuple[str, str, Dict[str, Any]]:
     except Exception as e:
         logger.warning(f"Failed to store Google SSO state parameter: {e}")
 
+    google_scopes = os.getenv("GOOGLE_OAUTH_SCOPES", "email profile")
+
     query_params = {
         "response_type": "code",
         "client_id": client_id,
         "redirect_uri": redirect_uri,
-        "scope": "email profile",
+        "scope": google_scopes,
         "state": state,
         "prompt": "select_account",
         "code_challenge": code_challenge,
@@ -337,10 +339,12 @@ def get_github_auth_url() -> Tuple[str, str, Dict[str, Any]]:
     except Exception as e:
         logger.warning(f"Failed to store GitHub SSO state parameter: {e}")
 
+    github_scopes = os.getenv("GITHUB_OAUTH_SCOPES", "user:email")
+
     query_params = {
         "client_id": client_id,
         "redirect_uri": redirect_uri,
-        "scope": "user:email",
+        "scope": github_scopes,
         "state": state,
     }
 
@@ -362,7 +366,7 @@ def exchange_github_code(code: str, state: str | None = None) -> tuple[SSOUserPr
         raise ValueError("GITHUB_CLIENT_ID environment variable is not configured")
     client_secret = os.getenv("GITHUB_CLIENT_SECRET")
     if not client_secret:
-        raise ValueError("GITHUB_CLIENT_SECRET environment variable is not configured")
+        raise ValueError("GOOGLE_CLIENT_SECRET environment variable is not configured")
     redirect_uri = _get_redirect_uri()
 
     # Setup retrying OAuth session
@@ -466,8 +470,8 @@ def exchange_github_code(code: str, state: str | None = None) -> tuple[SSOUserPr
     profile = SSOUserProfile(
         email=user_data["email"],
         username=user_data.get("login", ""),
-        name=user_data.get("name") or user_data.get("login") or "",
-        avatar=user_data.get("avatar_url", ""),
+        name=user_data.get("name", ""),
+        avatar=user_data.get("avatar_url", "")
     )
     return profile, None
 
@@ -628,4 +632,3 @@ def exchange_azure_code(code: str, state: str | None = None) -> tuple[SSOUserPro
         avatar="",
     )
     return profile, None
-
