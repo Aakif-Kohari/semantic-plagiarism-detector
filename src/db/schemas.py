@@ -53,7 +53,7 @@ class Document(DictLikeModel):
 class MatchResult(DictLikeModel):
     """Pydantic model representing a similarity PlagiarismIncident DTO."""
 
-    incident_id: Optional[Union[int, str]] = None
+    incident_id: Optional[str | int] = None
     document_a: str
     document_b: str
     similarity_score: float
