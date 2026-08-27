@@ -162,7 +162,8 @@ API_PORT: Final[int] = _get_env_int("API_PORT", 8000, min_val=1, max_val=65535)
 REDIS_PORT: Final[int] = _get_env_int("REDIS_PORT", 6379, min_val=1, max_val=65535)
 
 
-def get_valid_roles() -> set[str]:    """Return the set of valid user roles.
+def get_valid_roles() -> set[str]:
+    """Return the set of valid user roles.
 
     Configured via the ``ALLOWED_USER_ROLES`` environment variable as a
     comma-separated string (e.g. ``ALLOWED_USER_ROLES="admin,teacher,teaching_assistant"``).
