@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Run `pre-commit run --all-files` in the CI lint job (`.github/workflows/ci.yml`).
 - Daily storage snapshots and projected days-until-full estimate via `storage_history` (`src/utils/storage_metrics.py`).
 - Prometheus gauge `spd_active_threads` updated from `threading.active_count()` on each `/metrics` scrape (`src/core/metrics.py`).
+- Custom low/mid/high color-scale thresholds in `build_similarity_workbook` (`src/utils/excel_export.py`).
 
 ### Fixed
 - Embed bundled DejaVu Sans / Roboto TTF in ReportLab PDF reports so non-ASCII document names render correctly (`src/utils/pdf_report.py`).

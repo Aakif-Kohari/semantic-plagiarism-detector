@@ -22,8 +22,14 @@ from openpyxl.cell import WriteOnlyCell
 from openpyxl.comments import Comment
 from openpyxl.formatting.rule import ColorScaleRule
 from openpyxl.styles import Alignment, Font, PatternFill
-fix/excel-sheet-title-sanitization
-from openpyxl.comments import Comment
+from openpyxl.utils import get_column_letter
+
+from src.utils.export_sanitizer import (
+    FORMULA_TRIGGER_PREFIXES,
+    sanitize_spreadsheet_value,
+)
+
+
 def sanitize_sheet_title(title: str) -> str:
     """
     Sanitize a worksheet title to comply with Excel's naming rules.
@@ -36,12 +42,8 @@ def sanitize_sheet_title(title: str) -> str:
     sanitized_title = sanitized_title[:31]
 
     return sanitized_title or "Sheet"
-from openpyxl.utils import get_column_letter
 
-from src.utils.export_sanitizer import (
-    FORMULA_TRIGGER_PREFIXES,
-    sanitize_spreadsheet_value,
-)
+
 def _create_managed_temp_file(suffix: str = ".xlsx", prefix: str = "temp_") -> str:
     """Helper to create a temporary file that is automatically deleted on exit."""
     fd, temp_path = tempfile.mkstemp(suffix=suffix, prefix=prefix)
@@ -77,7 +79,12 @@ def _truncate_title(title, max_length: int = 60) -> str:
 
 
 def build_similarity_workbook(
-    df: pd.DataFrame, threshold: float = 0.59, write_only: bool = False
+    df: pd.DataFrame,
+    threshold: float = 0.59,
+    write_only: bool = False,
+    low_threshold: float = 0.0,
+    mid_threshold: float = 0.59,
+    high_threshold: float = 1.0,
 ) -> Workbook:
     """Helper function that builds and styles the openpyxl Workbook.
 
@@ -86,10 +93,17 @@ def build_similarity_workbook(
         threshold: Score threshold for conditional formatting color scale.
         write_only: If True, uses openpyxl write_only mode with ws.append() for
             memory-efficient streaming of large matrices. Defaults to False.
+        low_threshold: Low breakpoint for the 3-color scale.
+        mid_threshold: Mid breakpoint for the 3-color scale.
+        high_threshold: High breakpoint for the 3-color scale.
 
     Returns:
         Workbook: Configured openpyxl Workbook instance.
     """
+    # Older callers pass ``threshold`` as the yellow midpoint.
+    if threshold != 0.59 and mid_threshold == 0.59:
+        mid_threshold = threshold
+
     if write_only:
         wb = Workbook(write_only=True)
         wb.properties.title = "Semantic Plagiarism Similarity Report"
@@ -162,14 +176,14 @@ def build_similarity_workbook(
 
             color_scale = ColorScaleRule(
                 start_type="num",
-                start_value=0.0,
-                start_color="FFFFFF",  # White (0%)
+                start_value=low_threshold,
+                start_color="FFFFFF",  # White (low)
                 mid_type="num",
-                mid_value=threshold,
-                mid_color="FEF08A",  # Yellow (At threshold)
+                mid_value=mid_threshold,
+                mid_color="FEF08A",  # Yellow (mid)
                 end_type="num",
-                end_value=1.0,
-                end_color="EF4444",  # Red (100%)
+                end_value=high_threshold,
+                end_color="EF4444",  # Red (high)
             )
             ws.conditional_formatting.add(matrix_range, color_scale)
 
@@ -255,14 +269,14 @@ def build_similarity_workbook(
 
         color_scale = ColorScaleRule(
             start_type="num",
-            start_value=0.0,
-            start_color="FFFFFF",  # White (0%)
+            start_value=low_threshold,
+            start_color="FFFFFF",  # White (low)
             mid_type="num",
-            mid_value=threshold,
-            mid_color="FEF08A",  # Yellow (At threshold)
+            mid_value=mid_threshold,
+            mid_color="FEF08A",  # Yellow (mid)
             end_type="num",
-            end_value=1.0,
-            end_color="EF4444",  # Red (100%)
+            end_value=high_threshold,
+            end_color="EF4444",  # Red (high)
         )
         ws.conditional_formatting.add(matrix_range, color_scale)
 
@@ -279,7 +293,12 @@ def export_similarity_matrix_to_excel(
     df: pd.DataFrame, threshold: float = 0.59, write_only: bool = False
 ) -> bytes:
     """Exports a similarity matrix DataFrame into an in-memory Excel file (.xlsx) with formatting."""
-    wb = build_similarity_workbook(df, threshold=threshold, write_only=write_only)
+    wb = build_similarity_workbook(
+        df,
+        threshold=threshold,
+        write_only=write_only,
+        mid_threshold=threshold,
+    )
     output = io.BytesIO()
     wb.save(output)
     return output.getvalue()
@@ -295,7 +314,12 @@ def export_similarity_matrix_to_temp_file(
     Returns:
         str: Absolute path to the created temporary Excel file.
     """
-    wb = build_similarity_workbook(df, threshold=threshold, write_only=write_only)
+    wb = build_similarity_workbook(
+        df,
+        threshold=threshold,
+        write_only=write_only,
+        mid_threshold=threshold,
+    )
     temp_path = _create_managed_temp_file(suffix=".xlsx", prefix="similarity_matrix_")
     wb.save(temp_path)
     return temp_path
