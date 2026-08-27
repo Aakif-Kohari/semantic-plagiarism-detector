@@ -69,6 +69,10 @@ class WatermarkVerifyRequest(BaseModel):
     )
 
 
+# Alias for backward compatibility
+WatermarkRequest = WatermarkVerifyRequest
+
+
 class ConfidenceIntervalResponse(BaseModel):
     """Schema for confidence interval output."""
 
@@ -100,6 +104,11 @@ class WatermarkVerifyResponse(BaseModel):
     ngram_frequencies: Optional[dict[int, dict[str, int]]] = None
     token_details: Optional[list[dict[str, Any]]] = None
     created_at: str
+    observed_ratio: Optional[float] = None
+
+
+# Alias for backward compatibility
+WatermarkResponse = WatermarkVerifyResponse
 
 
 @router.post("/verify", response_model=WatermarkVerifyResponse, status_code=status.HTTP_200_OK)
@@ -184,6 +193,7 @@ async def verify_ai_watermark(request: WatermarkVerifyRequest):
             ngram_frequencies=features.ngram_frequencies if request.include_ngrams else None,
             token_details=features.token_details if request.include_token_details else None,
             created_at=created_at,
+            observed_ratio=test_result.observed_green_ratio,
         )
 
     except ValueError as ve:

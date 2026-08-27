@@ -78,7 +78,7 @@ def migration_004_add_plagiarism_incidents(
             similarity_score REAL NOT NULL,
             severity_rank TEXT NOT NULL,
             review_status TEXT NOT NULL DEFAULT 'Pending'
-                CHECK (review_status IN ('Pending', 'Resolved')),
+                CHECK (review_status IN ('Pending', 'Resolved', 'Dismissed')),
             date_flagged TEXT NOT NULL,
             last_seen TEXT NOT NULL
         )

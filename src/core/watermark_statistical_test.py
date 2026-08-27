@@ -9,8 +9,11 @@ statistical AI text watermarks (e.g., Maryland watermarking scheme).
 """
 
 from dataclasses import dataclass
+import logging
 import math
-from typing import Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 try:
     from scipy import stats as scipy_stats
@@ -189,7 +192,6 @@ class WatermarkStatisticalTester:
             z_crit = float(scipy_stats.norm.ppf(1.0 - alpha / 2.0))
         else:
             # High-precision approximation for standard normal quantile
-            # Common standard values
             if abs(confidence_level - 0.95) < 0.005:
                 z_crit = 1.959963984540054
             elif abs(confidence_level - 0.99) < 0.005:
@@ -283,7 +285,7 @@ class WatermarkStatisticalTester:
         asymptotic_p = self.compute_asymptotic_p_value(z_score)
         exact_p = self.compute_exact_binomial_p_value(green_tokens, total_tokens, g)
 
-        # Primary p-value used: exact binomial for N <= 1000, asymptotic for very large N if equivalent
+        # Primary p-value used: exact binomial for N <= 2000, asymptotic for very large N
         primary_p = exact_p if total_tokens <= 2000 else asymptotic_p
 
         ci = self.compute_wilson_confidence_interval(
@@ -293,8 +295,7 @@ class WatermarkStatisticalTester:
         # Detection decision: both z >= z_thresh and p_value <= alpha
         is_watermarked = (z_score >= z_thresh) and (primary_p <= alpha)
 
-        # Confidence percentage (0.0 to 100.0%)
-        # Based on 1 - p_value, scaled smoothly
+        # Confidence percentage (0.0 to 100.0%) based on 1 - p_value
         confidence_score = round(max(0.0, min(100.0, (1.0 - primary_p) * 100.0)), 4)
 
         effect_size = round(observed_ratio - g, 6)
@@ -334,3 +335,78 @@ def compute_watermark_statistics(
         confidence_level=confidence_level,
     )
     return tester.test(green_tokens, total_tokens)
+
+
+def compute_z_score(
+    observed_ratio: float, expected_ratio: float, sample_size: int
+) -> float:
+    """Compute the z-score for the observed green list ratio.
+
+    Uses the normal approximation to the binomial distribution.
+
+    Args:
+        observed_ratio: The observed proportion of green list tokens.
+        expected_ratio: The expected proportion under the null hypothesis.
+        sample_size: Total number of tokens in the text.
+
+    Returns:
+        The computed z-score.
+    """
+    if sample_size <= 0 or expected_ratio <= 0 or expected_ratio >= 1:
+        return 0.0
+
+    # Standard deviation of the binomial distribution
+    std_dev = math.sqrt((expected_ratio * (1 - expected_ratio)) / sample_size)
+
+    if std_dev == 0:
+        return 0.0
+
+    z_score = (observed_ratio - expected_ratio) / std_dev
+    return round(z_score, 4)
+
+
+def compute_p_value(z_score: float) -> float:
+    """Compute the one-tailed p-value from a z-score.
+
+    Args:
+        z_score: The computed z-score.
+
+    Returns:
+        The one-tailed p-value.
+    """
+    # P(Z > z) = 0.5 * (1 - erf(z / sqrt(2)))
+    p_value = 0.5 * (1 - math.erf(z_score / math.sqrt(2)))
+    return round(p_value, 6)
+
+
+def verify_watermark_presence(
+    token_metrics: Dict[str, Any],
+    expected_green_ratio: float = 0.5,
+    significance_level: float = 0.05,
+) -> Dict[str, Any]:
+    """Verify the presence of an AI watermark using statistical testing.
+
+    Args:
+        token_metrics: Metrics from ai_watermark_extractor.
+        expected_green_ratio: Expected ratio of green list tokens under H0.
+        significance_level: Alpha level for hypothesis testing.
+
+    Returns:
+        Dictionary containing z-score, p-value, and verification result.
+    """
+    observed_ratio = token_metrics.get("green_list_ratio", 0.0)
+    sample_size = token_metrics.get("total_tokens", 0)
+
+    z_score = compute_z_score(observed_ratio, expected_green_ratio, sample_size)
+    p_value = compute_p_value(z_score)
+
+    # Reject null hypothesis if p-value < alpha
+    is_watermarked = p_value < significance_level
+
+    return {
+        "z_score": z_score,
+        "p_value": p_value,
+        "is_watermarked": is_watermarked,
+        "confidence_level": 1.0 - significance_level,
+        "observed_ratio": observed_ratio,
+    }
