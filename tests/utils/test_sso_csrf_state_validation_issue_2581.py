@@ -30,7 +30,7 @@ def setup_auth_db(tmp_path, monkeypatch):
 def test_google_auth_url_stores_state(monkeypatch):
     """Verify get_google_auth_url generates and stores state server-side."""
     monkeypatch.setenv("GOOGLE_CLIENT_ID", "test-google-client-id")
-    url, state = get_google_auth_url()
+    url, state, state_data = get_google_auth_url()
 
     assert f"state={state}" in url
     assert state.startswith("google_")

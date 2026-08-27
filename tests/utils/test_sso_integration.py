@@ -31,9 +31,10 @@ def test_full_google_oauth_login_cycle(mock_post, mock_get, monkeypatch):
     monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "dummy_secret")
 
     # 1. Generate the authorization URL; this also stores the state parameter.
-    auth_url, state = get_google_auth_url()
+    auth_url, state, state_data = get_google_auth_url()
     assert "dummy_client_id" in auth_url
     assert state.startswith("google_")
+    assert "code_verifier" in state_data
 
     # State must be valid (stored, unused) before the callback is handled.
     assert validate_sso_state(state) is True
@@ -42,7 +43,7 @@ def test_full_google_oauth_login_cycle(mock_post, mock_get, monkeypatch):
 
     # Since the state above was consumed by the assertion, generate a fresh
     # one to drive the rest of the flow exactly as the real callback would.
-    auth_url, state = get_google_auth_url()
+    auth_url, state, state_data = get_google_auth_url()
 
     # 2. Mock the provider's token exchange endpoint.
     mock_post.return_value = MagicMock(
@@ -64,7 +65,7 @@ def test_full_google_oauth_login_cycle(mock_post, mock_get, monkeypatch):
 
     # 4. Exchange the authorization code for a user profile. This validates
     #    and consumes the state parameter (CSRF protection).
-    profile, error = exchange_google_code("mock_auth_code", state=state)
+    profile, error = exchange_google_code("mock_auth_code", state=state, code_verifier=state_data["code_verifier"])
 
     assert error is None
     assert profile is not None
