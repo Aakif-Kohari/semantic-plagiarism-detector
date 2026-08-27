@@ -8,6 +8,7 @@ from src.utils.sso import (
     exchange_azure_code,
     exchange_github_code,
     exchange_google_code,
+    generate_pkce_pair,
     get_azure_auth_url,
     get_github_auth_url,
     get_google_auth_url,
@@ -24,10 +25,13 @@ def test_get_google_auth_url_missing_client_id(monkeypatch):
 
 def test_get_google_auth_url_success(monkeypatch):
     monkeypatch.setenv("GOOGLE_CLIENT_ID", "dummy_google_client_id")
-    url, state = get_google_auth_url()
+    url, state, state_data = get_google_auth_url()
     assert "dummy_google_client_id" in url
     assert "prompt=select_account" in url
+    assert "code_challenge=" in url
+    assert "code_challenge_method=S256" in url
     assert state.startswith("google_")
+    assert "code_verifier" in state_data
 
 
 def test_exchange_google_code_missing_client_id(monkeypatch):
