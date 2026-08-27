@@ -175,6 +175,18 @@ def get_backup_dir() -> Path:
 BACKUP_DIR: Final[Path] = get_backup_dir()
 
 
+def reload_config() -> None:
+    """Refresh module-level constants derived from environment variables.
+
+    Module-level constants such as ``BACKUP_DIR`` are computed once, at
+    import time, from ``os.environ``. Tests (or callers) that mutate
+    ``os.environ`` after this module has already been imported will not
+    see those changes reflected in the constants unless this function is
+    called afterward to recompute them.
+    """
+    global BACKUP_DIR
+    BACKUP_DIR = get_backup_dir()
+
 # ─── Application display accessors (pre-existing) ──────────────────────────
 
 
