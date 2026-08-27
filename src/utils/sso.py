@@ -130,7 +130,11 @@ def generate_pkce_pair() -> Tuple[str, str]:
 def get_google_auth_url() -> Tuple[str, str, Dict[str, Any]]:
     """
     Return the Google OAuth authorization URL, state, and state data.
-    
+
+    PKCE (Issue #3453): The returned ``state_data`` dict includes a
+    ``code_verifier`` key that **must** be passed to
+    :func:`exchange_google_code` when exchanging the authorization code.
+
     Returns:
         tuple[str, str, dict]: (authorization_url, state_token, state_data)
     """
