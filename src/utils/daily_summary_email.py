@@ -519,7 +519,24 @@ def send_email(
         raise ValueError(f"Invalid reply-to email address: {reply_to}")
 
     smtp_server = os.getenv("SMTP_SERVER")
-    smtp_port = int(os.getenv("SMTP_PORT", "587"))
+    
+    # Issue #3446: Validate SMTP port number range (1 <= port <= 65535) with fallback to default 587
+    raw_smtp_port = os.getenv("SMTP_PORT", "587")
+    try:
+        smtp_port = int(raw_smtp_port)
+        if not (1 <= smtp_port <= 65535):
+            logger.warning(
+                "Invalid SMTP_PORT '%s' out of range (1-65535). Falling back to default port 587.",
+                raw_smtp_port,
+            )
+            smtp_port = 587
+    except (ValueError, TypeError):
+        logger.warning(
+            "Invalid non-integer SMTP_PORT '%s'. Falling back to default port 587.",
+            raw_smtp_port,
+        )
+        smtp_port = 587
+
     smtp_username = os.getenv("SMTP_USERNAME")
     smtp_password = os.getenv("SMTP_PASSWORD")
     from_email = os.getenv("FROM_EMAIL", smtp_username)
