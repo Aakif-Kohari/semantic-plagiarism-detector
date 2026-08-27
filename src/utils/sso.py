@@ -264,11 +264,18 @@ def exchange_google_code(code: str, state: str | None = None, code_verifier: str
     email = user_data.get("email", "")
     raw_username = email.split("@")[0] if email else ""
     username = re.sub(r"[^a-zA-Z0-9_-]", "_", raw_username)
+
+    # Fallback avatar generation (Issue #3459)
+    avatar_url = user_data.get("picture")
+    if not avatar_url:
+        name_param = urllib.parse.quote(user_data.get("name") or raw_username or email)
+        avatar_url = f"https://ui-avatars.com/api/?name={name_param}"
+
     profile = SSOUserProfile(
         email=email,
         username=username,
         name=user_data.get("name", ""),
-        avatar=user_data.get("picture", "")
+        avatar=avatar_url
     )
     return profile, None
 
@@ -467,11 +474,17 @@ def exchange_github_code(code: str, state: str | None = None) -> tuple[SSOUserPr
         # We raise a ValueError to reject login with message requesting a public email.
         raise ValueError("GitHub login failed: A verified public email is required. Please update your GitHub settings.")
 
+    # Fallback avatar generation (Issue #3459)
+    avatar_url = user_data.get("avatar_url")
+    if not avatar_url:
+        name_param = urllib.parse.quote(user_data.get("name") or user_data.get("login") or user_data["email"])
+        avatar_url = f"https://ui-avatars.com/api/?name={name_param}"
+
     profile = SSOUserProfile(
         email=user_data["email"],
         username=user_data.get("login", ""),
         name=user_data.get("name", ""),
-        avatar=user_data.get("avatar_url", "")
+        avatar=avatar_url
     )
     return profile, None
 
