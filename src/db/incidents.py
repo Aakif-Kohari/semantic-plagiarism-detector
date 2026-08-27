@@ -507,6 +507,7 @@ def get_incident_by_id(
     if db_path is None:
         db_path = DEFAULT_DB_PATH
     init_incident_db(db_path)
+    alt_id = f"INC-{hex(incident_id)[2:].upper()}" if isinstance(incident_id, int) else str(incident_id)
     with closing(_get_connection(db_path)) as conn:
         conn.row_factory = sqlite3.Row
         row = conn.execute(
@@ -518,11 +519,11 @@ def get_incident_by_id(
             FROM plagiarism_incidents pi
             LEFT JOIN documents da ON pi.document_a = da.filename
             LEFT JOIN documents db ON pi.document_b = db.filename
-            WHERE (pi.incident_id = ? OR pi.incident_id = ?)
+            WHERE (pi.incident_id = ? OR pi.incident_id = ? OR pi.incident_id = ?)
               AND (da.is_deleted IS NULL OR da.is_deleted = 0)
               AND (db.is_deleted IS NULL OR db.is_deleted = 0)
             """,
-            (incident_id, str(incident_id)),
+            (incident_id, str(incident_id), alt_id),
         ).fetchone()
 
         if row is None:
@@ -802,11 +803,13 @@ def update_review_status(
 
     init_incident_db(db_path)
 
+    alt_id = f"INC-{hex(incident_id)[2:].upper()}" if isinstance(incident_id, int) else str(incident_id)
+
     with closing(sqlite3.connect(str(db_path))) as conn:
         try:
             cursor = conn.execute(
-                "UPDATE plagiarism_incidents SET review_status = ? WHERE incident_id = ?",
-                (status, str(incident_id).strip()),
+                "UPDATE plagiarism_incidents SET review_status = ? WHERE (incident_id = ? OR incident_id = ? OR incident_id = ?)",
+                (status, incident_id, str(incident_id).strip(), alt_id),
             )
 
             conn.commit()
