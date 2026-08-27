@@ -143,8 +143,15 @@ AUTH_DB_PATH: Final[Path] = _REPO_ROOT / "users.db"
 # bug; centralizing it here fixes that drift.)
 FAISS_INDEX_PATH: Final[Path] = _REPO_ROOT / "corpus.index"
 
-# DB files inspected by the ``/healthz`` endpoint.  The two real SQLite DBs
-# are the corpus DB and the auth DB.  (The original implementation in
+# ─── Base directory constants (issue #3743) ────────────────────────────────
+# Centralized so modules stop independently computing paths like
+# ``Path(__file__).parent.parent / "data"``, which risks drifting if a file
+# is ever moved to a different depth in the tree.
+DATA_DIR: Final[Path] = _REPO_ROOT / "data"
+LOGS_DIR: Final[Path] = _REPO_ROOT / "logs"
+MODELS_DIR: Final[Path] = _REPO_ROOT / "models"
+
+# DB files inspected by the ``/healthz`` endpoint.  The two real SQLite DBs# are the corpus DB and the auth DB.  (The original implementation in
 # ``src/api/app.py`` inspected ``<repo>/corpus.db`` instead of
 # ``<repo>/data/corpus.db`` – a latent bug, since no code writes to that
 # location.  Centralizing here fixes that drift.)
@@ -181,6 +188,10 @@ def get_backup_dir() -> Path:
 
 BACKUP_DIR: Final[Path] = get_backup_dir()
 
+# Alias exposed for naming consistency with DATA_DIR / LOGS_DIR / MODELS_DIR
+# (issue #3743). Points at the same configured location as BACKUP_DIR.
+BACKUPS_DIR: Final[Path] = BACKUP_DIR
+
 
 def reload_config() -> None:
     """Refresh module-level constants derived from environment variables.
@@ -191,9 +202,9 @@ def reload_config() -> None:
     see those changes reflected in the constants unless this function is
     called afterward to recompute them.
     """
-    global BACKUP_DIR
+    global BACKUP_DIR, BACKUPS_DIR
     BACKUP_DIR = get_backup_dir()
-
+    BACKUPS_DIR = BACKUP_DIR
 # ─── Application display accessors (pre-existing) ──────────────────────────
 
 
