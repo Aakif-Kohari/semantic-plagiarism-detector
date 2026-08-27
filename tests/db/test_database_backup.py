@@ -251,10 +251,17 @@ def test_create_database_backup_respects_gzip_compression_level_env(tmp_path, mo
         assert len(passed_compresslevel) == 1
         assert passed_compresslevel[0] == 3
 
+ feature/cleanup-failed-backups
+ feature/cleanup-failed-backups
+ feature/cleanup-failed-backups
+
+ feature/cleanup-failed-backups
+
  feature/utc-timestamp-backups
  feature/utc-timestamp-backups
 
  feature/utc-timestamp-backups
+ main
 
  feature/pre-snapshot-integrity-check
  feature/pre-snapshot-integrity-check
