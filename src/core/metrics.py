@@ -91,6 +91,10 @@ active_threads_gauge = Gauge(
     "Active Python threads",
 )
 
+faiss_vectors_gauge = Gauge(
+    "spd_faiss_vectors_total",
+    "Number of vectors in FAISS index",
+)
 # ── Histograms ─────────────────────────────────────────────────────────────────
 
 pipeline_duration_seconds = Histogram(
