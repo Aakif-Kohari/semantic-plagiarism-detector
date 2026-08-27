@@ -4,6 +4,7 @@ test_daily_summary_email.py
 Tests for daily summary email functionality and HTML template generation.
 """
 
+import html
 import re
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch

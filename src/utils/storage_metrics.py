@@ -358,3 +358,59 @@ def get_projected_days_until_full(
     bytes_per_day = growth / elapsed_days
     remaining = max_disk_bytes - last_total
     return remaining / bytes_per_day
+
+
+def get_storage_by_class() -> List[Dict[str, Any]]:
+    """Return a per-class-section storage breakdown.
+
+    Groups non-deleted documents by ``class_section`` (documents with a
+    blank/NULL class_section are grouped under ``"Unassigned"``) and reports,
+    for each group:
+        - class_section: str
+        - document_count: int (distinct documents in the class)
+        - chunk_count: int (chunks belonging to those documents)
+        - estimated_bytes: int (sum of chunk text + embedding blob sizes)
+
+    Returns an empty list if the corpus database does not exist or cannot
+    be queried.
+    """
+    from src.db.corpus_db import get_corpus_db_path
+
+    db_path = get_corpus_db_path()
+    results: list[dict[str, Any]] = []
+    if not db_path.exists():
+        return results
+
+    try:
+        connection = sqlite3.connect(str(db_path))
+        try:
+            rows = connection.execute(
+                """
+                SELECT
+                    COALESCE(NULLIF(d.class_section, ''), 'Unassigned') AS class_section,
+                    COUNT(DISTINCT d.filename) AS document_count,
+                    COUNT(c.vector_id) AS chunk_count,
+                    COALESCE(SUM(LENGTH(c.chunk_text) + LENGTH(c.embedding)), 0) AS estimated_bytes
+                FROM documents d
+                LEFT JOIN chunks c ON c.filename = d.filename
+                WHERE d.is_deleted = 0 OR d.is_deleted IS NULL
+                GROUP BY class_section
+                ORDER BY estimated_bytes DESC
+                """
+            ).fetchall()
+        finally:
+            connection.close()
+    except sqlite3.Error as e:
+        logger.debug("Could not compute storage by class: %s", e)
+        return results
+
+    for class_section, document_count, chunk_count, estimated_bytes in rows:
+        results.append(
+            {
+                "class_section": class_section,
+                "document_count": document_count,
+                "chunk_count": chunk_count,
+                "estimated_bytes": int(estimated_bytes),
+            }
+        )
+    return results
