@@ -12,12 +12,33 @@ from typing import Optional, Tuple, Dict, Any
 from dataclasses import dataclass
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util import Retry
 from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
 
 # State expiration constant - 10 minutes
 STATE_EXPIRATION_SECONDS = 600
+
+
+def _get_oauth_session() -> requests.Session:
+    """Create and return a requests.Session configured with retry logic for transient errors.
+
+    Acceptance Criteria (Issue #3455):
+    - Uses urllib3.util.Retry(total=3, backoff_factor=0.5, status_forcelist=[500, 502, 503, 504])
+    """
+    session = requests.Session()
+    retries = Retry(
+        total=3,
+        backoff_factor=0.5,
+        status_forcelist=[500, 502, 503, 504],
+        raise_on_status=False,  # Keep status code responses accessible so we can log/handle them.
+    )
+    adapter = HTTPAdapter(max_retries=retries)
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+    return session
 
 
 @dataclass
@@ -193,8 +214,11 @@ def exchange_google_code(code: str, state: str | None = None, code_verifier: str
     if code_verifier is not None:
         token_data["code_verifier"] = code_verifier
 
+    # Setup retrying OAuth session
+    session = _get_oauth_session()
+
     try:
-        token_resp = requests.post(
+        token_resp = session.post(
             "https://oauth2.googleapis.com/token",
             data=token_data,
             timeout=10,
@@ -217,7 +241,7 @@ def exchange_google_code(code: str, state: str | None = None, code_verifier: str
         return None, "Invalid or expired SSO authorization code"
 
     try:
-        user_info_resp = requests.get(
+        user_info_resp = session.get(
             "https://www.googleapis.com/oauth2/v2/userinfo",
             headers={"Authorization": f"Bearer {access_token}"},
             timeout=10,
@@ -341,8 +365,11 @@ def exchange_github_code(code: str, state: str | None = None) -> tuple[SSOUserPr
         raise ValueError("GITHUB_CLIENT_SECRET environment variable is not configured")
     redirect_uri = _get_redirect_uri()
 
+    # Setup retrying OAuth session
+    session = _get_oauth_session()
+
     try:
-        token_resp = requests.post(
+        token_resp = session.post(
             "https://github.com/login/oauth/access_token",
             data={
                 "client_id": client_id,
@@ -375,7 +402,7 @@ def exchange_github_code(code: str, state: str | None = None) -> tuple[SSOUserPr
         return None, "Invalid or expired SSO authorization code"
 
     try:
-        user_info_resp = requests.get(
+        user_info_resp = session.get(
             "https://api.github.com/user",
             headers={"Authorization": f"Bearer {access_token}"},
             timeout=10,
@@ -401,7 +428,7 @@ def exchange_github_code(code: str, state: str | None = None) -> tuple[SSOUserPr
     # GitHub might not return email in /user if it's private, fetch explicitly
     if not user_data.get("email"):
         try:
-            emails_resp = requests.get(
+            emails_resp = session.get(
                 "https://api.github.com/user/emails",
                 headers={"Authorization": f"Bearer {access_token}"},
                 timeout=10,
