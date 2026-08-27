@@ -33,6 +33,12 @@ flagged_incidents_total = Counter(
     "Total number of flagged plagiarism incidents",
 )
 
+plagiarism_incidents_total = Counter(
+    "spd_plagiarism_incidents_total",
+    "Total plagiarism incidents flagged",
+    ["severity"],
+)
+
 uploads_total = Counter(
     "uploads_total",
     "Total number of file upload batches processed",
@@ -49,6 +55,12 @@ cache_misses_total = Counter(
     "spd_cache_misses_total",
     "Total cache misses",
     labelnames=["cache_type"],
+)
+
+ocr_invocations_total = Counter(
+    "spd_ocr_invocations_total",
+    "Total OCR extraction attempts",
+    ["status"],
 )
 
 # ── Gauges ─────────────────────────────────────────────────────────────────────

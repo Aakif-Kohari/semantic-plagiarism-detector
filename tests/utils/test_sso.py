@@ -5,8 +5,10 @@ import requests
 
 from src.utils.sso import (
     SSOUserProfile,
+    exchange_azure_code,
     exchange_github_code,
     exchange_google_code,
+    get_azure_auth_url,
     get_github_auth_url,
     get_google_auth_url,
 )
@@ -22,7 +24,7 @@ def test_get_google_auth_url_missing_client_id(monkeypatch):
 
 def test_get_google_auth_url_success(monkeypatch):
     monkeypatch.setenv("GOOGLE_CLIENT_ID", "dummy_google_client_id")
-    url, state = get_google_auth_url()
+    url, state, *rest = get_google_auth_url()
     assert "dummy_google_client_id" in url
     assert "prompt=select_account" in url
     assert state.startswith("google_")
@@ -71,6 +73,35 @@ def test_exchange_google_code_success(mock_post, mock_get, monkeypatch):
     mock_get.assert_called_once()
 
 
+@patch("src.utils.sso.requests.get")
+@patch("src.utils.sso.requests.post")
+def test_exchange_google_code_sanitizes_username(mock_post, mock_get, monkeypatch):
+    """Test that email with special characters (dots, pluses) produces a sanitized username."""
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "dummy_client_id")
+    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "dummy_secret")
+
+    mock_post.return_value.ok = True
+    mock_post.return_value.status_code = 200
+    mock_post.return_value.json.return_value = {"access_token": "google_token_123"}
+
+    mock_get.return_value.ok = True
+    mock_get.return_value.status_code = 200
+    mock_get.return_value.json.return_value = {
+        "email": "john.doe+class@school.edu",
+        "name": "John Doe",
+        "picture": "https://example.com/avatar.png",
+    }
+
+    user_data, error_msg = exchange_google_code("valid_code")
+    assert user_data == SSOUserProfile(
+        email="john.doe+class@school.edu",
+        username="john_doe_class",
+        name="John Doe",
+        avatar="https://example.com/avatar.png",
+    )
+    assert error_msg is None
+
+
 @patch("src.utils.sso.requests.post")
 def test_exchange_google_code_unauthorized(mock_post, monkeypatch):
     """Test Google OAuth returns 4xx error message when authorization code is rejected."""
@@ -97,7 +128,7 @@ def test_get_github_auth_url_missing_client_id(monkeypatch):
 
 def test_get_github_auth_url_success(monkeypatch):
     monkeypatch.setenv("GITHUB_CLIENT_ID", "dummy_github_client_id")
-    url, state = get_github_auth_url()
+    url, state, *rest = get_github_auth_url()
     assert "dummy_github_client_id" in url
     assert state.startswith("github_")
 
@@ -420,6 +451,91 @@ def test_exchange_github_code_private_email_fallback_issue_3454(mock_post, mock_
     # Check secondary GET /user/emails call arguments
     second_call_url = mock_get.call_args_list[1][0][0]
     assert second_call_url == "https://api.github.com/user/emails"
+
+
+def test_get_azure_auth_url_missing_client_id(monkeypatch):
+    monkeypatch.delenv("AZURE_CLIENT_ID", raising=False)
+    with pytest.raises(
+        ValueError, match="AZURE_CLIENT_ID environment variable is not configured"
+    ):
+        get_azure_auth_url()
+
+
+def test_get_azure_auth_url_success(monkeypatch):
+    monkeypatch.setenv("AZURE_CLIENT_ID", "dummy_azure_client_id")
+    monkeypatch.delenv("AZURE_TENANT_ID", raising=False)
+    url, state = get_azure_auth_url()
+    assert "dummy_azure_client_id" in url
+    assert "login.microsoftonline.com/common/oauth2/v2.0/authorize" in url
+    assert state.startswith("azure_")
+
+
+def test_get_azure_auth_url_custom_tenant(monkeypatch):
+    monkeypatch.setenv("AZURE_CLIENT_ID", "dummy_azure_client_id")
+    monkeypatch.setenv("AZURE_TENANT_ID", "contoso-tenant-id")
+    url, state = get_azure_auth_url()
+    assert "login.microsoftonline.com/contoso-tenant-id/oauth2/v2.0/authorize" in url
+
+
+def test_exchange_azure_code_missing_client_id(monkeypatch):
+    monkeypatch.delenv("AZURE_CLIENT_ID", raising=False)
+    monkeypatch.setenv("AZURE_CLIENT_SECRET", "dummy_secret")
+    with pytest.raises(
+        ValueError, match="AZURE_CLIENT_ID environment variable is not configured"
+    ):
+        exchange_azure_code("dummy_code")
+
+
+def test_exchange_azure_code_missing_client_secret(monkeypatch):
+    monkeypatch.setenv("AZURE_CLIENT_ID", "dummy_client_id")
+    monkeypatch.delenv("AZURE_CLIENT_SECRET", raising=False)
+    with pytest.raises(
+        ValueError, match="AZURE_CLIENT_SECRET environment variable is not configured"
+    ):
+        exchange_azure_code("dummy_code")
+
+
+@patch("src.utils.sso.requests.get")
+@patch("src.utils.sso.requests.post")
+def test_exchange_azure_code_success(mock_post, mock_get, monkeypatch):
+    monkeypatch.setenv("AZURE_CLIENT_ID", "dummy_client_id")
+    monkeypatch.setenv("AZURE_CLIENT_SECRET", "dummy_secret")
+    monkeypatch.setenv("AZURE_TENANT_ID", "custom_tenant")
+
+    mock_post.return_value.ok = True
+    mock_post.return_value.status_code = 200
+    mock_post.return_value.json.return_value = {"access_token": "azure_token_123"}
+
+    mock_get.return_value.ok = True
+    mock_get.return_value.status_code = 200
+    mock_get.return_value.json.return_value = {
+        "mail": "john.doe@university.edu",
+        "displayName": "John Doe",
+        "userPrincipalName": "john.doe@university.edu",
+    }
+
+    user_data, error_msg = exchange_azure_code("valid_code")
+    assert user_data == SSOUserProfile(
+        email="john.doe@university.edu",
+        username="john_doe",
+        name="John Doe",
+        avatar="",
+    )
+    assert error_msg is None
+    mock_post.assert_called_once()
+    mock_get.assert_called_once()
+
+
+@patch("src.utils.sso.requests.post")
+def test_azure_oauth_token_exchange_timeout(mock_post, monkeypatch):
+    monkeypatch.setenv("AZURE_CLIENT_ID", "dummy_client_id")
+    monkeypatch.setenv("AZURE_CLIENT_SECRET", "dummy_secret")
+
+    mock_post.side_effect = requests.Timeout()
+
+    user_data, error_msg = exchange_azure_code("valid_code")
+    assert user_data is None
+    assert error_msg == "SSO provider timed out. Please try again."
 
 
 

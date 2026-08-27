@@ -4,6 +4,7 @@ test_daily_summary_email.py
 Tests for daily summary email functionality and HTML template generation.
 """
 
+import html
 import re
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
@@ -1410,5 +1411,362 @@ class TestIncidentCsvAttachment:
         assert len(lines) == 51  # Header + 50 rows
         for i in range(50):
             assert f"INC-{i:03d}" in csv_text
+
+
+# ---------------------------------------------------------------------------
+# Unit tests for HTML entity escaping in daily summary email rows (#3442)
+# ---------------------------------------------------------------------------
+
+
+class TestHtmlEntityEscapingDailySummaryEmail:
+    """Test suite verifying HTML entity escaping in incident table rows and email templates (#3442)."""
+
+    def test_build_incident_row_html_escapes_script_tags(self):
+        """Verify script tags in document_a and document_b are escaped to &lt;script&gt;."""
+        inc = {
+            "document_a": "<script>alert('XSS')</script>.pdf",
+            "document_b": "<img src=x onerror=alert(1)>.docx",
+            "similarity_score": 0.88,
+            "date_flagged": "2026-08-25",
+        }
+        row_html = build_incident_row_html(inc)
+
+        assert "<script>" not in row_html
+        assert "</script>" not in row_html
+        assert "&lt;script&gt;alert(&#x27;XSS&#x27;)&lt;/script&gt;.pdf" in row_html or "&lt;script&gt;alert(&#39;XSS&#39;)&lt;/script&gt;.pdf" in row_html or "&lt;script&gt;alert('XSS')&lt;/script&gt;.pdf" in row_html
+        assert "<img src=x" not in row_html
+        assert "&lt;img src=x onerror=alert(1)&gt;.docx" in row_html
+
+    def test_build_incident_row_html_escapes_special_html_characters(self):
+        """Verify &, <, >, \", ' in filenames are escaped."""
+        inc = {
+            "document_a": "Physics & Math <Calculus> \"Final\".pdf",
+            "document_b": "Literature 'Draft' & Notes.docx",
+            "similarity_score": 0.72,
+            "date_flagged": "2026-08-25 12:00 <UTC>",
+        }
+        row_html = build_incident_row_html(inc)
+
+        assert "Physics &amp; Math &lt;Calculus&gt;" in row_html
+        assert "&lt;UTC&gt;" in row_html
+        assert "<Calculus>" not in row_html
+        assert "<UTC>" not in row_html
+
+    def test_build_incident_row_html_with_link_and_malicious_id(self):
+        """Verify incident_id containing quotes or tags is properly escaped in anchor tag."""
+        inc = {
+            "incident_id": '42" onclick="alert(1)',
+            "document_a": "<b>Important_Paper.pdf</b>",
+            "document_b": "DocB.txt",
+            "similarity_score": 0.95,
+            "date_flagged": "2026-08-25",
+        }
+        row_html = build_incident_row_html(inc)
+
+        assert '42&quot; onclick=&quot;alert(1)' in row_html or '42" onclick="alert(1)' not in row_html
+        assert "<b>" not in row_html
+        assert "&lt;b&gt;Important_Paper.pdf&lt;/b&gt;" in row_html
+
+    def test_build_email_html_body_escapes_all_incidents(self):
+        """Verify entire email body preserves valid HTML structure while escaping all incident rows."""
+        incidents = [
+            {
+                "document_a": "<iframe src='http://evil.com'></iframe>",
+                "document_b": "<svg/onload=alert(1)>",
+                "similarity_score": 0.91,
+                "severity_rank": "High",
+                "date_flagged": "2026-08-25",
+            },
+            {
+                "document_a": "Safe_Doc_A.pdf",
+                "document_b": "<style>body{display:none}</style>",
+                "similarity_score": 0.65,
+                "severity_rank": "Medium",
+                "date_flagged": "2026-08-25",
+            },
+        ]
+        html_body = build_email_html_body(incidents, total_scans=50)
+
+        assert "<iframe" not in html_body
+        assert "<svg" not in html_body
+        assert "<style>body" not in html_body
+        assert "&lt;iframe src=&#x27;http://evil.com&#x27;&gt;&lt;/iframe&gt;" in html_body or "&lt;iframe src='http://evil.com'&gt;&lt;/iframe&gt;" in html_body or "&lt;iframe" in html_body
+        assert "&lt;svg/onload=alert(1)&gt;" in html_body
+        assert "&lt;style&gt;body{display:none}&lt;/style&gt;" in html_body
+
+    def test_generate_daily_summary_html_escapes_top_pairs(self):
+        """Verify generate_daily_summary_html escapes filenames in top pairs table."""
+        stats = {
+            "total_scans": 120,
+            "flagged_incidents": 5,
+            "avg_similarity": 0.82,
+            "top_pairs": [
+                {
+                    "doc_a": "<script>evil()</script>.docx",
+                    "doc_b": "normal_doc.pdf",
+                    "similarity": 0.96,
+                },
+                {
+                    "doc_a": "Doc1.pdf",
+                    "doc_b": "<a href='javascript:steal()'>Click</a>",
+                    "similarity": 0.89,
+                },
+            ],
+        }
+        summary_html = generate_daily_summary_html(stats)
+
+        assert "<script>evil()</script>" not in summary_html
+        assert "&lt;script&gt;evil()&lt;/script&gt;.docx" in summary_html
+        assert "<a href='javascript:steal()'>" not in summary_html
+        assert "&lt;a href=&#x27;javascript:steal()&#x27;&gt;Click&lt;/a&gt;" in summary_html or "&lt;a href='javascript:steal()' style=" not in summary_html
+
+    @pytest.mark.parametrize(
+        "unsafe_filename,expected_fragment",
+        [
+            ("<script>alert(1)</script>", "&lt;script&gt;alert(1)&lt;/script&gt;"),
+            ("doc<tag>.pdf", "doc&lt;tag&gt;.pdf"),
+            ("item & entity", "item &amp; entity"),
+            ("quote\"test\".docx", "quote&quot;test&quot;.docx"),
+            ("<h1>Big Title</h1>", "&lt;h1&gt;Big Title&lt;/h1&gt;"),
+            ("<style>.hide{display:none}</style>", "&lt;style&gt;.hide{display:none}&lt;/style&gt;"),
+            ("<body onload=calc()>", "&lt;body onload=calc()&gt;"),
+            ("<input type='text'>", "&lt;input type=&#x27;text&#x27;&gt;" if "&#x27;" in html.escape("<input type='text'>") else "&lt;input type='text'&gt;"),
+        ],
+    )
+    def test_build_incident_row_html_parametrized_xss_payloads(self, unsafe_filename, expected_fragment):
+        """Verify a variety of XSS vectors are neutralized in build_incident_row_html."""
+        inc = {
+            "document_a": unsafe_filename,
+            "document_b": "clean_partner.pdf",
+            "similarity_score": 0.85,
+            "date_flagged": "2026-08-25",
+        }
+        row = build_incident_row_html(inc)
+        assert unsafe_filename not in row or "<" not in unsafe_filename
+        assert expected_fragment in row
+
+    def test_build_incident_row_html_non_string_values_coerced(self):
+        """Verify non-string values passed in document fields are safely converted and escaped."""
+        inc = {
+            "document_a": 12345,
+            "document_b": None,
+            "similarity_score": 0.50,
+            "date_flagged": 20260825,
+        }
+        row = build_incident_row_html(inc)
+        assert "12345" in row
+        assert "None" in row
+        assert "20260825" in row
+
+    def test_build_severity_section_html_escapes_all_incidents_in_table(self):
+        """Verify build_severity_section_html escapes HTML in grouped severity tables."""
+        incidents = [
+            {
+                "document_a": "<img src=x onerror=alert('A')>.pdf",
+                "document_b": "<svg onload=alert('B')>.docx",
+                "similarity_score": 0.92,
+                "date_flagged": "2026-08-25",
+            },
+            {
+                "document_a": "Doc & Ampersand.txt",
+                "document_b": "Doc < LessThan.txt",
+                "similarity_score": 0.89,
+                "date_flagged": "2026-08-25",
+            },
+        ]
+        section_html = build_severity_section_html("High", incidents)
+        assert "<img src=x" not in section_html
+        assert "<svg" not in section_html
+        assert "&lt;img src=x onerror=alert(&#x27;A&#x27;)&gt;.pdf" in section_html or "&lt;img src=x" in section_html
+        assert "Doc &amp; Ampersand.txt" in section_html
+        assert "Doc &lt; LessThan.txt" in section_html
+
+    def test_build_email_html_body_with_malicious_footer_note_is_preserved_or_controlled(self):
+        """Verify that footer note and incident data render together safely."""
+        incidents = [
+            {
+                "document_a": "<script>alert('doc_a')</script>",
+                "document_b": "doc_b.pdf",
+                "similarity_score": 0.77,
+                "severity_rank": "High",
+                "date_flagged": "2026-08-25",
+            }
+        ]
+        html_body = build_email_html_body(incidents, total_scans=10, footer_note="Review carefully.")
+        assert "<script>alert('doc_a')</script>" not in html_body
+        assert "&lt;script&gt;alert(&#x27;doc_a&#x27;)&lt;/script&gt;" in html_body or "&lt;script&gt;alert('doc_a')&lt;/script&gt;" in html_body or "&lt;script&gt;" in html_body
+        assert "Review carefully." in html_body
+
+    def test_build_incident_row_html_preserves_anchor_tag_markup_while_escaping_text(self):
+        """Verify the <a> anchor tag structure itself is preserved while document_a content inside is escaped."""
+        inc = {
+            "incident_id": "1001",
+            "document_a": "Essay <Revision 2>.pdf",
+            "document_b": "Original <Source>.pdf",
+            "similarity_score": 0.94,
+            "date_flagged": "2026-08-25",
+        }
+        row = build_incident_row_html(inc)
+        assert '<a href="http://localhost:8501/incident/1001"' in row
+        assert "Essay &lt;Revision 2&gt;.pdf</a>" in row
+        assert "Original &lt;Source&gt;.pdf" in row
+        assert "<Revision 2>" not in row
+        assert "<Source>" not in row
+
+    @pytest.mark.parametrize(
+        "doc_name",
+        [
+            '"><script>alert(document.cookie)</script>',
+            "';alert(1);//",
+            '<b onmouseover="alert(\'hover\')">hover me</b>',
+            '<a href="javascript:alert(1)">click</a>',
+            '<iframe src="javascript:alert(1)"></iframe>',
+            '<object data="javascript:alert(1)"></object>',
+            '<embed src="javascript:alert(1)"></embed>',
+            '<meta http-equiv="refresh" content="0;url=http://evil.com">',
+            '<link rel="stylesheet" href="http://evil.com/evil.css">',
+            '<style>body{background:red}</style>',
+            '<<SCRIPT>alert("XSS");//<</SCRIPT>',
+            '<script src="http://evil.com/xss.js"></script>',
+            '<body onload="alert(1)">',
+            '<img src="javascript:alert(1)">',
+            '<svg/onload=alert(1)>',
+            '<details open ontoggle=alert(1)>',
+            '<audio src onloadstart=alert(1)>',
+            '<video src onerror=alert(1)>',
+            '<textarea autofocus onfocus=alert(1)>',
+            '<keygen autofocus onfocus=alert(1)>',
+        ],
+    )
+    def test_build_incident_row_html_comprehensive_xss_vectors(self, doc_name):
+        """Verify comprehensive set of 20 distinct OWASP/XSS vectors are sanitized into HTML entities."""
+        inc = {
+            "incident_id": "test_id",
+            "document_a": doc_name,
+            "document_b": doc_name,
+            "similarity_score": 0.99,
+            "date_flagged": "2026-08-25",
+        }
+        row = build_incident_row_html(inc)
+        # Verify no unescaped tag delimiters or active executable tags in table cells
+        assert "<script" not in row.lower()
+        assert "<iframe" not in row.lower()
+        assert "<object" not in row.lower()
+        assert "<embed" not in row.lower()
+        assert "<meta" not in row.lower()
+        assert "<style" not in row.lower()
+        assert "<details" not in row.lower()
+        assert "<audio" not in row.lower()
+        assert "<video" not in row.lower()
+        assert "<textarea" not in row.lower()
+        assert "<keygen" not in row.lower()
+        assert "<svg" not in row.lower()
+
+    def test_send_daily_summary_with_xss_incidents_escapes_in_email(self):
+        """Verify full send_daily_summary pipeline generates and delivers escaped HTML body."""
+        with patch("src.utils.daily_summary_email.send_email") as mock_send, \
+             patch("src.utils.daily_summary_email.get_admin_emails") as mock_admins, \
+             patch("src.utils.daily_summary_email.get_incidents_last_24h") as mock_incidents:
+            mock_admins.return_value = ["admin@example.com"]
+            mock_incidents.return_value = [
+                {
+                    "incident_id": "INC-XSS-1",
+                    "document_a": "<script>alert(1)</script>.pdf",
+                    "document_b": "<img src=x onerror=alert(2)>.docx",
+                    "similarity_score": 0.98,
+                    "severity_rank": "High",
+                    "review_status": "Pending",
+                    "date_flagged": "2026-08-25",
+                }
+            ]
+            mock_send.return_value = True
+
+            result = send_daily_summary()
+            assert result is True
+            mock_send.assert_called_once()
+            delivered_html = mock_send.call_args[0][2]
+            assert "<script>alert(1)</script>" not in delivered_html
+            assert "&lt;script&gt;alert(1)&lt;/script&gt;.pdf" in delivered_html
+            assert "<img src=x" not in delivered_html
+            assert "&lt;img src=x onerror=alert(2)&gt;.docx" in delivered_html
+
+    def test_build_incident_row_html_control_characters_and_entities_combined(self):
+        """Verify filenames with both HTML entities and punctuation are safely transformed."""
+        inc = {
+            "document_a": "Essay_1 <v2> & notes [final].pdf",
+            "document_b": "Essay_2 \"quoted\" & 'single'.docx",
+            "similarity_score": 0.825,
+            "date_flagged": "2026-08-25",
+        }
+        row = build_incident_row_html(inc)
+        assert "Essay_1 &lt;v2&gt; &amp; notes [final].pdf" in row
+        assert "Essay_2 &quot;quoted&quot; &amp; &#x27;single&#x27;.docx" in row or "Essay_2 &quot;quoted&quot; &amp; 'single'.docx" in row or "&#39;single&#39;" in row
+
+    def test_build_incident_row_html_numeric_similarity_precision_formatting(self):
+        """Verify similarity percentage format retains clean numeric output alongside escaped names."""
+        inc = {
+            "document_a": "<test>.pdf",
+            "document_b": "regular.pdf",
+            "similarity_score": 0.9542,
+            "date_flagged": "2026-08-25",
+        }
+        row = build_incident_row_html(inc)
+        assert "95.42%" in row
+        assert "&lt;test&gt;.pdf" in row
+
+    def test_generate_daily_summary_html_with_empty_and_escaped_top_pairs(self):
+        """Verify generate_daily_summary_html properly formats mixed safe and unsafe top pairs."""
+        stats = {
+            "total_scans": 20,
+            "flagged_incidents": 2,
+            "avg_similarity": 0.75,
+            "top_pairs": [
+                {
+                    "doc_a": "<svg onload=alert(1)>",
+                    "doc_b": "<iframe src='http://evil.com'>",
+                    "similarity": 0.95,
+                },
+                {
+                    "doc_a": "Clean_Doc_1.txt",
+                    "doc_b": "Clean_Doc_2.txt",
+                    "similarity": 0.80,
+                },
+            ],
+        }
+        rendered = generate_daily_summary_html(stats)
+        assert "<svg onload" not in rendered
+        assert "<iframe" not in rendered
+        assert "&lt;svg onload=alert(1)&gt;" in rendered
+        assert "&lt;iframe src=&#x27;http://evil.com&#x27;&gt;" in rendered or "&lt;iframe src='http://evil.com'&gt;" in rendered
+        assert "Clean_Doc_1.txt" in rendered
+        assert "Clean_Doc_2.txt" in rendered
+
+    def test_build_incident_row_html_empty_and_whitespace_keys(self):
+        """Verify empty and whitespace strings in incident dictionary format correctly with escaping."""
+        inc = {
+            "document_a": "",
+            "document_b": "   ",
+            "similarity_score": 0.0,
+            "date_flagged": "",
+        }
+        row = build_incident_row_html(inc)
+        assert '<td style="padding: 12px; border-bottom: 1px solid #eeeeee; color: #333333;"></td>' in row
+        assert "0.00%" in row
+
+    def test_build_incident_row_html_unicode_cjk_characters(self):
+        """Verify non-ASCII unicode filenames (e.g., CJK, Cyrillic) pass through safely without corruption."""
+        inc = {
+            "document_a": "論文_提出_2026.pdf",
+            "document_b": "Научная_работа_Финал.docx",
+            "similarity_score": 0.93,
+            "date_flagged": "2026-08-25",
+        }
+        row = build_incident_row_html(inc)
+        assert "論文_提出_2026.pdf" in row
+        assert "Научная_работа_Финал.docx" in row
+
+
+
+
 
 
