@@ -123,6 +123,15 @@ jobs:
           # Issue #695 Implementation: Enabling pip cache
           cache-dependency-path: '**/requirements*.txt'
 
+      # Issue #3483: Cache HuggingFace transformer model weights
+      - name: Cache HuggingFace Hub
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface/hub
+          key: ${{ runner.os }}-hf-paraphrase-multilingual-MiniLM-L12-v2-${{ hashFiles('**/requirements*.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-hf-paraphrase-multilingual-MiniLM-L12-v2-
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip

@@ -506,13 +506,13 @@ def create_state_token(provider: str) -> Tuple[str, Dict[str, Any]]:
 
 def cleanup_expired_states(states: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
     """
-    Clean up expired state tokens from the database or in-memory store.
+    Remove expired state tokens from memory dictionary.
     
     Args:
-        states: Dictionary of stored states {state_token: state_data}
-    
+        states: Dictionary mapping state tokens to state metadata
+        
     Returns:
-        dict: Filtered dictionary with expired states removed
+        dict: Cleaned states dictionary
     """
     current_time = time.time()
     expiration_threshold = current_time - STATE_EXPIRATION_SECONDS
