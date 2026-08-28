@@ -55,7 +55,7 @@ class DocumentWarning:
     message: str = ""
     warning_type: str = ""
     details: dict[str, Any] = field(default_factory=dict)
-
+    occurrence_count: int = 1
     def to_dict(self) -> dict[str, Any]:
         return {
             "doc_a": self.doc_a,
@@ -64,9 +64,9 @@ class DocumentWarning:
             "severity": self.severity,
             "message": self.message,
             "warning_type": self.warning_type,
+            "occurrence_count": self.occurrence_count,
             **self.details,
         }
-
 
 class WarningList:
     """Collection manager for document warnings supporting filtering by severity."""
@@ -82,7 +82,7 @@ class WarningList:
 
     def add_warning(self, item: DocumentWarning | Mapping[str, Any]) -> None:
         if isinstance(item, DocumentWarning):
-            self.warnings.append(item)
+            dw = item
         elif isinstance(item, Mapping):
             dw = DocumentWarning(
                 doc_a=str(item.get("doc_a", "")),
@@ -93,8 +93,17 @@ class WarningList:
                 warning_type=str(item.get("warning_type", "")),
                 details=dict(item),
             )
-            self.warnings.append(dw)
+        else:
+            return
 
+        # Same (filename, code) pair already recorded — bump its count
+        # instead of adding a duplicate row to the UI warning panel.
+        for existing in self.warnings:
+            if existing.doc_a == dw.doc_a and existing.warning_type == dw.warning_type:
+                existing.occurrence_count += 1
+                return
+
+        self.warnings.append(dw)
     def filter_by_severity(self, severity: str) -> list[DocumentWarning]:
         """Filter warnings by severity level (e.g. 'High', 'Medium', 'Low')."""
         target = str(severity or "").strip().casefold()
