@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import html
-import re
-from typing import Any, Callable, Iterable, Mapping, Sequence
+import json
+import refrom typing import Any, Callable, Iterable, Mapping, Sequence
 
 import pandas as pd
 import streamlit as st
@@ -152,8 +152,39 @@ def filter_by_severity(
     return wl.filter_by_severity(target_severity)
 
 
-def _normalise_warning(
-    warning: Mapping[str, Any],
+def _warning_to_export_record(
+    item: DocumentWarning | Mapping[str, Any],
+) -> dict[str, str]:
+    """Flatten a warning into the Filename/Warning Code/Severity/Message row used for export."""
+    data = item.to_dict() if isinstance(item, DocumentWarning) else dict(item)
+    return {
+        "Filename": str(data.get("doc_a", "")),
+        "Warning Code": str(data.get("warning_type", "")),
+        "Severity": str(data.get("severity", "")),
+        "Message": str(data.get("message", "")),
+    }
+
+
+def export_warnings_to_csv(
+    warnings: Iterable[DocumentWarning | Mapping[str, Any]],
+) -> str:
+    """Export warnings to a CSV string with Filename, Warning Code, Severity, Message columns."""
+    records = [_warning_to_export_record(item) for item in warnings]
+    df = pd.DataFrame(
+        records, columns=["Filename", "Warning Code", "Severity", "Message"]
+    )
+    return df.to_csv(index=False)
+
+
+def export_warnings_to_json(
+    warnings: Iterable[DocumentWarning | Mapping[str, Any]],
+) -> str:
+    """Export warnings to a JSON string with Filename, Warning Code, Severity, Message keys."""
+    records = [_warning_to_export_record(item) for item in warnings]
+    return json.dumps(records, indent=2)
+
+
+def _normalise_warning(    warning: Mapping[str, Any],
 ) -> dict[str, Any]:
     try:
         similarity = float(warning.get("similarity", 0.0))
