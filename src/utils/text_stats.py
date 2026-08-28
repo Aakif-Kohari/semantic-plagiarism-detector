@@ -20,7 +20,8 @@ def count_words(text: str) -> int:
     Count the number of words in the given text.
 
     Words are defined as sequences of characters separated by whitespace.
-    Punctuation is stripped before counting.
+    Punctuation is stripped before counting. For CJK scripts, individual
+    characters are counted as individual word units.
 
     Args:
         text: The text to analyze
@@ -30,6 +31,13 @@ def count_words(text: str) -> int:
     """
     if not text:
         return 0
+
+    cjk_chars = re.findall(r"[\u4e00-\u9fff]", text)
+    if cjk_chars:
+        # Replace CJK characters with space to avoid merging adjacent English words
+        non_cjk_text = re.sub(r"[\u4e00-\u9fff]", " ", text)
+        words = re.findall(r"\b\w+\b", non_cjk_text.lower())
+        return len(cjk_chars) + len(words)
 
     # Remove punctuation and split on whitespace
     words = re.findall(r"\b\w+\b", text.lower())
@@ -79,6 +87,10 @@ _ABBREVIATION_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Spaced ellipsis such as ". . ." or ". . . ." — periods separated by whitespace
+# that represent a pause or omitted text rather than multiple sentence breaks.
+_SPACED_ELLIPSIS_RE = re.compile(r"(?:\.\s+)+\.")
+
 # Dotted acronyms such as "U.S.", "e.u." or "N.A.V.O." — any run of two or more
 # single letters each followed by a period. Written generically so the list
 # above does not need an entry per acronym.
@@ -99,11 +111,12 @@ _SENTENCE_ENDING_RE = re.compile(r"[.!?]+")
 def _mask_non_terminal_periods(text: str) -> str:
     """Replace periods that do not end a sentence with a placeholder.
 
-    Covers abbreviations, dotted acronyms and decimal points. The surrounding
-    letters are preserved so that word boundaries elsewhere in the text are
-    unaffected — only the period itself is swapped out.
+    Covers abbreviations, dotted acronyms, decimal points, and spaced ellipses.
+    The surrounding letters are preserved so that word boundaries elsewhere in
+    the text are unaffected — only the period itself is swapped out.
     """
-    masked = _DECIMAL_POINT_RE.sub(_PROTECTED_PERIOD, text)
+    masked = _SPACED_ELLIPSIS_RE.sub(_PROTECTED_PERIOD, text)
+    masked = _DECIMAL_POINT_RE.sub(_PROTECTED_PERIOD, masked)
     masked = _DOTTED_ACRONYM_RE.sub(
         lambda match: match.group(0).replace(".", _PROTECTED_PERIOD),
         masked,
@@ -120,8 +133,9 @@ def count_sentences(text: str) -> int:
     Count the number of sentences in the given text.
 
     Sentences are identified by periods, exclamation marks, and question marks.
-    Periods belonging to common abbreviations ("Dr."), dotted acronyms ("U.S.")
-    and decimal numbers ("3.14") are excluded so they do not inflate the count.
+    Periods belonging to common abbreviations ("Dr."), dotted acronyms ("U.S."),
+    decimal numbers ("3.14"), and spaced ellipses (". . .") are excluded so they
+    do not inflate the count.
 
     Non-empty text always counts as at least one sentence, so a run of words
     with no terminal punctuation is reported as a single sentence rather than
@@ -276,36 +290,47 @@ def format_text_stats(text: str) -> str:
     return f"**Words:** {words} | **Characters:** {chars} | **Est. Reading Time:** {time} min | **Flesch Reading Ease:** {reading_ease} | **Flesch-Kincaid Grade:** {grade_level}"
 
 
-def count_syllables_in_word(word: str) -> int:
-    """Estimate the syllable count of a single word using basic heuristics."""
+def count_syllables(word: str) -> int:
+    """
+    Estimate the syllable count of a single English word.
+
+    Uses regex-based vowel group counting with silent 'e' deductions.
+
+    Args:
+        word: The word to analyze
+
+    Returns:
+        Estimated syllable count (at least 1 for non-empty words)
+    """
     word = word.lower().strip()
     if not word:
         return 0
-    word = "".join([c for c in word if c.isalpha()])
+
+    # Strip non-alphabetic characters
+    word = re.sub(r"[^a-z]", "", word)
     if not word:
         return 0
 
-    vowels = "aeiouy"
-    count = 0
-    is_prev_vowel = False
+    # Count vowel groups
+    vowel_groups = re.findall(r"[aeiouy]+", word)
+    count = len(vowel_groups)
 
-    for char in word:
-        is_vowel = char in vowels
-        if is_vowel and not is_prev_vowel:
-            count += 1
-        is_prev_vowel = is_vowel
-
+    # Silent 'e' deductions
     if word.endswith("e"):
+        vowels = "aeiouy"
         is_consonant_le = (
             len(word) >= 3 and word.endswith("le") and word[-3] not in vowels
         )
         if not is_consonant_le:
             count -= 1
 
-    if count <= 0:
-        count = 1
+    # Return at least 1 syllable for non-empty words
+    return max(1, count)
 
-    return count
+
+def count_syllables_in_word(word: str) -> int:
+    """Estimate the syllable count of a single word using basic heuristics."""
+    return count_syllables(word)
 
 
 def get_syllable_count(text: str) -> int:
