@@ -79,6 +79,10 @@ _ABBREVIATION_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Spaced ellipsis such as ". . ." or ". . . ." — periods separated by whitespace
+# that represent a pause or omitted text rather than multiple sentence breaks.
+_SPACED_ELLIPSIS_RE = re.compile(r"(?:\.\s+)+\.")
+
 # Dotted acronyms such as "U.S.", "e.u." or "N.A.V.O." — any run of two or more
 # single letters each followed by a period. Written generically so the list
 # above does not need an entry per acronym.
@@ -99,11 +103,12 @@ _SENTENCE_ENDING_RE = re.compile(r"[.!?]+")
 def _mask_non_terminal_periods(text: str) -> str:
     """Replace periods that do not end a sentence with a placeholder.
 
-    Covers abbreviations, dotted acronyms and decimal points. The surrounding
-    letters are preserved so that word boundaries elsewhere in the text are
-    unaffected — only the period itself is swapped out.
+    Covers abbreviations, dotted acronyms, decimal points, and spaced ellipses.
+    The surrounding letters are preserved so that word boundaries elsewhere in
+    the text are unaffected — only the period itself is swapped out.
     """
-    masked = _DECIMAL_POINT_RE.sub(_PROTECTED_PERIOD, text)
+    masked = _SPACED_ELLIPSIS_RE.sub(_PROTECTED_PERIOD, text)
+    masked = _DECIMAL_POINT_RE.sub(_PROTECTED_PERIOD, masked)
     masked = _DOTTED_ACRONYM_RE.sub(
         lambda match: match.group(0).replace(".", _PROTECTED_PERIOD),
         masked,
@@ -120,8 +125,9 @@ def count_sentences(text: str) -> int:
     Count the number of sentences in the given text.
 
     Sentences are identified by periods, exclamation marks, and question marks.
-    Periods belonging to common abbreviations ("Dr."), dotted acronyms ("U.S.")
-    and decimal numbers ("3.14") are excluded so they do not inflate the count.
+    Periods belonging to common abbreviations ("Dr."), dotted acronyms ("U.S."),
+    decimal numbers ("3.14"), and spaced ellipses (". . .") are excluded so they
+    do not inflate the count.
 
     Non-empty text always counts as at least one sentence, so a run of words
     with no terminal punctuation is reported as a single sentence rather than
