@@ -333,9 +333,35 @@ class TestDetectChunkLanguage:
         text = "Der schnelle braune Fuchs springt über den faulen Hund."
         assert detect_chunk_language(text) == "de"
 
-    def test_detect_chinese(self):
-        text = "快速的棕色狐狸跳过懒狗。"
+    def test_detect_chinese_simplified(self):
+        """Verify that detect_chunk_language detects simplified Chinese paragraphs."""
+        text = "这是一个关于自然语言处理 and 机器翻译系统的测试段落。我们将通过分析这段文字来验证语言识别逻辑的准确性。"
         assert detect_chunk_language(text) == "zh"
+
+    def test_detect_chinese_traditional(self):
+        """Verify that detect_chunk_language detects traditional Chinese paragraphs."""
+        text = "這是一個關於自然語言處理 and 機器翻譯系統的測試段落。我們將通過分析這段文字來驗證語言識別邏輯的準確性。"
+        assert detect_chunk_language(text) == "zh"
+
+    def test_detect_japanese_hiragana_katakana(self):
+        """Verify that detect_chunk_language detects Japanese paragraphs containing Hiragana and Katakana."""
+        text = "日本語のひらがなとカタカナ、そして漢字が混在しているテスト用の文章です。プログラムが正しく検知できるかテストします。"
+        assert detect_chunk_language(text) == "ja"
+
+    def test_detect_mixed_cjk_english(self):
+        """Verify that mixed CJK and English texts are correctly identified."""
+        zh_en = "We are testing the alignment system for our project. 这是一个用于测试混合文本语言识别效果的段落。"
+        ja_en = "Hiragana (ひらがな) and Katakana (カタカナ) are fundamental Japanese scripts used alongside Kanji."
+        assert detect_chunk_language(zh_en) == "zh"
+        assert detect_chunk_language(ja_en) == "ja"
+
+    def test_detect_arabic(self):
+        text = "الثعلب البني السريع يقفز فوق الكلب الكسول."
+        assert detect_chunk_language(text) == "ar"
+
+    def test_detect_hindi(self):
+        text = "तेज भूरी लोमड़ी आलसी कुत्ते के ऊपर से कूदती है।"
+        assert detect_chunk_language(text) == "hi"
 
     def test_detect_english_default(self):
         text = "The quick brown fox jumps over the lazy dog."
