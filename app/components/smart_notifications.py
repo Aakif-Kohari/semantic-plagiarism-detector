@@ -880,9 +880,10 @@ def render_notification_badge():
         unread = manager.get_unread_count(user)
         
         if unread > 0:
+            label = f"{unread} New Notification{'s' if unread != 1 else ''}"
             st.sidebar.markdown(
                 f"""
-                <div style="
+                <div role="button" aria-label="{label}" style="
                     background-color: #ff4b4b;
                     color: white;
                     padding: 8px 12px;
@@ -891,7 +892,7 @@ def render_notification_badge():
                     font-weight: bold;
                     margin: 10px 0;
                 ">
-                    🔔 {unread} New Notification{'s' if unread > 1 else ''}
+                    🔔 {label}
                 </div>
                 """,
                 unsafe_allow_html=True
