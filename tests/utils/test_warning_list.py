@@ -473,9 +473,18 @@ class TestEscapeJsString:
         assert escape_js_string(12) == "12"
 
 
-def test_truncate_search_query_numeric():
-    """Test that _truncate_search_query converts int/float search inputs to strings instead of returning empty."""
-    from src.utils.warning_list import _truncate_search_query
+def test_document_warning_creation_with_missing_optional_parameters():
+    """Verify DocumentWarning can be instantiated without optional fields without raising TypeError, and default values are set correctly."""
+    from src.utils.warning_list import DocumentWarning
+
+    # Instantiate with only required/code & message fields
+    warning = DocumentWarning(code="TEST", message="Test message")
+
+    assert warning.code == "TEST"
+    assert warning.message == "Test message"
+    assert warning.severity == "Medium"
+    assert warning.details is None
+    assert warning.page_number is None
 
     assert _truncate_search_query(12345) == "12345"
     assert _truncate_search_query(98.6) == "98.6"
