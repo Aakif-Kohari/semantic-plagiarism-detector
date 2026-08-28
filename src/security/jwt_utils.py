@@ -132,6 +132,7 @@ def _verify_jwt_token(
     token: str,
     expected_type: str,
     secret_key: Optional[str] = None,
+    clock_skew_seconds: int = 10,
 ) -> dict[str, Any]:
     """Shared implementation for verifying JWT signatures, expiration, and types."""
     if not token or not isinstance(token, str):
@@ -179,7 +180,7 @@ def _verify_jwt_token(
             exp_int = int(exp)
         except (TypeError, ValueError) as exc:
             raise ValueError(f"Invalid {expected_type} token: malformed exp claim.") from exc
-        if int(time.time()) >= exp_int:
+        if int(time.time()) >= exp_int + clock_skew_seconds:
             raise ValueError(f"{expected_type.capitalize()} token has expired.")
 
     token_type = payload.get("type")
@@ -192,6 +193,7 @@ def _verify_jwt_token(
 def verify_refresh_token(
     token: str,
     secret_key: Optional[str] = None,
+    clock_skew_seconds: int = 10,
 ) -> dict[str, Any]:
     """
     Verify refresh token signature and expiration timestamp.
@@ -199,6 +201,7 @@ def verify_refresh_token(
     Args:
         token: JWT refresh token or configured static testing refresh token.
         secret_key: Secret key used to verify signature. Uses JWT_SECRET_KEY if None.
+        clock_skew_seconds: Clock drift allowance in seconds.
 
     Returns:
         Decoded token payload dict.
@@ -219,12 +222,13 @@ def verify_refresh_token(
             )
         return {"sub": "test_user", "type": "refresh", "scopes": ["read", "write"]}
 
-    return _verify_jwt_token(token, "refresh", secret_key)
+    return _verify_jwt_token(token, "refresh", secret_key, clock_skew_seconds=clock_skew_seconds)
 
 
 def verify_access_token(
     token: str,
     secret_key: Optional[str] = None,
+    clock_skew_seconds: int = 10,
 ) -> dict[str, Any]:
     """
     Verify access token signature and expiration timestamp.
@@ -232,6 +236,7 @@ def verify_access_token(
     Args:
         token: JWT access token.
         secret_key: Secret key used to verify signature. Uses JWT_SECRET_KEY if None.
+        clock_skew_seconds: Clock drift allowance in seconds.
 
     Returns:
         Decoded token payload dict.
@@ -239,4 +244,4 @@ def verify_access_token(
     Raises:
         ValueError: If token signature is invalid, expired, wrong type, or secret is missing.
     """
-    return _verify_jwt_token(token, "access", secret_key)
+    return _verify_jwt_token(token, "access", secret_key, clock_skew_seconds=clock_skew_seconds)

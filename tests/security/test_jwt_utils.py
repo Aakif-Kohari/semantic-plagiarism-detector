@@ -76,3 +76,18 @@ def test_secret_key_set_after_import(monkeypatch):
     refresh_token = create_jwt_token({"sub": "frank", "type": "refresh"})
     refresh_payload = verify_refresh_token(refresh_token)
     assert refresh_payload["sub"] == "frank"
+
+
+def test_expired_token_with_clock_skew():
+    """Verify that verify_access_token respects clock_skew_seconds tolerance when check token expiration."""
+    # 1. Create a token that expired 5 seconds ago
+    token = create_jwt_token({"sub": "skew_user", "type": "access"}, expires_in_seconds=-5)
+
+    # 2. Verify with default clock skew (10 seconds), it should PASS (since -5 is within +10 skew)
+    payload = verify_access_token(token)
+    assert payload["sub"] == "skew_user"
+
+    # 3. Verify with custom clock skew (3 seconds), it should FAIL (since -5 is past +3 skew)
+    with pytest.raises(ValueError, match="expired"):
+        verify_access_token(token, clock_skew_seconds=3)
+
