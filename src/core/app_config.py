@@ -44,6 +44,18 @@ logger = logging.getLogger(__name__)
 # process that imports this module.
 _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 
+# ─── Environment & Secrets Validation (Issue #3748) ────────────────────────
+APP_ENV: Final[str] = os.getenv("APP_ENV", "development").strip().lower()
+JWT_SECRET_KEY: Final[str] = os.getenv("JWT_SECRET_KEY", "").strip()
+REDIS_PASSWORD: Final[str] = os.getenv("REDIS_PASSWORD", "").strip()
+
+if APP_ENV == "production":
+    # If secrets are unset ("") or using obvious default placeholders, halt startup.
+    _default_secrets = {"", "default", "changeme", "secret", "password"}
+    if JWT_SECRET_KEY in _default_secrets or REDIS_PASSWORD in _default_secrets:
+        raise SystemExit("Fatal: Default secrets detected in production environment.")
+
+
 # ─── Application display config (pre-existing) ─────────────────────────────
 DEFAULT_APP_TITLE: Final[str] = "Semantic Plagiarism Detection System"
 DEFAULT_PDF_FOOTER_TEXT: Final[str] = ""
@@ -123,7 +135,7 @@ def _get_env_int(
 get_env_int = _get_env_int
 
 
-def _get_env_bool(key: str, default: bool = False) -> bool:
+def _get_env_bool_alt(key: str, default: bool = False) -> bool:
     """Parse a boolean environment variable.
 
     Accepts "true"/"false", "1"/"0", and "yes"/"no" (case-insensitive,
@@ -150,9 +162,6 @@ def _get_env_bool(key: str, default: bool = False) -> bool:
         return False
     return default
 
-
-# Public alias
-get_env_bool = _get_env_bool
 
 # ─── Port configuration (issue #3742) ──────────────────────────────────────
 # Validated via ``_get_env_int`` so a non-numeric value in the environment
@@ -213,7 +222,8 @@ DATA_DIR: Final[Path] = _REPO_ROOT / "data"
 LOGS_DIR: Final[Path] = _REPO_ROOT / "logs"
 MODELS_DIR: Final[Path] = _REPO_ROOT / "models"
 
-# DB files inspected by the ``/healthz`` endpoint.  The two real SQLite DBs# are the corpus DB and the auth DB.  (The original implementation in
+# DB files inspected by the ``/healthz`` endpoint.  The two real SQLite DBs
+# are the corpus DB and the auth DB.  (The original implementation in
 # ``src/api/app.py`` inspected ``<repo>/corpus.db`` instead of
 # ``<repo>/data/corpus.db`` – a latent bug, since no code writes to that
 # location.  Centralizing here fixes that drift.)

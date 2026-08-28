@@ -24,7 +24,8 @@ def get_total_corpus_storage_bytes() -> int:
     total_bytes = usage.get("total_bytes", 0)
 
     data_dir = DATA_DIR
-    if data_dir.exists():        for p in data_dir.glob("**/*"):
+    if data_dir.exists():
+        for p in data_dir.glob("**/*"):
             if p.is_file() and p.suffix not in (".db", ".index"):
                 try:
                     total_bytes += p.stat().st_size
