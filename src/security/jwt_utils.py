@@ -18,6 +18,21 @@ from typing import Any, Dict, List, Optional, Set
 JWT_SECRET_KEY: Optional[str] = os.getenv("JWT_SECRET_KEY")
 JWT_ALGORITHM: str = "HS256"
 
+class JWTDecodeError(ValueError):
+    """Raised when the JWT structure is malformed or cannot be base64-decoded."""
+    pass
+
+
+class JWTExpiredError(ValueError):
+    """Raised when the token's 'exp' timestamp is in the past."""
+    pass
+
+
+class JWTSignatureError(ValueError):
+    """Raised when the cryptographic signature validation fails."""
+    pass
+
+
 _IS_TEST: bool = os.getenv("APP_ENV") == "test"
 
 # Static testing tokens only in test environment
@@ -136,7 +151,7 @@ def _verify_jwt_token(
 ) -> dict[str, Any]:
     """Shared implementation for verifying JWT signatures, expiration, and types."""
     if not token or not isinstance(token, str):
-        raise ValueError(f"Invalid {expected_type} token: token cannot be empty.")
+        raise JWTDecodeError(f"Invalid {expected_type} token: token cannot be empty.")
 
     token = token.strip()
 
@@ -149,7 +164,7 @@ def _verify_jwt_token(
 
     parts = token.split(".")
     if len(parts) != 3:
-        raise ValueError(f"Invalid {expected_type} token: malformed JWT structure.")
+        raise JWTDecodeError(f"Invalid {expected_type} token: malformed JWT structure.")
 
     encoded_header, encoded_payload, encoded_signature = parts
 
@@ -163,29 +178,29 @@ def _verify_jwt_token(
     try:
         actual_sig = base64url_decode(encoded_signature)
     except Exception as exc:
-        raise ValueError(f"Invalid {expected_type} token: invalid base64 signature encoding.") from exc
+        raise JWTDecodeError(f"Invalid {expected_type} token: invalid base64 signature encoding.") from exc
 
     if not hmac.compare_digest(expected_sig, actual_sig):
-        raise ValueError(f"Invalid {expected_type} token: signature verification failed.")
+        raise JWTSignatureError(f"Invalid {expected_type} token: signature verification failed.")
 
     try:
         payload_bytes = base64url_decode(encoded_payload)
         payload = json.loads(payload_bytes.decode("utf-8"))
     except Exception as exc:
-        raise ValueError(f"Invalid {expected_type} token: malformed JSON payload.") from exc
+        raise JWTDecodeError(f"Invalid {expected_type} token: malformed JSON payload.") from exc
 
     exp = payload.get("exp")
     if exp is not None:
         try:
             exp_int = int(exp)
         except (TypeError, ValueError) as exc:
-            raise ValueError(f"Invalid {expected_type} token: malformed exp claim.") from exc
+            raise JWTDecodeError(f"Invalid {expected_type} token: malformed exp claim.") from exc
         if int(time.time()) >= exp_int + clock_skew_seconds:
-            raise ValueError(f"{expected_type.capitalize()} token has expired.")
+            raise JWTExpiredError(f"{expected_type.capitalize()} token has expired.")
 
     token_type = payload.get("type")
     if token_type and token_type != expected_type:
-        raise ValueError(f"Invalid token type: expected '{expected_type}', got '{token_type}'.")
+        raise JWTDecodeError(f"Invalid token type: expected '{expected_type}', got '{token_type}'.")
 
     return payload
 
@@ -210,14 +225,14 @@ def verify_refresh_token(
         ValueError: If token signature is invalid, expired, wrong type, or secret is missing.
     """
     if not token or not isinstance(token, str):
-        raise ValueError("Invalid refresh token: token cannot be empty.")
+        raise JWTDecodeError("Invalid refresh token: token cannot be empty.")
 
     token = token.strip()
 
     # Support static / testing refresh tokens only in test environment
     if token in VALID_STATIC_REFRESH_TOKENS:
         if not _IS_TEST:
-            raise ValueError(
+            raise JWTDecodeError(
                 "Invalid refresh token: static testing tokens are not allowed outside test environment."
             )
         return {"sub": "test_user", "type": "refresh", "scopes": ["read", "write"]}
