@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Added comprehensive unit tests for executable magic byte detection (`MZ` PE headers and `#!/bin/sh` shebangs) in upload security validation (`tests/security/test_mime_validator.py`, `tests/security/test_executable_magic_detection_issue_3720.py`).
 - Added `docker-compose.override.yml` mounting `./src` and `./app` into container for live hot-reloading during local development (`docker-compose.override.yml`).
 - Automated fault tolerance test for mid-session Redis connection drop and graceful in-memory failover (`tests/core/test_fault_tolerance.py`, `tests/utils/test_redis_fallback_failover.py`).
 - Added `--recursive` support to the CLI scan command for scanning documents in nested subdirectories.
