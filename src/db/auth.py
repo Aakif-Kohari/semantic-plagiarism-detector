@@ -1815,6 +1815,8 @@ from typing import Set
 
 import streamlit as st
 
+from app.session_keys import SessionKeys
+
 # ============================================================================
 # ROLE DEFINITIONS
 # ============================================================================
@@ -2028,7 +2030,7 @@ def require_permission(permission: Permission):
         @wraps(func)
         def wrapper(*args, **kwargs):
             # Get username from session state
-            username = st.session_state.get(SessionKeys.USERNAME)  # noqa: F821
+            username = st.session_state.get(SessionKeys.USERNAME)
             if not username:
                 st.error("🔒 Authentication required.")
                 return None
@@ -2057,7 +2059,7 @@ def require_role(required_role: UserRole):
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
-            username = st.session_state.get(SessionKeys.USERNAME)  # noqa: F821
+            username = st.session_state.get(SessionKeys.USERNAME)
             if not username:
                 st.error("🔒 Authentication required.")
                 return None
@@ -2780,7 +2782,7 @@ def render_role_selector(username: str, current_role: str) -> None:
 
     if selected != current_role:
         if st.button(f"Update Role for {username}", key=f"role_update_{username}"):
-            admin = st.session_state.get(SessionKeys.USERNAME)  # noqa: F821
+            admin = st.session_state.get(SessionKeys.USERNAME)
             new_role = UserRole.from_string(selected)
             if promote_user(username, new_role, admin):
                 st.success(f"✅ Role updated to {selected} for {username}")
