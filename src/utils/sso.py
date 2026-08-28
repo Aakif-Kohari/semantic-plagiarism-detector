@@ -59,14 +59,22 @@ def _get_redirect_uri() -> str:
     return os.getenv("APP_BASE_URL", "http://localhost:8501")
 
 
-def verify_sso_state(state: str, stored_state: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
+def verify_sso_state_payload(
+    state: str, stored_state: Dict[str, Any]
+) -> Tuple[bool, Optional[str]]:
     """
-    Verify that the state token is valid and not expired.
-    
+    Verify a state token against the ``state_data`` payload it was issued with.
+
+    This is the stateless counterpart to :func:`verify_sso_state`. That one
+    asks the auth database whether a state row is live and unused; this one
+    checks a token against the dict returned as the third element of
+    :func:`get_google_auth_url` / :func:`get_github_auth_url`, which is useful
+    when the payload is held in the session rather than the database.
+
     Args:
         state: The state parameter received from the OAuth callback
         stored_state: The stored state data containing token and timestamp
-    
+
     Returns:
         tuple[bool, Optional[str]]: (is_valid, error_message)
     """
@@ -282,6 +290,11 @@ def exchange_google_code(code: str, state: str | None = None, code_verifier: str
 
 def verify_sso_state(state: str) -> bool:
     """Verify that the state parameter returned in the OAuth callback matches the stored value.
+
+    Checks the token against the ``sso_states`` table via
+    :func:`src.db.auth.validate_sso_state`, which also consumes the row so a
+    replayed callback is rejected. See :func:`verify_sso_state_payload` for the
+    stateless equivalent that validates a session-held ``state_data`` dict.
 
     Args:
         state: State token string returned from OAuth provider callback.

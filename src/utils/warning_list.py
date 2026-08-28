@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 import html
 import re
 from typing import Any, Callable, Iterable, Mapping, Sequence
@@ -27,9 +28,6 @@ MAX_SEARCH_QUERY_LENGTH = 200
 WARNING_SHORT_DOCUMENT = (
     "Document contains fewer than 50 words; similarity scoring may be unreliable."
 )
-WARNING_MIXED_LANGUAGES = (
-    "Document contains chunks in multiple languages ({languages}); similarity scoring and embeddings may be inconsistent."
-)
 
 _SORT_KEYS = {
     "warn_sort_similarity": "similarity",
@@ -46,70 +44,99 @@ def _sort_display_names(lang_code: str) -> dict[str, str]:
 WarningPage = PaginationPage[dict[str, Any]]
 
 
-def _detect_chunk_language(chunk: Any) -> str | None:
-    """Extract or detect language ISO code for a chunk."""
-    if isinstance(chunk, dict):
-        for key in ("language", "detected_language", "lang"):
-            if chunk.get(key):
-                return str(chunk[key]).strip().lower()
-        text = chunk.get("text", "")
+@dataclass
+class DocumentWarning:
+    """Represents a document-level plagiarism or processing warning."""
+
+    doc_a: str = ""
+    doc_b: str = ""
+    similarity: float = 0.0
+    severity: str = "Low"
+    message: str = ""
+    warning_type: str = ""
+    details: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "doc_a": self.doc_a,
+            "doc_b": self.doc_b,
+            "similarity": self.similarity,
+            "severity": self.severity,
+            "message": self.message,
+            "warning_type": self.warning_type,
+            **self.details,
+        }
+
+
+class WarningList:
+    """Collection manager for document warnings supporting filtering by severity."""
+
+    def __init__(
+        self,
+        warnings: Iterable[DocumentWarning | Mapping[str, Any]] | None = None,
+    ) -> None:
+        self.warnings: list[DocumentWarning] = []
+        if warnings:
+            for item in warnings:
+                self.add_warning(item)
+
+    def add_warning(self, item: DocumentWarning | Mapping[str, Any]) -> None:
+        if isinstance(item, DocumentWarning):
+            self.warnings.append(item)
+        elif isinstance(item, Mapping):
+            dw = DocumentWarning(
+                doc_a=str(item.get("doc_a", "")),
+                doc_b=str(item.get("doc_b", "")),
+                similarity=float(item.get("similarity", 0.0)),
+                severity=str(item.get("severity", "Low")),
+                message=str(item.get("message", "")),
+                warning_type=str(item.get("warning_type", "")),
+                details=dict(item),
+            )
+            self.warnings.append(dw)
+
+    def filter_by_severity(self, severity: str) -> list[DocumentWarning]:
+        """Filter warnings by severity level (e.g. 'High', 'Medium', 'Low')."""
+        target = str(severity or "").strip().casefold()
+        return [
+            w
+            for w in self.warnings
+            if w.severity.strip().casefold() == target
+        ]
+
+    def __len__(self) -> int:
+        return len(self.warnings)
+
+    def __iter__(self):
+        return iter(self.warnings)
+
+    def __getitem__(self, index: int) -> DocumentWarning:
+        return self.warnings[index]
+
+
+def filter_by_severity(
+    warnings_or_severity: Iterable[DocumentWarning | Mapping[str, Any]] | str,
+    severity: str | None = None,
+) -> list[DocumentWarning]:
+    """Filter warnings by severity level (e.g. 'High', 'Medium', 'Low').
+
+    Can be called as:
+      - filter_by_severity(warnings, "High")
+      - filter_by_severity("High", warnings)
+      - filter_by_severity("High")
+    """
+    if isinstance(warnings_or_severity, str):
+        target_severity = warnings_or_severity
+        items = severity if severity is not None else []
     else:
-        for attr in ("detected_language", "language", "lang"):
-            if hasattr(chunk, attr) and getattr(chunk, attr):
-                return str(getattr(chunk, attr)).strip().lower()
-        text = getattr(chunk, "text", str(chunk))
+        items = warnings_or_severity
+        target_severity = severity or ""
 
-    cleaned = " ".join(str(text or "").split())
-    if len(cleaned) < 15:
-        return None
+    if isinstance(items, WarningList):
+        return items.filter_by_severity(target_severity)
 
-    try:
-        from src.core.cross_lingual import detect_language
-        lang, confident = detect_language(cleaned)
-        if confident and lang:
-            return lang.strip().lower()
-    except Exception:
-        pass
-
-    try:
-        from langdetect import detect
-        lang_code = detect(cleaned)
-        if lang_code:
-            return str(lang_code).strip().lower()
-    except Exception:
-        pass
-
-    return None
-
-
-def _get_document_mixed_languages(
-    warning: Mapping[str, Any],
-    doc_name: str,
-    chunks_key: str,
-    explicit_lang_keys: Sequence[str],
-) -> set[str]:
-    """Detect all unique languages present across chunks for a single document."""
-    for key in explicit_lang_keys:
-        val = warning.get(key)
-        if isinstance(val, (list, tuple, set)) and len(val) > 0:
-            return {str(lang).strip().lower() for lang in val if lang}
-
-    chunks = warning.get(chunks_key)
-
-    if not chunks and doc_name and "analysis_results" in st.session_state and st.session_state.analysis_results is not None:
-        chunked_docs = _chunked_docs_from_results(st.session_state.analysis_results)
-        chunks = chunked_docs.get(doc_name, [])
-
-    if not chunks or not isinstance(chunks, Sequence):
-        return set()
-
-    detected: set[str] = set()
-    for chunk in chunks:
-        lang = _detect_chunk_language(chunk)
-        if lang:
-            detected.add(lang)
-
-    return detected
+    wl = WarningList(items if isinstance(items, Iterable) else [])
+    return wl.filter_by_severity(target_severity)
 
 
 def _normalise_warning(
@@ -128,13 +155,12 @@ def _normalise_warning(
 
     existing_warnings = warning.get("warnings")
     if isinstance(existing_warnings, (list, tuple, set)):
-        warnings_list = [str(w) for w in existing_warnings]
+        warnings_list = list(existing_warnings)
     elif isinstance(existing_warnings, str):
         warnings_list = [existing_warnings]
     else:
         warnings_list = []
 
-    # 1. Check SHORT_DOCUMENT warning (< 50 words)
     for wc_key in ("word_count", "word_count_a", "word_count_b"):
         val = warning.get(wc_key)
         if val is not None:
@@ -145,39 +171,6 @@ def _normalise_warning(
                     break
             except (TypeError, ValueError):
                 pass
-
-    # 2. Check MIXED_LANGUAGES warning
-    explicit_mixed = warning.get("mixed_languages") or warning.get("detected_languages") or warning.get("languages")
-    all_mixed_langs: set[str] = set()
-
-    if isinstance(explicit_mixed, (list, tuple, set)) and len(explicit_mixed) > 1:
-        all_mixed_langs = {str(l).strip().lower() for l in explicit_mixed if l}
-    else:
-        doc_a = str(warning.get("doc_a", "")).strip()
-        doc_b = str(warning.get("doc_b", "")).strip()
-
-        langs_a = _get_document_mixed_languages(
-            warning, doc_a, "chunks_a", ("doc_a_languages", "languages_a", "chunk_languages_a")
-        )
-        langs_b = _get_document_mixed_languages(
-            warning, doc_b, "chunks_b", ("doc_b_languages", "languages_b", "chunk_languages_b")
-        )
-
-        if len(langs_a) > 1:
-            all_mixed_langs.update(langs_a)
-        if len(langs_b) > 1:
-            all_mixed_langs.update(langs_b)
-
-        if not all_mixed_langs:
-            gen_langs = warning.get("chunk_languages")
-            if isinstance(gen_langs, (list, tuple, set)) and len(gen_langs) > 1:
-                all_mixed_langs = {str(l).strip().lower() for l in gen_langs if l}
-
-    if len(all_mixed_langs) > 1:
-        lang_str = ", ".join(sorted(all_mixed_langs))
-        msg = WARNING_MIXED_LANGUAGES.format(languages=lang_str)
-        if not any("multiple languages" in w or "mixed languages" in w for w in warnings_list):
-            warnings_list.append(msg)
 
     res = {
         **dict(warning),
@@ -207,6 +200,7 @@ def filter_warnings(
     warnings: Iterable[Mapping[str, Any]],
     search_query: str = "",
     min_match_length: int = 0,
+    severity: str | None = None,
 ) -> list[dict[str, Any]]:
     """Filter normalized warnings using functional predicate matching."""
     normalised = [_normalise_warning(item) for item in warnings]
@@ -216,6 +210,14 @@ def filter_warnings(
             item
             for item in normalised
             if item.get("matched_length", 0) >= min_match_length
+        ]
+
+    if severity:
+        target = severity.strip().casefold()
+        normalised = [
+            item
+            for item in normalised
+            if str(item.get("severity", "")).strip().casefold() == target
         ]
 
     predicate = matches_query_predicate(search_query)
@@ -970,6 +972,9 @@ def render_warning_controls(
                                         ai_b=ai_b,
                                     )
                                 )
+                        if flag.get("warnings"):
+                            for w_msg in flag["warnings"]:
+                                st.caption(f"⚠️ {w_msg}")
                     with c2:
                         st.markdown(
                             f"<div style='text-align:right;'>{badge_html(tier, flag['severity'])}</div>",

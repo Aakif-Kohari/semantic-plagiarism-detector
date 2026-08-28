@@ -70,7 +70,9 @@ def get_sqlite_db_paths() -> list[Path]:
 
     # 4. Search root and data directories for additional .db files
     base_dir = Path(__file__).resolve().parents[2]
-    data_dir = DATA_DIR    for folder in [base_dir, data_dir]:
+    data_dir = DATA_DIR
+
+    for folder in [base_dir, data_dir]:
         if folder.exists():
             for file_path in folder.glob("*.db"):
                 paths.append(file_path)
