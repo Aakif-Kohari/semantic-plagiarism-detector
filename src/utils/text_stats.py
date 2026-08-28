@@ -284,36 +284,47 @@ def format_text_stats(text: str) -> str:
     return f"**Words:** {words} | **Characters:** {chars} | **Est. Reading Time:** {time} min | **Flesch Reading Ease:** {reading_ease} | **Flesch-Kincaid Grade:** {grade_level}"
 
 
-def count_syllables_in_word(word: str) -> int:
-    """Estimate the syllable count of a single word using basic heuristics."""
+def count_syllables(word: str) -> int:
+    """
+    Estimate the syllable count of a single English word.
+
+    Uses regex-based vowel group counting with silent 'e' deductions.
+
+    Args:
+        word: The word to analyze
+
+    Returns:
+        Estimated syllable count (at least 1 for non-empty words)
+    """
     word = word.lower().strip()
     if not word:
         return 0
-    word = "".join([c for c in word if c.isalpha()])
+
+    # Strip non-alphabetic characters
+    word = re.sub(r"[^a-z]", "", word)
     if not word:
         return 0
 
-    vowels = "aeiouy"
-    count = 0
-    is_prev_vowel = False
+    # Count vowel groups
+    vowel_groups = re.findall(r"[aeiouy]+", word)
+    count = len(vowel_groups)
 
-    for char in word:
-        is_vowel = char in vowels
-        if is_vowel and not is_prev_vowel:
-            count += 1
-        is_prev_vowel = is_vowel
-
+    # Silent 'e' deductions
     if word.endswith("e"):
+        vowels = "aeiouy"
         is_consonant_le = (
             len(word) >= 3 and word.endswith("le") and word[-3] not in vowels
         )
         if not is_consonant_le:
             count -= 1
 
-    if count <= 0:
-        count = 1
+    # Return at least 1 syllable for non-empty words
+    return max(1, count)
 
-    return count
+
+def count_syllables_in_word(word: str) -> int:
+    """Estimate the syllable count of a single word using basic heuristics."""
+    return count_syllables(word)
 
 
 def get_syllable_count(text: str) -> int:
