@@ -847,3 +847,49 @@ def test_issue_1770_rollback_duration_logging(tmp_path, caplog):
         ), f"Rollback log does not match required format: {record.message!r}"
     finally:
         connection.close()
+
+
+def test_migration_rollback_on_failure(tmp_path):
+    """
+    Verifies that a database transaction rolls back completely during a
+    failed migration step, leaving the schema_version at its previous number.
+    """
+    connection = sqlite3.connect(str(tmp_path / "rollback_test.db"))
+    try:
+        assert get_user_version(connection) == 0
+
+        # Define migration 1: successfully creates a table
+        def up_v1(conn: sqlite3.Connection) -> None:
+            conn.execute("CREATE TABLE valid_table (id INTEGER)")
+
+        # Run migration 1
+        run_migrations(
+            connection,
+            migrations={1: up_v1},
+            target_version=1,
+        )
+        assert get_user_version(connection) == 1
+        assert table_exists(connection, "valid_table")
+
+        # Define migration 2: has a syntax error
+        def up_v2(conn: sqlite3.Connection) -> None:
+            conn.execute("CREATE TABLE another_table (id INTEGER)")
+            conn.execute("ALTER TABLE another_table ADD COLUMN;")  # Syntax error
+
+        # Run migration 2, it should raise sqlite3.OperationalError and rollback
+        with pytest.raises(sqlite3.OperationalError):
+            run_migrations(
+                connection,
+                migrations={1: up_v1, 2: up_v2},
+                target_version=2,
+            )
+
+        # Assert that the schema version remains at 1
+        assert get_user_version(connection) == 1
+        # Assert that another_table does NOT exist (rolled back)
+        assert not table_exists(connection, "another_table")
+        # Assert that valid_table still exists
+        assert table_exists(connection, "valid_table")
+    finally:
+        connection.close()
+

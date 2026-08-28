@@ -238,9 +238,13 @@ def build_similarity_workbook(
             )
 
         for col_idx, val in enumerate(row, start=2):
-            cell = ws.cell(row=row_idx, column=col_idx, value=float(val))
-            cell.number_format = "0.0%"
-            cell.alignment = Alignment(horizontal="right")
+            if pd.isna(val):
+                cell = ws.cell(row=row_idx, column=col_idx, value="-")
+                cell.alignment = Alignment(horizontal="right")
+            else:
+                cell = ws.cell(row=row_idx, column=col_idx, value=float(val))
+                cell.number_format = "0.0%"
+                cell.alignment = Alignment(horizontal="right")
 
     # Header styling
     header_fill = PatternFill(
