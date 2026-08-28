@@ -28,7 +28,11 @@ MAX_SEARCH_QUERY_LENGTH = 200
 WARNING_SHORT_DOCUMENT = (
     "Document contains fewer than 50 words; similarity scoring may be unreliable."
 )
-
+WARNING_BINARY_CHARACTERS = (
+    "Document contains an unusually high ratio of non-printable control "
+    "characters; the file may be binary or corrupted rather than text."
+)
+CONTROL_CHARACTER_RATIO_THRESHOLD = 0.01
 _SORT_KEYS = {
     "warn_sort_similarity": "similarity",
     "warn_sort_doc_a": "doc_a",
@@ -181,6 +185,20 @@ def _normalise_warning(
             except (TypeError, ValueError):
                 pass
 
+    for cc_key in (
+        "control_char_ratio",
+        "control_char_ratio_a",
+        "control_char_ratio_b",
+    ):
+        val = warning.get(cc_key)
+        if val is not None:
+            try:
+                if float(val) > CONTROL_CHARACTER_RATIO_THRESHOLD:
+                    if WARNING_BINARY_CHARACTERS not in warnings_list:
+                        warnings_list.append(WARNING_BINARY_CHARACTERS)
+                    break
+            except (TypeError, ValueError):
+                pass
     res = {
         **dict(warning),
         "doc_a": str(warning.get("doc_a", "")).strip(),
