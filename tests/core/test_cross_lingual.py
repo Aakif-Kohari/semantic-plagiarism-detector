@@ -337,6 +337,14 @@ class TestDetectChunkLanguage:
         text = "快速的棕色狐狸跳过懒狗。"
         assert detect_chunk_language(text) == "zh"
 
+    def test_detect_arabic(self):
+        text = "الثعلب البني السريع يقفز فوق الكلب الكسول."
+        assert detect_chunk_language(text) == "ar"
+
+    def test_detect_hindi(self):
+        text = "तेज भूरी लोमड़ी आलसी कुत्ते के ऊपर से कूदती है।"
+        assert detect_chunk_language(text) == "hi"
+
     def test_detect_english_default(self):
         text = "The quick brown fox jumps over the lazy dog."
         assert detect_chunk_language(text) == "en"
