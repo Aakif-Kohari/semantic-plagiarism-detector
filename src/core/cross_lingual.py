@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import re
 from collections import OrderedDict
 from dataclasses import asdict, dataclass
@@ -31,7 +32,11 @@ from typing import Callable, Iterable, Optional
 import numpy as np
 from langdetect import DetectorFactory, LangDetectException, detect_langs
 
+ feature/translation-fallback-service
+from src.core.translator import translate_text, translate_text_secondary
+
 from src.core.translator import translate_text, translate_text_batch
+ main
 from src.db.translation_cache import get_cached_translation, save_translation
 
 logger = logging.getLogger(__name__)
@@ -231,14 +236,27 @@ def back_translate_chunk(
             )
         
     except Exception as exc:
-        # Graceful fallback: return original text if translation fails
         logger.error(
-            "Translation failed for %s -> %s: %s. Falling back to original text.",
+            "Translation failed for %s -> %s: %s. Attempting fallback.",
             source_lang,
             TARGET_LANGUAGE,
             exc,
-            exc_info=True,
         )
+        # Route to secondary translator if enabled (resilience layer)
+        if os.getenv("SECONDARY_TRANSLATOR_ENABLED", "false").lower() == "true":
+            try:
+                logger.info("Routing translation request to secondary offline model...")
+                translated_text = translate_text_secondary(
+                    text,
+                    target_lang=TARGET_LANGUAGE,
+                    source_lang=source_lang,
+                )
+                if translated_text:
+                    if use_cache:
+                        save_translation(text, source_lang, TARGET_LANGUAGE, translated_text)
+                    return translated_text
+            except Exception as sec_exc:
+                logger.error("Secondary offline model translation also failed: %s", sec_exc)
         return text
 
     # Save to cache

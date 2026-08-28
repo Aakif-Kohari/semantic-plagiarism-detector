@@ -242,6 +242,33 @@ def translate_text(
     return translated
 
 
+ feature/translation-fallback-service
+def translate_text_secondary(
+    text: str,
+    target_lang: str = "en",
+    source_lang: str = "auto",
+) -> str:
+    """Fallback translation service using an offline/secondary translator.
+
+    If MyMemoryTranslator is available, it uses it. Swaps to a mock
+    offline fallback translation string on connection/provider failures.
+    """
+    if not text:
+        return ""
+
+    try:
+        from deep_translator import MyMemoryTranslator
+        translated = MyMemoryTranslator(
+            source=source_lang or "auto",
+            target=target_lang,
+        ).translate(text)
+        if translated:
+            return str(translated).strip()
+    except Exception:
+        pass
+
+    return f"[Offline Fallback -> {target_lang}]: {text}"
+
 def translate_text_batch(
     texts: list[str],
     target_lang: str = "en",
@@ -279,6 +306,7 @@ def translate_text_batch(
             except Exception:
                 results.append(f"(Translation Error: {exc})")
         return results
+ main
 
 
 def get_language_name(code: str) -> str:
