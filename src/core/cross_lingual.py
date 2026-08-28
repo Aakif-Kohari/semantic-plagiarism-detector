@@ -12,8 +12,8 @@ The original source text is never replaced. Only ``embedding_text`` is
 translated to English so FAISS vectors for different languages share the same
 semantic space.
 
-Recent Additions (Issue #1956):
-- Implemented detect_chunk_language() using lightweight heuristics.
+Recent Additions (Issue #1956, #3696):
+- Implemented detect_chunk_language() using lightweight heuristics and thread-safe LRU cache.
 - Implemented back_translate_chunk() with SQLite cache integration.
 - Implemented verify_semantic_fidelity() for translation quality checks.
 """
@@ -46,7 +46,7 @@ MIN_DETECTION_CHARACTERS = 20
 # Target language for back-translation (primary corpus language)
 TARGET_LANGUAGE = "en"
 
-# ── Lightweight Language Detection Heuristics (Issue #1956, #2222) ────────────
+# ── Lightweight Language Detection Heuristics (Issue #1956, #2222, #3696) ────────────
 
 # Regex patterns for common stop words and character ranges.
 # Avoids heavy dependencies like langdetect for fast chunk-level detection.
@@ -77,13 +77,19 @@ _LANGUAGE_HEURISTICS = {
     "hi": re.compile(r"[\u0900-\u097f]"),  # Devanagari script (Hindi)
 }
 
+# Thread-safe LRU Cache for Language Detection
+_DETECT_LANG_CACHE_LOCK = RLock()
+_DETECT_LANG_CACHE: OrderedDict[str, str] = OrderedDict()
+_DETECT_LANG_CACHE_MAXSIZE = 1024
+
 
 def detect_chunk_language(text: str) -> str:
     """Detect the likely language of a text chunk using lightweight heuristics.
 
     This function uses regex matching against common stop words and Unicode
     character ranges to identify the language without requiring heavy NLP
-    models or external API calls.
+    models or external API calls. Results are cached using a thread-safe
+    LRU cache to speed up multi-lingual processing.
 
     Args:
         text: The input text chunk to analyze.
@@ -94,34 +100,56 @@ def detect_chunk_language(text: str) -> str:
     if not text or not isinstance(text, str):
         return TARGET_LANGUAGE
 
+    # Generate SHA-256 hash for cache key
+    text_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+    # Check cache first
+    with _DETECT_LANG_CACHE_LOCK:
+        if text_hash in _DETECT_LANG_CACHE:
+            _DETECT_LANG_CACHE.move_to_end(text_hash)
+            return _DETECT_LANG_CACHE[text_hash]
+
+    detected_lang = TARGET_LANGUAGE
+    cjk_found = False
+
     # Check for script-based languages first as they are highly distinctive
     for lang, pattern in _LANGUAGE_HEURISTICS.items():
         if lang in ("zh", "ja", "ar", "hi"):
             if pattern.search(text):
-                return lang
+                detected_lang = lang
+                cjk_found = True
+                break
 
-    # Count stop word matches for European languages
-    matches: dict[str, int] = {}
-    words = text.lower().split()
-    total_words = len(words)
+    if not cjk_found:
+        # Count stop word matches for European languages
+        matches: dict[str, int] = {}
+        words = text.lower().split()
+        total_words = len(words)
 
-    if total_words < 3:
-        return TARGET_LANGUAGE
+        if total_words >= 3:
+            for lang, pattern in _LANGUAGE_HEURISTICS.items():
+                if lang in ("zh", "ja", "ar", "hi"):
+                    continue
+                count = len(pattern.findall(text))
+                matches[lang] = count
 
-    for lang, pattern in _LANGUAGE_HEURISTICS.items():
-        if lang in ("zh", "ja", "ar", "hi"):
-            continue
-        count = len(pattern.findall(text))
-        matches[lang] = count
+            # Find the language with the highest stop word density
+            if matches:
+                best_lang = max(matches, key=matches.get)
+                # Require at least 15% of words to be stop words to avoid false positives
+                if matches[best_lang] / total_words > 0.15:
+                    detected_lang = best_lang
 
-    # Find the language with the highest stop word density
-    if matches:
-        best_lang = max(matches, key=matches.get)
-        # Require at least 15% of words to be stop words to avoid false positives
-        if matches[best_lang] / total_words > 0.15:
-            return best_lang
+    # Update cache securely
+    with _DETECT_LANG_CACHE_LOCK:
+        if text_hash in _DETECT_LANG_CACHE:
+            _DETECT_LANG_CACHE.move_to_end(text_hash)
+        else:
+            if len(_DETECT_LANG_CACHE) >= _DETECT_LANG_CACHE_MAXSIZE:
+                _DETECT_LANG_CACHE.popitem(last=False)
+        _DETECT_LANG_CACHE[text_hash] = detected_lang
 
-    return TARGET_LANGUAGE
+    return detected_lang
 
 
 # ── Back-Translation with SQLite Cache (Issue #1956) ─────────────────────────
