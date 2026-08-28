@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Prometheus gauge `spd_active_threads` updated from `threading.active_count()` on each `/metrics` scrape (`src/core/metrics.py`).
 - `reset_analysis_session_state()` clears document lists, matrices, and scan flags while keeping theme and session id (`app/state_manager.py`).
 - Custom low/mid/high color-scale thresholds in `build_similarity_workbook` (`src/utils/excel_export.py`).
+- `show_notification()` toast helper with success/warning/error/info icons (`app/components/notifications.py`).
 
 ### Fixed
 - Graceful degradation when reportlab is not installed: badge generator module loads without reportlab and raises a clear error only when PDF generation is requested (`src/utils/badge_generator.py`).
