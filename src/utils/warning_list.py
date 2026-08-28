@@ -25,6 +25,9 @@ except ImportError:
         fuzz = None
 FUZZY_THRESHOLD = 75
 MAX_SEARCH_QUERY_LENGTH = 200
+WARNING_SHORT_DOCUMENT = (
+    "Document contains fewer than 50 words; similarity scoring may be unreliable."
+)
 
 _SORT_KEYS = {
     "warn_sort_similarity": "similarity",
@@ -43,29 +46,25 @@ WarningPage = PaginationPage[dict[str, Any]]
 
 @dataclass
 class DocumentWarning:
-    """Represents a document-level warning with default optional fields."""
+    """Represents a document-level plagiarism or processing warning."""
 
-    code: str = ""
-    message: str = ""
-    severity: str = "Medium"
-    details: Any = None
-    page_number: Any = None
     doc_a: str = ""
     doc_b: str = ""
     similarity: float = 0.0
+    severity: str = "Low"
+    message: str = ""
     warning_type: str = ""
+    details: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "code": self.code,
-            "message": self.message,
-            "severity": self.severity,
-            "details": self.details,
-            "page_number": self.page_number,
             "doc_a": self.doc_a,
             "doc_b": self.doc_b,
             "similarity": self.similarity,
+            "severity": self.severity,
+            "message": self.message,
             "warning_type": self.warning_type,
+            **self.details,
         }
 
 
@@ -86,15 +85,13 @@ class WarningList:
             self.warnings.append(item)
         elif isinstance(item, Mapping):
             dw = DocumentWarning(
-                code=str(item.get("code", item.get("warning_type", ""))),
-                message=str(item.get("message", "")),
-                severity=str(item.get("severity", "Medium")),
-                details=item.get("details", None),
-                page_number=item.get("page_number", None),
                 doc_a=str(item.get("doc_a", "")),
                 doc_b=str(item.get("doc_b", "")),
                 similarity=float(item.get("similarity", 0.0)),
+                severity=str(item.get("severity", "Low")),
+                message=str(item.get("message", "")),
                 warning_type=str(item.get("warning_type", "")),
+                details=dict(item),
             )
             self.warnings.append(dw)
 
@@ -121,7 +118,13 @@ def filter_by_severity(
     warnings_or_severity: Iterable[DocumentWarning | Mapping[str, Any]] | str,
     severity: str | None = None,
 ) -> list[DocumentWarning]:
-    """Filter warnings by severity level (e.g. 'High', 'Medium', 'Low')."""
+    """Filter warnings by severity level (e.g. 'High', 'Medium', 'Low').
+
+    Can be called as:
+      - filter_by_severity(warnings, "High")
+      - filter_by_severity("High", warnings)
+      - filter_by_severity("High")
+    """
     if isinstance(warnings_or_severity, str):
         target_severity = warnings_or_severity
         items = severity if severity is not None else []
@@ -150,7 +153,26 @@ def _normalise_warning(
     except ValueError:
         severity = severity_from_score(similarity)
 
-    return {
+    existing_warnings = warning.get("warnings")
+    if isinstance(existing_warnings, (list, tuple, set)):
+        warnings_list = list(existing_warnings)
+    elif isinstance(existing_warnings, str):
+        warnings_list = [existing_warnings]
+    else:
+        warnings_list = []
+
+    for wc_key in ("word_count", "word_count_a", "word_count_b"):
+        val = warning.get(wc_key)
+        if val is not None:
+            try:
+                if float(val) < 50:
+                    if WARNING_SHORT_DOCUMENT not in warnings_list:
+                        warnings_list.append(WARNING_SHORT_DOCUMENT)
+                    break
+            except (TypeError, ValueError):
+                pass
+
+    res = {
         **dict(warning),
         "doc_a": str(warning.get("doc_a", "")).strip(),
         "doc_b": str(warning.get("doc_b", "")).strip(),
@@ -158,6 +180,11 @@ def _normalise_warning(
         "severity": severity,
         "severity_rank": severity_rank(severity),
     }
+
+    if warnings_list or "warnings" in warning:
+        res["warnings"] = warnings_list
+
+    return res
 
 
 def _truncate_search_query(search_query: Any) -> str:
@@ -173,6 +200,7 @@ def filter_warnings(
     warnings: Iterable[Mapping[str, Any]],
     search_query: str = "",
     min_match_length: int = 0,
+    severity: str | None = None,
 ) -> list[dict[str, Any]]:
     """Filter normalized warnings using functional predicate matching."""
     normalised = [_normalise_warning(item) for item in warnings]
@@ -182,6 +210,14 @@ def filter_warnings(
             item
             for item in normalised
             if item.get("matched_length", 0) >= min_match_length
+        ]
+
+    if severity:
+        target = severity.strip().casefold()
+        normalised = [
+            item
+            for item in normalised
+            if str(item.get("severity", "")).strip().casefold() == target
         ]
 
     predicate = matches_query_predicate(search_query)
@@ -936,6 +972,9 @@ def render_warning_controls(
                                         ai_b=ai_b,
                                     )
                                 )
+                        if flag.get("warnings"):
+                            for w_msg in flag["warnings"]:
+                                st.caption(f"⚠️ {w_msg}")
                     with c2:
                         st.markdown(
                             f"<div style='text-align:right;'>{badge_html(tier, flag['severity'])}</div>",
