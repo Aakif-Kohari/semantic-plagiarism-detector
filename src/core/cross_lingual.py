@@ -32,11 +32,11 @@ from typing import Callable, Iterable, Optional
 import numpy as np
 from langdetect import DetectorFactory, LangDetectException, detect_langs
 
- feature/translation-fallback-service
-from src.core.translator import translate_text, translate_text_secondary
-
-from src.core.translator import translate_text, translate_text_batch
- main
+from src.core.translator import (
+    translate_text,
+    translate_text_batch,
+    translate_text_secondary,
+)
 from src.db.translation_cache import get_cached_translation, save_translation
 
 logger = logging.getLogger(__name__)
