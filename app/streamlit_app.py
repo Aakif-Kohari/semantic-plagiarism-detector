@@ -1014,7 +1014,17 @@ import threading
 import uvicorn
 
 import src.core.app_config as app_config
+
+
+@st.cache_resource
+def _print_startup_summary():
+    app_config.print_startup_config_summary()
+
+
+_print_startup_summary()
+
 from src.api.app import app as fastapi_app
+
 
 # Issue #2782: Import domain models from the core layer instead of defining inline
 from src.core.models.categorization import (

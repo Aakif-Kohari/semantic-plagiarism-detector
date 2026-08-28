@@ -13,7 +13,26 @@ from src.security.jwt_utils import (
     create_refresh_token,
     verify_access_token,
     verify_refresh_token,
+    JWTDecodeError,
+    JWTExpiredError,
+    JWTSignatureError,
 )
+
+
+@pytest.fixture(autouse=True)
+def setup_jwt_env(monkeypatch):
+    monkeypatch.setenv("JWT_SECRET_KEY", "testing-secret-key-1234567890-test")
+    monkeypatch.setattr(jwt_utils, "_IS_TEST", True)
+    monkeypatch.setattr(
+        jwt_utils,
+        "VALID_STATIC_REFRESH_TOKENS",
+        {
+            "dev-refresh-token",
+            "valid-refresh-token",
+            "test-refresh-token",
+            "sample-refresh-token",
+        },
+    )
 
 
 def test_create_and_verify_access_token():
@@ -42,23 +61,23 @@ def test_invalid_signature():
     header, payload, _sig = token.split(".")
     tampered_token = f"{header}.{payload}.tampered_signature"
 
-    with pytest.raises(ValueError, match="signature verification failed"):
+    with pytest.raises(JWTSignatureError, match="signature verification failed"):
         verify_access_token(tampered_token)
 
 
 def test_expired_token():
     token = create_jwt_token({"sub": "david", "type": "access"}, expires_in_seconds=-10)
-    with pytest.raises(ValueError, match="expired"):
+    with pytest.raises(JWTExpiredError, match="expired"):
         verify_access_token(token)
 
 
 def test_wrong_token_type():
     access_token = create_access_token(sub="eve")
-    with pytest.raises(ValueError, match="expected 'refresh'"):
+    with pytest.raises(JWTDecodeError, match="expected 'refresh'"):
         verify_refresh_token(access_token)
 
     refresh_token = create_refresh_token(sub="eve")
-    with pytest.raises(ValueError, match="expected 'access'"):
+    with pytest.raises(JWTDecodeError, match="expected 'access'"):
         verify_access_token(refresh_token)
 
 
@@ -88,6 +107,6 @@ def test_expired_token_with_clock_skew():
     assert payload["sub"] == "skew_user"
 
     # 3. Verify with custom clock skew (3 seconds), it should FAIL (since -5 is past +3 skew)
-    with pytest.raises(ValueError, match="expired"):
+    with pytest.raises(JWTExpiredError, match="expired"):
         verify_access_token(token, clock_skew_seconds=3)
 

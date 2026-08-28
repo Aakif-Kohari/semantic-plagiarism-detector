@@ -240,11 +240,28 @@ from src.utils.filename import (
 )
 
 
+import inspect
+
+
 def test_compute_file_hash_stream_matches_byte_hash():
     data = b"Hello World" * 1000
     stream = BytesIO(data)
 
     assert compute_file_hash_stream(stream) == get_file_sha256_hash(data)
+
+
+def test_compute_file_hash_stream_default_chunk_size():
+    sig = inspect.signature(compute_file_hash_stream)
+    assert sig.parameters["chunk_size"].default == 1024 * 1024
+
+
+def test_compute_file_hash_stream_custom_chunk_sizes():
+    data = b"CustomChunkSizeTestingData" * 50000  # ~1.3 MB
+    expected_hash = get_file_sha256_hash(data)
+
+    for chunk_size in [16, 64, 1024, 65536, 1024 * 1024, 2 * 1024 * 1024]:
+        stream = BytesIO(data)
+        assert compute_file_hash_stream(stream, chunk_size=chunk_size) == expected_hash
 
 
 def test_normalize_sha256_hash_lowercases_mixed_case():

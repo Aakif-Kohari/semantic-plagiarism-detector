@@ -73,12 +73,19 @@ def get_file_sha256_hash(file_bytes: bytes) -> str:
 
 def compute_file_hash_stream(
     file_stream: IO[bytes],
-    chunk_size: int = 65536,
+    chunk_size: int = 1024 * 1024,
 ) -> str:
     """Return the SHA-256 hex digest for a file-like object.
 
     The stream is read incrementally in fixed-size chunks to avoid loading
     the entire file into memory.
+
+    Args:
+        file_stream: Binary stream to read and hash.
+        chunk_size: Number of bytes per read iteration (default 1 MB = 1024 * 1024).
+
+    Returns:
+        The hexadecimal SHA-256 hash string.
     """
     hasher = hashlib.sha256()
 
@@ -127,7 +134,7 @@ def sanitize_filename(
         raise ValueError("max_length must be at least 8.")
 
     raw = html.unescape(str(filename or ""))
-    raw = unicodedata.normalize("NFKC", raw)
+    raw = unicodedata.normalize("NFC", raw)
     raw = _CONTROL_RE.sub("", raw)
 
     # Strip markup before selecting the basename. Closing tags contain "/"
@@ -323,7 +330,7 @@ def get_final_extension(filename: object) -> str:
     from hiding an executable payload, such as ``document.pdf.exe``.
     """
     raw = html.unescape(str(filename or ""))
-    raw = unicodedata.normalize("NFKC", raw)
+    raw = unicodedata.normalize("NFC", raw)
     raw = _CONTROL_RE.sub("", raw)
     raw = _HTML_TAG_RE.sub("", raw)
     basename = _basename(raw).strip()
