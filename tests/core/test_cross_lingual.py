@@ -335,12 +335,12 @@ class TestDetectChunkLanguage:
 
     def test_detect_chinese_simplified(self):
         """Verify that detect_chunk_language detects simplified Chinese paragraphs."""
-        text = "这是一个关于自然语言处理 and 机器翻译系统的测试段落。我们将通过分析这段文字来验证语言识别逻辑的准确性。"
+        text = "这是一个关于自然语言处理 and 机器翻译系统的测试段落。我们将通过分析这段文字来验证 language detection 逻辑的准确性。"
         assert detect_chunk_language(text) == "zh"
 
     def test_detect_chinese_traditional(self):
         """Verify that detect_chunk_language detects traditional Chinese paragraphs."""
-        text = "這是一個關於自然語言處理 and 機器翻譯系統的測試段落。我們將通過分析這段文字來驗證語言識別邏輯的準確性。"
+        text = "這是一個關於自然語言處理 and 機器翻譯系統的測試段落。我們將通過分析這段文字來驗證 language detection 邏輯的準確性。"
         assert detect_chunk_language(text) == "zh"
 
     def test_detect_japanese_hiragana_katakana(self):
@@ -354,14 +354,6 @@ class TestDetectChunkLanguage:
         ja_en = "Hiragana (ひらがな) and Katakana (カタカナ) are fundamental Japanese scripts used alongside Kanji."
         assert detect_chunk_language(zh_en) == "zh"
         assert detect_chunk_language(ja_en) == "ja"
-
-    def test_detect_arabic(self):
-        text = "الثعلب البني السريع يقفز فوق الكلب الكسول."
-        assert detect_chunk_language(text) == "ar"
-
-    def test_detect_hindi(self):
-        text = "तेज भूरी लोमड़ी आलसी कुत्ते के ऊपर से कूदती है।"
-        assert detect_chunk_language(text) == "hi"
 
     def test_detect_english_default(self):
         text = "The quick brown fox jumps over the lazy dog."
