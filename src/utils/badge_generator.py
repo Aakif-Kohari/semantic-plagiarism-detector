@@ -148,7 +148,6 @@ def has_reportlab() -> bool:
     return SimpleDocTemplate is not None
 
 
-def validate_hex_color(color: Optional[str], default_color: str = "#2563eb") -> str:
 def validate_hex_color(
     color: Optional[str], default_color: str = DEFAULT_BADGE_COLOR
 ) -> str:
@@ -752,4 +751,4 @@ def generate_svg_badge(
 def get_badge_cache_key(label: str, message: str, color: str) -> str:
     """Generate a deterministic cache key for a badge configuration."""
     raw_key = f"{label}|{message}|{color}"
-    return hashlib.md5(raw_key.encode("utf-8")).hexdigest()
+    return hashlib.md5(raw_key.encode("utf-8")).hexdigest()  # nosec

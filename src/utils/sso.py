@@ -131,7 +131,6 @@ def get_google_auth_url() -> Tuple[str, str, Dict[str, Any]]:
     return url, state, state_data
 
 
-def exchange_google_code(code: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
 def exchange_google_code(code: str, state: str | None = None) -> tuple[SSOUserProfile | None, str | None]:
     """Exchange code for access token and fetch user info."""
     if state is not None:
@@ -286,7 +285,6 @@ def get_github_auth_url() -> Tuple[str, str, Dict[str, Any]]:
     return url, state, state_data
 
 
-def exchange_github_code(code: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
 def exchange_github_code(code: str, state: str | None = None) -> tuple[SSOUserProfile | None, str | None]:
     """Exchange code for access token and fetch user info."""
     if state is not None:
