@@ -24,6 +24,12 @@ except ImportError:
         fuzz = None
 FUZZY_THRESHOLD = 75
 MAX_SEARCH_QUERY_LENGTH = 200
+WARNING_SHORT_DOCUMENT = (
+    "Document contains fewer than 50 words; similarity scoring may be unreliable."
+)
+WARNING_MIXED_LANGUAGES = (
+    "Document contains chunks in multiple languages ({languages}); similarity scoring and embeddings may be inconsistent."
+)
 
 _SORT_KEYS = {
     "warn_sort_similarity": "similarity",
@@ -40,6 +46,72 @@ def _sort_display_names(lang_code: str) -> dict[str, str]:
 WarningPage = PaginationPage[dict[str, Any]]
 
 
+def _detect_chunk_language(chunk: Any) -> str | None:
+    """Extract or detect language ISO code for a chunk."""
+    if isinstance(chunk, dict):
+        for key in ("language", "detected_language", "lang"):
+            if chunk.get(key):
+                return str(chunk[key]).strip().lower()
+        text = chunk.get("text", "")
+    else:
+        for attr in ("detected_language", "language", "lang"):
+            if hasattr(chunk, attr) and getattr(chunk, attr):
+                return str(getattr(chunk, attr)).strip().lower()
+        text = getattr(chunk, "text", str(chunk))
+
+    cleaned = " ".join(str(text or "").split())
+    if len(cleaned) < 15:
+        return None
+
+    try:
+        from src.core.cross_lingual import detect_language
+        lang, confident = detect_language(cleaned)
+        if confident and lang:
+            return lang.strip().lower()
+    except Exception:
+        pass
+
+    try:
+        from langdetect import detect
+        lang_code = detect(cleaned)
+        if lang_code:
+            return str(lang_code).strip().lower()
+    except Exception:
+        pass
+
+    return None
+
+
+def _get_document_mixed_languages(
+    warning: Mapping[str, Any],
+    doc_name: str,
+    chunks_key: str,
+    explicit_lang_keys: Sequence[str],
+) -> set[str]:
+    """Detect all unique languages present across chunks for a single document."""
+    for key in explicit_lang_keys:
+        val = warning.get(key)
+        if isinstance(val, (list, tuple, set)) and len(val) > 0:
+            return {str(lang).strip().lower() for lang in val if lang}
+
+    chunks = warning.get(chunks_key)
+
+    if not chunks and doc_name and "analysis_results" in st.session_state and st.session_state.analysis_results is not None:
+        chunked_docs = _chunked_docs_from_results(st.session_state.analysis_results)
+        chunks = chunked_docs.get(doc_name, [])
+
+    if not chunks or not isinstance(chunks, Sequence):
+        return set()
+
+    detected: set[str] = set()
+    for chunk in chunks:
+        lang = _detect_chunk_language(chunk)
+        if lang:
+            detected.add(lang)
+
+    return detected
+
+
 def _normalise_warning(
     warning: Mapping[str, Any],
 ) -> dict[str, Any]:
@@ -54,7 +126,60 @@ def _normalise_warning(
     except ValueError:
         severity = severity_from_score(similarity)
 
-    return {
+    existing_warnings = warning.get("warnings")
+    if isinstance(existing_warnings, (list, tuple, set)):
+        warnings_list = [str(w) for w in existing_warnings]
+    elif isinstance(existing_warnings, str):
+        warnings_list = [existing_warnings]
+    else:
+        warnings_list = []
+
+    # 1. Check SHORT_DOCUMENT warning (< 50 words)
+    for wc_key in ("word_count", "word_count_a", "word_count_b"):
+        val = warning.get(wc_key)
+        if val is not None:
+            try:
+                if float(val) < 50:
+                    if WARNING_SHORT_DOCUMENT not in warnings_list:
+                        warnings_list.append(WARNING_SHORT_DOCUMENT)
+                    break
+            except (TypeError, ValueError):
+                pass
+
+    # 2. Check MIXED_LANGUAGES warning
+    explicit_mixed = warning.get("mixed_languages") or warning.get("detected_languages") or warning.get("languages")
+    all_mixed_langs: set[str] = set()
+
+    if isinstance(explicit_mixed, (list, tuple, set)) and len(explicit_mixed) > 1:
+        all_mixed_langs = {str(l).strip().lower() for l in explicit_mixed if l}
+    else:
+        doc_a = str(warning.get("doc_a", "")).strip()
+        doc_b = str(warning.get("doc_b", "")).strip()
+
+        langs_a = _get_document_mixed_languages(
+            warning, doc_a, "chunks_a", ("doc_a_languages", "languages_a", "chunk_languages_a")
+        )
+        langs_b = _get_document_mixed_languages(
+            warning, doc_b, "chunks_b", ("doc_b_languages", "languages_b", "chunk_languages_b")
+        )
+
+        if len(langs_a) > 1:
+            all_mixed_langs.update(langs_a)
+        if len(langs_b) > 1:
+            all_mixed_langs.update(langs_b)
+
+        if not all_mixed_langs:
+            gen_langs = warning.get("chunk_languages")
+            if isinstance(gen_langs, (list, tuple, set)) and len(gen_langs) > 1:
+                all_mixed_langs = {str(l).strip().lower() for l in gen_langs if l}
+
+    if len(all_mixed_langs) > 1:
+        lang_str = ", ".join(sorted(all_mixed_langs))
+        msg = WARNING_MIXED_LANGUAGES.format(languages=lang_str)
+        if not any("multiple languages" in w or "mixed languages" in w for w in warnings_list):
+            warnings_list.append(msg)
+
+    res = {
         **dict(warning),
         "doc_a": str(warning.get("doc_a", "")).strip(),
         "doc_b": str(warning.get("doc_b", "")).strip(),
@@ -62,6 +187,11 @@ def _normalise_warning(
         "severity": severity,
         "severity_rank": severity_rank(severity),
     }
+
+    if warnings_list or "warnings" in warning:
+        res["warnings"] = warnings_list
+
+    return res
 
 
 def _truncate_search_query(search_query: Any) -> str:
