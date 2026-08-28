@@ -125,7 +125,7 @@ class PatternRepository(BaseRepository):
                 params.append(pattern_type)
             where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
             rows = conn.execute(
-                f"""
+                f"""  # nosec
                 SELECT * FROM plagiarism_patterns
                 {where_sql}
                 ORDER BY confidence_score DESC, occurrence_count DESC

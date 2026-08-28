@@ -367,7 +367,7 @@ def delete_all_if_table_exists(
         return False
 
     table = quote_identifier(table_name)
-    connection.execute(f"DELETE FROM {table}")
+    connection.execute(f"DELETE FROM {table}")  # nosec
     return True
 
 

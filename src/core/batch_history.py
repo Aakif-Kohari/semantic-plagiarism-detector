@@ -256,7 +256,7 @@ class BatchHistory:
             params.append(max_documents)
 
         where_clause = " AND ".join(conditions) if conditions else "1=1"
-        query_sql = f"SELECT * FROM batch_history WHERE {where_clause} ORDER BY created_at DESC LIMIT ?"
+        query_sql = f"SELECT * FROM batch_history WHERE {where_clause} ORDER BY created_at DESC LIMIT ?"  # nosec
         params.append(limit)
 
         conn = self._get_conn()

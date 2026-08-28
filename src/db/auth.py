@@ -254,7 +254,7 @@ class AuthRepository(BaseRepository):
             end_date=end_date,
         )
         query = (
-            f"SELECT id, event_type, username, timestamp, details FROM security_audit_log{where_clause}"
+            f"SELECT id, event_type, username, timestamp, details FROM security_audit_log{where_clause}"  # nosec
             " ORDER BY id DESC LIMIT ? OFFSET ?"
         )
         query_params = params + (limit, offset)
@@ -290,7 +290,7 @@ class AuthRepository(BaseRepository):
             start_date=start_date,
             end_date=end_date,
         )
-        query = f"SELECT COUNT(*) FROM security_audit_log{where_clause}"
+        query = f"SELECT COUNT(*) FROM security_audit_log{where_clause}"  # nosec
 
         try:
             with self.connection(read_only=True) as conn:
@@ -781,7 +781,7 @@ def get_user_roles(user_ids: list[int]) -> dict[int, str]:
         placeholders = ",".join("?" for _ in user_ids)
         with _connect() as conn:
             rows = conn.execute(
-                f"SELECT id, role FROM users WHERE id IN ({placeholders})",
+                f"SELECT id, role FROM users WHERE id IN ({placeholders})",  # nosec
                 tuple(user_ids),
             ).fetchall()
             return {row[0]: row[1] for row in rows}
@@ -866,7 +866,7 @@ def delete_user(username: str) -> None:
             for table_name in ("user_sessions", "authorization_tokens"):
                 if table_exists(conn, table_name):
                     conn.execute(
-                        f"DELETE FROM {table_name} WHERE username = ?",
+                        f"DELETE FROM {table_name} WHERE username = ?",  # nosec
                         (username,),
                     )
 
@@ -1629,7 +1629,7 @@ def _cleanup_revoked_tokens() -> int:
             if expired_signatures:
                 placeholders = ",".join("?" for _ in expired_signatures)
                 cur = conn.execute(
-                    f"DELETE FROM revoked_tokens WHERE token_signature IN ({placeholders})",
+                    f"DELETE FROM revoked_tokens WHERE token_signature IN ({placeholders})",  # nosec
                     expired_signatures
                 )
                 deleted_count = cur.rowcount

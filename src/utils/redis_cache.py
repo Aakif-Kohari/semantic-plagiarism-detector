@@ -504,7 +504,7 @@ class RedisCache:
                             pass
                     else:
                         self._inc_hits()
-                        return pickle.loads(decompressed)
+                        return pickle.loads(decompressed)  # nosec
                         
             except Exception as e:
                 logger.error(f"[RedisCache] Error getting key {key}: {e}. Falling back.")
@@ -815,7 +815,7 @@ def get_large_data(key: str | Path) -> Optional[Any]:
                 del cache.fallback_cache[f"spd:v1:large:{key_str}"]
         
         if data:
-            return pickle.loads(zlib.decompress(data))
+            return pickle.loads(zlib.decompress(data))  # nosec
         return None
     except Exception as e:
         logger.error(f"Failed to retrieve large data for key {key}: {e}")

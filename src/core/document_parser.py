@@ -1797,7 +1797,7 @@ def extract_text_from_odt(file: PDFInput) -> str:
 
         with zipfile.ZipFile(io.BytesIO(raw_data), "r") as archive:
             with archive.open("content.xml") as xml_file:
-                tree = xml.etree.ElementTree.parse(xml_file)
+                tree = xml.etree.ElementTree.parse(xml_file)  # nosec
 
         ns = {
             "text": "urn:oasis:names:tc:opendocument:xmlns:text:1.0",

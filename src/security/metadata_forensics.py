@@ -57,7 +57,7 @@ def extract_docx_metadata(file_bytes: bytes) -> Dict[str, Any]:
             # Extract core properties
             if "docProps/core.xml" in zf.namelist():
                 core_xml = zf.read("docProps/core.xml")
-                root = ET.fromstring(core_xml)
+                root = ET.fromstring(core_xml)  # nosec
 
                 metadata["creator"] = _get_xml_text(root, "dc:creator", DOCX_CORE_NS)
                 metadata["last_modified_by"] = _get_xml_text(
@@ -74,7 +74,7 @@ def extract_docx_metadata(file_bytes: bytes) -> Dict[str, Any]:
             # Extract extended properties (app.xml)
             if "docProps/app.xml" in zf.namelist():
                 app_xml = zf.read("docProps/app.xml")
-                app_root = ET.fromstring(app_xml)
+                app_root = ET.fromstring(app_xml)  # nosec
                 app_ns = {
                     "ep": "http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"
                 }

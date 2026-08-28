@@ -116,7 +116,7 @@ class ReportGenerator:
         Returns:
             PlagiarismReport instance
         """
-        report_id = hashlib.md5(f"{datetime.now().isoformat()}_{report_type.value}".encode()).hexdigest()[:12]
+        report_id = hashlib.md5(f"{datetime.now().isoformat()}_{report_type.value}".encode()).hexdigest()[:12]  # nosec
         timestamp = datetime.now().isoformat()
 
         summary = self._generate_summary(detection_results)

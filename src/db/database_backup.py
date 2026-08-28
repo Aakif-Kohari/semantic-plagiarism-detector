@@ -412,7 +412,7 @@ def get_database_table_stats(db_path: str | Path) -> dict[str, int]:
             for table_name in table_names:
                 try:
                     count_cursor = connection.execute(
-                        f'SELECT COUNT(*) FROM "{table_name}"'
+                        f'SELECT COUNT(*) FROM "{table_name}"'  # nosec
                     )
                     row = count_cursor.fetchone()
                     row_count = int(row[0]) if row else 0

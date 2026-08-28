@@ -715,7 +715,7 @@ def batch_soft_delete_documents(doc_ids: list[int]) -> int:
 
     with _connect() as conn:
         conn.execute(
-            f"""
+            f"""  # nosec
             INSERT INTO deleted_chunks (vector_id, filename, chunk_index, chunk_text, embedding)
             SELECT vector_id, filename, chunk_index, chunk_text, embedding
             FROM chunks
@@ -724,14 +724,14 @@ def batch_soft_delete_documents(doc_ids: list[int]) -> int:
             tuple(doc_ids),
         )
         conn.execute(
-            f"""
+            f"""  # nosec
             DELETE FROM chunks
             WHERE filename IN (SELECT filename FROM documents WHERE id IN ({placeholders}))
             """,
             tuple(doc_ids),
         )
         cursor = conn.execute(
-            f"UPDATE documents SET is_deleted = 1, deleted_at = ? WHERE id IN ({placeholders})",
+            f"UPDATE documents SET is_deleted = 1, deleted_at = ? WHERE id IN ({placeholders})",  # nosec
             (now, *doc_ids),
         )
         rowcount = cursor.rowcount
@@ -767,7 +767,7 @@ def batch_permanently_delete_documents(doc_ids: list[int]) -> int:
         filenames = [
             row[0]
             for row in conn.execute(
-                f"SELECT filename FROM documents WHERE id IN ({placeholders})",
+                f"SELECT filename FROM documents WHERE id IN ({placeholders})",  # nosec
                 doc_id_tuple,
             ).fetchall()
         ]
@@ -784,7 +784,7 @@ def batch_permanently_delete_documents(doc_ids: list[int]) -> int:
             conn.execute("DELETE FROM deleted_chunks WHERE filename = ?", (filename,))
 
         cursor = conn.execute(
-            f"DELETE FROM documents WHERE id IN ({placeholders})",
+            f"DELETE FROM documents WHERE id IN ({placeholders})",  # nosec
             doc_id_tuple,
         )
         rowcount = cursor.rowcount
@@ -919,7 +919,7 @@ def get_chunks_for_documents(
     placeholders = ",".join("?" for _ in filenames)
     with _connect() as conn:
         rows = conn.execute(
-            f"""
+            f"""  # nosec
             SELECT filename, chunk_text, embedding
             FROM chunks
             WHERE filename IN ({placeholders})

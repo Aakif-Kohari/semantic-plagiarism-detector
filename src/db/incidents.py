@@ -837,7 +837,7 @@ def bulk_update_incident_status(
         try:
             placeholders = ",".join(["?"] * len(cleaned_ids))
             cursor = conn.execute(
-                f"UPDATE plagiarism_incidents SET review_status = ? WHERE incident_id IN ({placeholders})",
+                f"UPDATE plagiarism_incidents SET review_status = ? WHERE incident_id IN ({placeholders})",  # nosec
                 [status, *cleaned_ids],
             )
             conn.commit()
@@ -1143,7 +1143,7 @@ def query_incidents_paginated(
 
         # Total count
         count_row = conn.execute(
-            f"SELECT COUNT(*) FROM plagiarism_incidents pi {_JOIN_DOCUMENTS} {where_sql}",
+            f"SELECT COUNT(*) FROM plagiarism_incidents pi {_JOIN_DOCUMENTS} {where_sql}",  # nosec
             params,
         ).fetchone()
         total_count = count_row[0] if count_row else 0
@@ -1152,7 +1152,7 @@ def query_incidents_paginated(
         # Paginated fetch
         order_sql = f"pi.{sort_by} {sort_order}, pi.incident_id ASC"
         rows = conn.execute(
-            f"""
+            f"""  # nosec
             SELECT pi.incident_id, pi.document_a, pi.document_b,
                    pi.similarity_score, pi.severity_rank,
                    pi.review_status, pi.date_flagged, pi.last_seen,

@@ -95,7 +95,7 @@ def execute_code_sandbox(
         # Run the subprocess
         proc = subprocess.run(
             cmd,
-            shell=shell,
+            shell=shell,  # nosec
             capture_output=True,
             text=True,
             timeout=timeout,

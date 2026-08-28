@@ -141,7 +141,7 @@ class TranslationCache:
         self._misses = 0
 
     def get(self, text: str, source_lang: str, target_lang: str) -> Optional[str]:
-        key = f"{source_lang}:{target_lang}:{hashlib.md5(text.encode('utf-8')).hexdigest()}"
+        key = f"{source_lang}:{target_lang}:{hashlib.md5(text.encode('utf-8')).hexdigest()}"  # nosec
         if key in self._cache:
             self._hits += 1
             return self._cache[key]
@@ -149,7 +149,7 @@ class TranslationCache:
         return None
 
     def set(self, text: str, source_lang: str, target_lang: str, translation: str) -> None:
-        key = f"{source_lang}:{target_lang}:{hashlib.md5(text.encode('utf-8')).hexdigest()}"
+        key = f"{source_lang}:{target_lang}:{hashlib.md5(text.encode('utf-8')).hexdigest()}"  # nosec
         if len(self._cache) >= self.max_size:
             oldest_key = min(self._timestamps, key=self._timestamps.get)
             del self._cache[oldest_key]

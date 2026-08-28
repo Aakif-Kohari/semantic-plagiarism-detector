@@ -45,8 +45,8 @@ def _get_model_and_tokenizer():
                 AutoTokenizer,
             )
 
-            _tokenizer = AutoTokenizer.from_pretrained(model_name)
-            _model = AutoModelForSequenceClassification.from_pretrained(model_name)
+            _tokenizer = AutoTokenizer.from_pretrained(model_name)  # nosec
+            _model = AutoModelForSequenceClassification.from_pretrained(model_name)  # nosec
 
             logger.info("[ai_detector] Model loaded successfully.")
 

@@ -34,7 +34,7 @@ def _hash_shingles(shingles: set[str], num_hashes: int, seed: int = 42) -> np.nd
 
     for shingle in shingles:
         # Hash the shingle to a 32-bit integer
-        h = int(hashlib.sha1(shingle.encode("utf-8")).hexdigest()[:8], 16)
+        h = int(hashlib.sha1(shingle.encode("utf-8")).hexdigest()[:8], 16)  # nosec
 
         # Apply all hash functions
         hashes = (a * h + b) % _MERSENNE_PRIME

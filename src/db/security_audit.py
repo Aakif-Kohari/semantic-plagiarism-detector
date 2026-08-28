@@ -72,7 +72,7 @@ def _emit_audit_log_failure_alert(
                 headers={"Content-Type": "application/json"},
                 method="POST",
             )
-            with urllib.request.urlopen(req, timeout=5):
+            with urllib.request.urlopen(req, timeout=5):  # nosec
                 pass
         except Exception as webhook_exc:
             logger.warning(

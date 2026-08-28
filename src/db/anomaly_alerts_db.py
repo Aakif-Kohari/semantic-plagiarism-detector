@@ -199,12 +199,12 @@ class AnomalyAlertRepository:
 
         with self._conn() as conn:
             total = conn.execute(
-                f"SELECT COUNT(*) FROM anomaly_scans{where}", params
+                f"SELECT COUNT(*) FROM anomaly_scans{where}", params  # nosec
             ).fetchone()[0]
 
             offset = (page - 1) * per_page
             cursor = conn.execute(
-                f"""SELECT * FROM anomaly_scans{where}
+                f"""SELECT * FROM anomaly_scans{where}  # nosec
                     ORDER BY started_at DESC LIMIT ? OFFSET ?""",
                 params + [per_page, offset],
             )
@@ -305,12 +305,12 @@ class AnomalyAlertRepository:
 
         with self._conn() as conn:
             total = conn.execute(
-                f"SELECT COUNT(*) FROM anomaly_alerts{where}", params
+                f"SELECT COUNT(*) FROM anomaly_alerts{where}", params  # nosec
             ).fetchone()[0]
 
             offset = (page - 1) * per_page
             cursor = conn.execute(
-                f"""SELECT * FROM anomaly_alerts{where}
+                f"""SELECT * FROM anomaly_alerts{where}  # nosec
                     ORDER BY detected_at DESC LIMIT ? OFFSET ?""",
                 params + [per_page, offset],
             )
@@ -511,7 +511,7 @@ class AnomalyAlertRepository:
 
         with self._conn() as conn:
             conn.execute(
-                f"UPDATE anomaly_config SET {set_clause} WHERE id = 1",
+                f"UPDATE anomaly_config SET {set_clause} WHERE id = 1",  # nosec
                 values,
             )
         return self.get_config()

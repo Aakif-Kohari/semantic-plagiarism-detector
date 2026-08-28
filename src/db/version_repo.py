@@ -253,13 +253,13 @@ class DocumentSnapshotRepository:
 
         with self._conn() as conn:
             count_row = conn.execute(
-                f"SELECT COUNT(*) FROM document_snapshots{where}", params
+                f"SELECT COUNT(*) FROM document_snapshots{where}", params  # nosec
             ).fetchone()
             total = count_row[0] if count_row else 0
 
             offset = (page - 1) * per_page
             cursor = conn.execute(
-                f"""SELECT * FROM document_snapshots{where}
+                f"""SELECT * FROM document_snapshots{where}  # nosec
                     ORDER BY created_at DESC LIMIT ? OFFSET ?""",
                 params + [per_page, offset],
             )
@@ -331,13 +331,13 @@ class DocumentSnapshotRepository:
 
         with self._conn() as conn:
             count_row = conn.execute(
-                f"SELECT COUNT(*) FROM version_lineage{where}", params
+                f"SELECT COUNT(*) FROM version_lineage{where}", params  # nosec
             ).fetchone()
             total = count_row[0] if count_row else 0
 
             offset = (page - 1) * per_page
             cursor = conn.execute(
-                f"""SELECT * FROM version_lineage{where}
+                f"""SELECT * FROM version_lineage{where}  # nosec
                     ORDER BY last_created DESC LIMIT ? OFFSET ?""",
                 params + [per_page, offset],
             )

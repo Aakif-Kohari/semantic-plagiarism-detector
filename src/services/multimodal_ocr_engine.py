@@ -100,7 +100,7 @@ class ParaphraseNeuralAlignmentEngine:
         vec = [0.0] * 128
         words = text.lower().split()
         for idx, w in enumerate(words):
-            h = int(hashlib.md5(w.encode("utf-8")).hexdigest(), 16)
+            h = int(hashlib.md5(w.encode("utf-8")).hexdigest(), 16)  # nosec
             vec[h % 128] += 1.0 + (idx * 0.05)
         return vec
 

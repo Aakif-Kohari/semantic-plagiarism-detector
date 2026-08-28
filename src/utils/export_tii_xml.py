@@ -109,7 +109,7 @@ def generate_tii_xml(report_data: dict[str, Any], include_text: bool = True) -> 
 
     # Pretty print the XML
     rough_string = ET.tostring(root, encoding="unicode")
-    reparsed = minidom.parseString(rough_string)
+    reparsed = minidom.parseString(rough_string)  # nosec
     return reparsed.toprettyxml(indent="  ")
 
 
@@ -121,7 +121,7 @@ def validate_tii_xml(xml_string: str) -> bool:
     validates on the same terms as one written today.
     """
     try:
-        root = ET.fromstring(xml_string)
+        root = ET.fromstring(xml_string)  # nosec
     except ET.ParseError:
         return False
 

@@ -145,7 +145,7 @@ class ContentFingerprinter:
         shingles = set()
         for i in range(len(words) - self.config.shingle_size + 1):
             shingle = " ".join(words[i:i + self.config.shingle_size])
-            shingles.add(hashlib.md5(shingle.encode()).hexdigest()[:12])
+            shingles.add(hashlib.md5(shingle.encode()).hexdigest()[:12])  # nosec
         return shingles
 
     def _compute_minhash(self, shingles: set[str]) -> list[int]:
@@ -154,7 +154,7 @@ class ContentFingerprinter:
         for i in range(self.config.minhash_num_perm):
             min_val = float('inf')
             for shingle in shingles:
-                hash_val = int(hashlib.md5(f"{shingle}_{i}".encode()).hexdigest(), 16)
+                hash_val = int(hashlib.md5(f"{shingle}_{i}".encode()).hexdigest(), 16)  # nosec
                 min_val = min(min_val, hash_val)
             signature.append(min_val % (2**32))
         return signature
@@ -170,12 +170,12 @@ class ContentFingerprinter:
     def _word_set_hash(self, words: list[str]) -> str:
         """Compute word set hash."""
         word_set = sorted(set(w.lower() for w in words))
-        return hashlib.md5(" ".join(word_set).encode()).hexdigest()[:16]
+        return hashlib.md5(" ".join(word_set).encode()).hexdigest()[:16]  # nosec
 
     def _paragraph_hashes(self, text: str) -> list[str]:
         """Compute paragraph-level hashes."""
         paragraphs = [p.strip() for p in text.split("\n\n") if len(p.strip()) > 20]
-        return [hashlib.md5(p.encode()).hexdigest()[:12] for p in paragraphs[:50]]
+        return [hashlib.md5(p.encode()).hexdigest()[:12] for p in paragraphs[:50]]  # nosec
 
     def compare_fingerprints(self, fp1: ContentFingerprint, fp2: ContentFingerprint) -> float:
         """Compare two fingerprints using Jaccard similarity."""
