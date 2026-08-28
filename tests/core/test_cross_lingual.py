@@ -9,6 +9,7 @@ import pytest
 from src.core.cross_lingual import (
     TranslationMemoryCache,
     back_translate_chunk,
+    back_translate_chunks,
     detect_chunk_language,
     detect_language,
     prepare_chunks_for_embedding,
@@ -753,3 +754,89 @@ class TestBackTranslateChunkRealTranslation:
         assert result == "Cached translation"
         # Should not call translate_text
         mock_translate.assert_not_called()
+
+
+def test_back_translate_chunks():
+    """Verify that back_translate_chunks correctly batches uncached translations."""
+    from src.db.translation_cache import get_cached_translation, save_translation
+    
+    # Pre-cache one translation to verify it's skipped in batch
+    save_translation(
+        "La inteligencia artificial es útil.",
+        "es",
+        "en",
+        "Artificial intelligence is useful."
+    )
+    
+    chunks = [
+        "La inteligencia artificial es útil.",  # Cached (Spanish)
+        "La inteligencia artificial ayuda a los profesores en la escuela.",  # Uncached 1 (Spanish)
+        "El perro corre en el parque con su pelota nueva.",  # Uncached 2 (Spanish)
+        "Este es un libro para aprender español de manera rápida.",  # Uncached 3 (Spanish)
+        "Artificial intelligence supports modern education globally.",  # English (no translation needed)
+    ]
+    
+    # We patch translate_text_batch to mock translation service
+    with patch("src.core.cross_lingual.translate_text_batch") as mock_batch:
+        # Mock translate_text_batch behavior
+        mock_batch.return_value = [
+            "Artificial intelligence helps teachers in school.",
+            "The dog runs in the park with his new ball.",
+            "This is a book to learn Spanish quickly."
+        ]
+        
+        results = back_translate_chunks(chunks)
+        
+        # Verify results
+        assert results == [
+            "Artificial intelligence is useful.",
+            "Artificial intelligence helps teachers in school.",
+            "The dog runs in the park with his new ball.",
+            "This is a book to learn Spanish quickly.",
+            "Artificial intelligence supports modern education globally."
+        ]
+        
+        # translate_text_batch should only be called with the uncached items
+        mock_batch.assert_called_once_with(
+            [
+                "La inteligencia artificial ayuda a los profesores en la escuela.",
+                "El perro corre en el parque con su pelota nueva.",
+                "Este es un libro para aprender español de manera rápida."
+            ],
+            target_lang="en",
+            source_lang="es"
+        )
+        
+        # Verify uncached items were saved to cache
+        assert get_cached_translation(
+            "La inteligencia artificial ayuda a los profesores en la escuela.", "es", "en"
+        ) == "Artificial intelligence helps teachers in school."
+        assert get_cached_translation(
+            "El perro corre en el parque con su pelota nueva.", "es", "en"
+        ) == "The dog runs in the park with his new ball."
+        assert get_cached_translation(
+            "Este es un libro para aprender español de manera rápida.", "es", "en"
+        ) == "This is a book to learn Spanish quickly."
+
+
+
+def test_back_translate_chunks_batching_groups_of_10():
+    """Verify that back_translate_chunks batches items in groups of 10."""
+    # Generate 25 uncached chunks
+    chunks = [f"Chunk {i}" for i in range(25)]
+    
+    with patch("src.core.cross_lingual.translate_text_batch") as mock_batch:
+        # Just echo the texts back as mock translation
+        mock_batch.side_effect = lambda texts, **_: [f"Translated {t}" for t in texts]
+        
+        results = back_translate_chunks(chunks, source_lang="es")
+        
+        assert len(results) == 25
+        assert results[0] == "Translated Chunk 0"
+        assert results[24] == "Translated Chunk 24"
+        
+        # Should have called translate_text_batch 3 times (batches of 10, 10, 5)
+        assert mock_batch.call_count == 3
+        mock_batch.assert_any_call([f"Chunk {i}" for i in range(10)], target_lang="en", source_lang="es")
+        mock_batch.assert_any_call([f"Chunk {i}" for i in range(10, 20)], target_lang="en", source_lang="es")
+        mock_batch.assert_any_call([f"Chunk {i}" for i in range(20, 25)], target_lang="en", source_lang="es")
