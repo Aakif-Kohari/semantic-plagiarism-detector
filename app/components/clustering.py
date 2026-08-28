@@ -3,6 +3,19 @@
 # ───────────────────────────────────────────────────────────────────────────────
 
 # ── Imports for Clustering and Topic Analysis ─────────────────────────────
+import logging
+import os
+from datetime import datetime, timedelta
+from typing import Any, Dict, List, Optional, Tuple
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import streamlit as st
+
+# Defined before the optional-dependency block below, which logs through it.
+logger = logging.getLogger(__name__)
+
 try:
     import scipy.cluster.hierarchy as sch
     from scipy.cluster.hierarchy import fcluster
