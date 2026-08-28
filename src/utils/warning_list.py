@@ -24,6 +24,9 @@ except ImportError:
         fuzz = None
 FUZZY_THRESHOLD = 75
 MAX_SEARCH_QUERY_LENGTH = 200
+WARNING_SHORT_DOCUMENT = (
+    "Document contains fewer than 50 words; similarity scoring may be unreliable."
+)
 
 _SORT_KEYS = {
     "warn_sort_similarity": "similarity",
@@ -54,7 +57,26 @@ def _normalise_warning(
     except ValueError:
         severity = severity_from_score(similarity)
 
-    return {
+    existing_warnings = warning.get("warnings")
+    if isinstance(existing_warnings, (list, tuple, set)):
+        warnings_list = list(existing_warnings)
+    elif isinstance(existing_warnings, str):
+        warnings_list = [existing_warnings]
+    else:
+        warnings_list = []
+
+    for wc_key in ("word_count", "word_count_a", "word_count_b"):
+        val = warning.get(wc_key)
+        if val is not None:
+            try:
+                if float(val) < 50:
+                    if WARNING_SHORT_DOCUMENT not in warnings_list:
+                        warnings_list.append(WARNING_SHORT_DOCUMENT)
+                    break
+            except (TypeError, ValueError):
+                pass
+
+    res = {
         **dict(warning),
         "doc_a": str(warning.get("doc_a", "")).strip(),
         "doc_b": str(warning.get("doc_b", "")).strip(),
@@ -62,6 +84,11 @@ def _normalise_warning(
         "severity": severity,
         "severity_rank": severity_rank(severity),
     }
+
+    if warnings_list or "warnings" in warning:
+        res["warnings"] = warnings_list
+
+    return res
 
 
 def _truncate_search_query(search_query: Any) -> str:
@@ -840,6 +867,9 @@ def render_warning_controls(
                                         ai_b=ai_b,
                                     )
                                 )
+                        if flag.get("warnings"):
+                            for w_msg in flag["warnings"]:
+                                st.caption(f"⚠️ {w_msg}")
                     with c2:
                         st.markdown(
                             f"<div style='text-align:right;'>{badge_html(tier, flag['severity'])}</div>",

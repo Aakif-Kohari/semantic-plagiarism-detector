@@ -480,3 +480,46 @@ def test_truncate_search_query_numeric():
     assert _truncate_search_query(12345) == "12345"
     assert _truncate_search_query(98.6) == "98.6"
     assert _truncate_search_query(None) == ""
+
+
+def test_warning_short_document_constant():
+    from src.utils.warning_list import WARNING_SHORT_DOCUMENT
+
+    assert (
+        WARNING_SHORT_DOCUMENT
+        == "Document contains fewer than 50 words; similarity scoring may be unreliable."
+    )
+
+
+def test_short_document_warning_triggered_for_low_word_count():
+    from src.utils.warning_list import WARNING_SHORT_DOCUMENT, _normalise_warning
+
+    item = {"doc_a": "DocA.txt", "doc_b": "DocB.txt", "similarity": 0.8, "word_count": 49}
+    norm = _normalise_warning(item)
+    assert "warnings" in norm
+    assert WARNING_SHORT_DOCUMENT in norm["warnings"]
+
+
+def test_short_document_warning_not_triggered_for_50_or_more_words():
+    from src.utils.warning_list import WARNING_SHORT_DOCUMENT, _normalise_warning
+
+    item_50 = {"doc_a": "DocA.txt", "doc_b": "DocB.txt", "similarity": 0.8, "word_count": 50}
+    norm_50 = _normalise_warning(item_50)
+    assert WARNING_SHORT_DOCUMENT not in norm_50.get("warnings", [])
+
+    item_100 = {"doc_a": "DocA.txt", "doc_b": "DocB.txt", "similarity": 0.8, "word_count": 100}
+    norm_100 = _normalise_warning(item_100)
+    assert WARNING_SHORT_DOCUMENT not in norm_100.get("warnings", [])
+
+
+def test_short_document_warning_handles_doc_specific_word_counts():
+    from src.utils.warning_list import WARNING_SHORT_DOCUMENT, _normalise_warning
+
+    item_a = {"doc_a": "DocA.txt", "doc_b": "DocB.txt", "similarity": 0.8, "word_count_a": 25, "word_count_b": 100}
+    norm_a = _normalise_warning(item_a)
+    assert WARNING_SHORT_DOCUMENT in norm_a["warnings"]
+
+    item_b = {"doc_a": "DocA.txt", "doc_b": "DocB.txt", "similarity": 0.8, "word_count_a": 100, "word_count_b": 10}
+    norm_b = _normalise_warning(item_b)
+    assert WARNING_SHORT_DOCUMENT in norm_b["warnings"]
+
