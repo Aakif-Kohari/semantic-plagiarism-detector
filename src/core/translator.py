@@ -242,6 +242,45 @@ def translate_text(
     return translated
 
 
+def translate_text_batch(
+    texts: list[str],
+    target_lang: str = "en",
+    source_lang: str = "auto",
+) -> list[str]:
+    """Translate a batch list of text strings.
+
+    Args:
+        texts: List of strings to translate.
+        target_lang: Target language code.
+        source_lang: Source language code.
+
+    Returns:
+        List of translated strings.
+    """
+    if not texts:
+        return []
+
+    validate_target_language_code(target_lang)
+
+    try:
+        translated = GoogleTranslator(
+            source=source_lang or "auto",
+            target=target_lang,
+        ).translate_batch(texts)
+        return [str(t or "").strip() for t in translated]
+    except Exception as exc:
+        logger.error("Batch translation error: %s", exc)
+        # Fallback to translate_text individually for resilience
+        results = []
+        for text in texts:
+            try:
+                res = translate_text(text, target_lang=target_lang, source_lang=source_lang)
+                results.append(res or "")
+            except Exception:
+                results.append(f"(Translation Error: {exc})")
+        return results
+
+
 def get_language_name(code: str) -> str:
     """Convert a two-letter ISO-639-1 language code to a human-readable language name.
 
