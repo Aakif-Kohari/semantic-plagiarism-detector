@@ -6,6 +6,7 @@ based on document characteristics, dataset homogeneity, and user feedback.
 """
 
 import logging
+import threading
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -503,7 +504,7 @@ class ThresholdOptimizer:
 # ============================================================================
 
 _optimizer: Optional[ThresholdOptimizer] = None
-_optimizer_lock = threading.Lock()  # noqa: F821
+_optimizer_lock = threading.Lock()
 
 
 def get_threshold_optimizer() -> ThresholdOptimizer:
