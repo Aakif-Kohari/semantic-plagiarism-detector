@@ -18,6 +18,8 @@ from src.core.app_config import (
     get_env_int,
     get_lock_timeout,
     load_branding_config,
+    mask_credential,
+    print_startup_config_summary,
 )
 # ---------------------------------------------------------------------------
 # Tests for get_app_title
@@ -519,3 +521,31 @@ def test_get_env_bool_unrecognized_value_returns_default(monkeypatch):
     monkeypatch.setenv("TEST_BOOL_VAR", "maybe")
     assert _get_env_bool("TEST_BOOL_VAR", default=True) is True
     assert _get_env_bool("TEST_BOOL_VAR", default=False) is False
+
+
+# ---------------------------------------------------------------------------
+# Tests for print_startup_config_summary and mask_credential (Issue #3747)
+# ---------------------------------------------------------------------------
+
+
+def test_mask_credential():
+    """Verify that sensitive values are masked correctly."""
+    assert mask_credential(None) == "NOT_SET"
+    assert mask_credential("") == "NOT_SET"
+    assert mask_credential("123") == "********"
+    assert mask_credential("1234") == "********"
+    assert mask_credential("secret") == "se********et"
+    assert mask_credential("my_password") == "my********rd"
+
+
+def test_print_startup_config_summary(capsys):
+    """Verify that print_startup_config_summary generates the expected summary table."""
+    print_startup_config_summary()
+    
+    captured = capsys.readouterr()
+    assert "[System Initialization]" in captured.out
+    assert "Configuration Metric" in captured.out
+    assert "Active Value State" in captured.out
+    assert "AI Model Architecture" in captured.out
+    assert "Execution Device" in captured.out
+    assert "Database Storage Path" in captured.out
