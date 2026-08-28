@@ -40,6 +40,10 @@ def test_count_words():
     assert count_words("hello,world") == 2
     assert count_words("hello-world") == 2
     assert count_words("HELLO hello") == 2
+    # CJK word count assertions
+    assert count_words("这是一个测试") == 6
+    assert count_words("Hello, 这是一个测试!") == 7
+    assert count_words("日本語漢字") == 5
 
 
 def test_get_word_count_matches_count_words():
