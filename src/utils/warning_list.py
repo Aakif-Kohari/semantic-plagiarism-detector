@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 import html
 import re
 from typing import Any, Callable, Iterable, Mapping, Sequence
@@ -38,6 +39,101 @@ def _sort_display_names(lang_code: str) -> dict[str, str]:
 
 
 WarningPage = PaginationPage[dict[str, Any]]
+
+
+@dataclass
+class DocumentWarning:
+    """Represents a document-level warning with default optional fields."""
+
+    code: str = ""
+    message: str = ""
+    severity: str = "Medium"
+    details: Any = None
+    page_number: Any = None
+    doc_a: str = ""
+    doc_b: str = ""
+    similarity: float = 0.0
+    warning_type: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "code": self.code,
+            "message": self.message,
+            "severity": self.severity,
+            "details": self.details,
+            "page_number": self.page_number,
+            "doc_a": self.doc_a,
+            "doc_b": self.doc_b,
+            "similarity": self.similarity,
+            "warning_type": self.warning_type,
+        }
+
+
+class WarningList:
+    """Collection manager for document warnings supporting filtering by severity."""
+
+    def __init__(
+        self,
+        warnings: Iterable[DocumentWarning | Mapping[str, Any]] | None = None,
+    ) -> None:
+        self.warnings: list[DocumentWarning] = []
+        if warnings:
+            for item in warnings:
+                self.add_warning(item)
+
+    def add_warning(self, item: DocumentWarning | Mapping[str, Any]) -> None:
+        if isinstance(item, DocumentWarning):
+            self.warnings.append(item)
+        elif isinstance(item, Mapping):
+            dw = DocumentWarning(
+                code=str(item.get("code", item.get("warning_type", ""))),
+                message=str(item.get("message", "")),
+                severity=str(item.get("severity", "Medium")),
+                details=item.get("details", None),
+                page_number=item.get("page_number", None),
+                doc_a=str(item.get("doc_a", "")),
+                doc_b=str(item.get("doc_b", "")),
+                similarity=float(item.get("similarity", 0.0)),
+                warning_type=str(item.get("warning_type", "")),
+            )
+            self.warnings.append(dw)
+
+    def filter_by_severity(self, severity: str) -> list[DocumentWarning]:
+        """Filter warnings by severity level (e.g. 'High', 'Medium', 'Low')."""
+        target = str(severity or "").strip().casefold()
+        return [
+            w
+            for w in self.warnings
+            if w.severity.strip().casefold() == target
+        ]
+
+    def __len__(self) -> int:
+        return len(self.warnings)
+
+    def __iter__(self):
+        return iter(self.warnings)
+
+    def __getitem__(self, index: int) -> DocumentWarning:
+        return self.warnings[index]
+
+
+def filter_by_severity(
+    warnings_or_severity: Iterable[DocumentWarning | Mapping[str, Any]] | str,
+    severity: str | None = None,
+) -> list[DocumentWarning]:
+    """Filter warnings by severity level (e.g. 'High', 'Medium', 'Low')."""
+    if isinstance(warnings_or_severity, str):
+        target_severity = warnings_or_severity
+        items = severity if severity is not None else []
+    else:
+        items = warnings_or_severity
+        target_severity = severity or ""
+
+    if isinstance(items, WarningList):
+        return items.filter_by_severity(target_severity)
+
+    wl = WarningList(items if isinstance(items, Iterable) else [])
+    return wl.filter_by_severity(target_severity)
 
 
 def _normalise_warning(
