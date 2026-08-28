@@ -73,6 +73,8 @@ _LANGUAGE_HEURISTICS = {
     ),
     "zh": re.compile(r"[\u4e00-\u9fff]"),  # CJK Unified Ideographs
     "ja": re.compile(r"[\u3040-\u309f\u30a0-\u30ff]"),  # Hiragana/Katakana
+    "ar": re.compile(r"[\u0600-\u06ff]"),  # Arabic script
+    "hi": re.compile(r"[\u0900-\u097f]"),  # Devanagari script (Hindi)
 }
 
 
@@ -92,9 +94,9 @@ def detect_chunk_language(text: str) -> str:
     if not text or not isinstance(text, str):
         return TARGET_LANGUAGE
 
-    # Check for CJK characters first as they are highly distinctive
+    # Check for script-based languages first as they are highly distinctive
     for lang, pattern in _LANGUAGE_HEURISTICS.items():
-        if lang in ("zh", "ja"):
+        if lang in ("zh", "ja", "ar", "hi"):
             if pattern.search(text):
                 return lang
 
@@ -107,7 +109,7 @@ def detect_chunk_language(text: str) -> str:
         return TARGET_LANGUAGE
 
     for lang, pattern in _LANGUAGE_HEURISTICS.items():
-        if lang in ("zh", "ja"):
+        if lang in ("zh", "ja", "ar", "hi"):
             continue
         count = len(pattern.findall(text))
         matches[lang] = count
