@@ -11,9 +11,12 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
 import os
 import time
 from typing import Any, Dict, List, Optional, Set
+
+logger = logging.getLogger(__name__)
 
 JWT_SECRET_KEY: Optional[str] = os.getenv("JWT_SECRET_KEY")
 JWT_ALGORITHM: str = "HS256"
@@ -76,7 +79,7 @@ def create_jwt_token(
         3-part dot-separated JWT token string.
 
     Raises:
-        ValueError: If no secret key is available.
+        ValueError: If no secret key is available or if the key is too short in production.
     """
     resolved_secret = secret_key if secret_key is not None else os.getenv("JWT_SECRET_KEY", JWT_SECRET_KEY)
     if not resolved_secret:
@@ -84,6 +87,13 @@ def create_jwt_token(
             "JWT_SECRET_KEY environment variable must be set. "
             "Do not use default secrets in production."
         )
+
+    if len(resolved_secret) < 32 and not _IS_TEST:
+        logger.critical(
+            "SECURITY WARNING: JWT secret key is less than 32 characters! "
+            "This makes HMAC signatures vulnerable to offline brute-force attacks."
+        )
+        raise ValueError("JWT secret key must be at least 32 characters long in production.")
 
     header = {"alg": JWT_ALGORITHM, "typ": "JWT"}
     now = int(time.time())
