@@ -242,6 +242,33 @@ def translate_text(
     return translated
 
 
+def translate_text_secondary(
+    text: str,
+    target_lang: str = "en",
+    source_lang: str = "auto",
+) -> str:
+    """Fallback translation service using an offline/secondary translator.
+
+    If MyMemoryTranslator is available, it uses it. Swaps to a mock
+    offline fallback translation string on connection/provider failures.
+    """
+    if not text:
+        return ""
+
+    try:
+        from deep_translator import MyMemoryTranslator
+        translated = MyMemoryTranslator(
+            source=source_lang or "auto",
+            target=target_lang,
+        ).translate(text)
+        if translated:
+            return str(translated).strip()
+    except Exception:
+        pass
+
+    return f"[Offline Fallback -> {target_lang}]: {text}"
+
+
 def get_language_name(code: str) -> str:
     """Convert a two-letter ISO-639-1 language code to a human-readable language name.
 

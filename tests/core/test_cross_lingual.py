@@ -753,3 +753,57 @@ class TestBackTranslateChunkRealTranslation:
         assert result == "Cached translation"
         # Should not call translate_text
         mock_translate.assert_not_called()
+
+
+def test_fallback_translation_service_disabled(monkeypatch):
+    """Verify that if primary fails and secondary is disabled, returns original text."""
+    monkeypatch.setenv("SECONDARY_TRANSLATOR_ENABLED", "false")
+    
+    with patch("src.core.cross_lingual.translate_text") as mock_primary, \
+         patch("src.core.cross_lingual.translate_text_secondary") as mock_secondary:
+        
+        mock_primary.side_effect = RuntimeError("Primary failure")
+        
+        result = back_translate_chunk("Hola", source_lang="es")
+        
+        # Should return original text
+        assert result == "Hola"
+        mock_primary.assert_called_once()
+        mock_secondary.assert_not_called()
+
+
+def test_fallback_translation_service_enabled_success(monkeypatch):
+    """Verify that if primary fails and secondary is enabled, secondary translation is returned."""
+    monkeypatch.setenv("SECONDARY_TRANSLATOR_ENABLED", "true")
+    
+    with patch("src.core.cross_lingual.translate_text") as mock_primary, \
+         patch("src.core.cross_lingual.translate_text_secondary") as mock_secondary:
+        
+        mock_primary.side_effect = RuntimeError("Primary failure")
+        mock_secondary.return_value = "Hello (Secondary)"
+        
+        result = back_translate_chunk("Hola", source_lang="es")
+        
+        # Should return secondary translation
+        assert result == "Hello (Secondary)"
+        mock_primary.assert_called_once()
+        mock_secondary.assert_called_once_with("Hola", target_lang="en", source_lang="es")
+
+
+def test_fallback_translation_service_enabled_failure(monkeypatch):
+    """Verify that if primary and secondary both fail, falls back to original text."""
+    monkeypatch.setenv("SECONDARY_TRANSLATOR_ENABLED", "true")
+    
+    with patch("src.core.cross_lingual.translate_text") as mock_primary, \
+         patch("src.core.cross_lingual.translate_text_secondary") as mock_secondary:
+        
+        mock_primary.side_effect = RuntimeError("Primary failure")
+        mock_secondary.side_effect = RuntimeError("Secondary failure")
+        
+        result = back_translate_chunk("Hola", source_lang="es")
+        
+        # Should return original text
+        assert result == "Hola"
+        mock_primary.assert_called_once()
+        mock_secondary.assert_called_once()
+
