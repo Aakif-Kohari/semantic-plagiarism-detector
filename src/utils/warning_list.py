@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 import html
 import re
 from typing import Any, Callable, Iterable, Mapping, Sequence
@@ -38,6 +39,101 @@ def _sort_display_names(lang_code: str) -> dict[str, str]:
 
 
 WarningPage = PaginationPage[dict[str, Any]]
+
+
+@dataclass
+class DocumentWarning:
+    """Represents a document-level plagiarism or processing warning."""
+
+    doc_a: str = ""
+    doc_b: str = ""
+    similarity: float = 0.0
+    severity: str = "Low"
+    message: str = ""
+    warning_type: str = ""
+    details: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "doc_a": self.doc_a,
+            "doc_b": self.doc_b,
+            "similarity": self.similarity,
+            "severity": self.severity,
+            "message": self.message,
+            "warning_type": self.warning_type,
+            **self.details,
+        }
+
+
+class WarningList:
+    """Collection manager for document warnings supporting filtering by severity."""
+
+    def __init__(
+        self,
+        warnings: Iterable[DocumentWarning | Mapping[str, Any]] | None = None,
+    ) -> None:
+        self.warnings: list[DocumentWarning] = []
+        if warnings:
+            for item in warnings:
+                self.add_warning(item)
+
+    def add_warning(self, item: DocumentWarning | Mapping[str, Any]) -> None:
+        if isinstance(item, DocumentWarning):
+            self.warnings.append(item)
+        elif isinstance(item, Mapping):
+            dw = DocumentWarning(
+                doc_a=str(item.get("doc_a", "")),
+                doc_b=str(item.get("doc_b", "")),
+                similarity=float(item.get("similarity", 0.0)),
+                severity=str(item.get("severity", "Low")),
+                message=str(item.get("message", "")),
+                warning_type=str(item.get("warning_type", "")),
+                details=dict(item),
+            )
+            self.warnings.append(dw)
+
+    def filter_by_severity(self, severity: str) -> list[DocumentWarning]:
+        """Filter warnings by severity level (e.g. 'High', 'Medium', 'Low')."""
+        target = str(severity or "").strip().casefold()
+        return [
+            w
+            for w in self.warnings
+            if w.severity.strip().casefold() == target
+        ]
+
+    def __len__(self) -> int:
+        return len(self.warnings)
+
+    def __iter__(self):
+        return iter(self.warnings)
+
+    def __getitem__(self, index: int) -> DocumentWarning:
+        return self.warnings[index]
+
+
+def filter_by_severity(
+    warnings_or_severity: Iterable[DocumentWarning | Mapping[str, Any]] | str,
+    severity: str | None = None,
+) -> list[DocumentWarning]:
+    """Filter warnings by severity level (e.g. 'High', 'Medium', 'Low').
+
+    Can be called as:
+      - filter_by_severity(warnings, "High")
+      - filter_by_severity("High", warnings)
+      - filter_by_severity("High")
+    """
+    if isinstance(warnings_or_severity, str):
+        target_severity = warnings_or_severity
+        items = severity if severity is not None else []
+    else:
+        items = warnings_or_severity
+        target_severity = severity or ""
+
+    if isinstance(items, WarningList):
+        return items.filter_by_severity(target_severity)
+
+    wl = WarningList(items if isinstance(items, Iterable) else [])
+    return wl.filter_by_severity(target_severity)
 
 
 def _normalise_warning(
@@ -77,6 +173,7 @@ def filter_warnings(
     warnings: Iterable[Mapping[str, Any]],
     search_query: str = "",
     min_match_length: int = 0,
+    severity: str | None = None,
 ) -> list[dict[str, Any]]:
     """Filter normalized warnings using functional predicate matching."""
     normalised = [_normalise_warning(item) for item in warnings]
@@ -86,6 +183,14 @@ def filter_warnings(
             item
             for item in normalised
             if item.get("matched_length", 0) >= min_match_length
+        ]
+
+    if severity:
+        target = severity.strip().casefold()
+        normalised = [
+            item
+            for item in normalised
+            if str(item.get("severity", "")).strip().casefold() == target
         ]
 
     predicate = matches_query_predicate(search_query)
