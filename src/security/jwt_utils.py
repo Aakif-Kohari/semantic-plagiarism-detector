@@ -209,7 +209,7 @@ def _verify_jwt_token(
             raise JWTExpiredError(f"{expected_type.capitalize()} token has expired.")
 
     token_type = payload.get("type")
-    if token_type and token_type != expected_type:
+    if token_type and not hmac.compare_digest(token_type, expected_type):
         raise JWTDecodeError(f"Invalid token type: expected '{expected_type}', got '{token_type}'.")
 
     return payload
