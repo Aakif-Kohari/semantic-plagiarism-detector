@@ -1152,3 +1152,62 @@ def test_markdown_extension_routing_consolidation():
     assert extract_text(markdown_content, "doc.markdown") == expected_text
     assert extract_text(markdown_content, "doc.mdown") == expected_text
 
+
+# ---------------------------------------------------------------------------
+# Timeout Safety & Circuit Breaker Tests (#3778)
+# ---------------------------------------------------------------------------
+
+class TestExtractionTimeoutCircuitBreaker:
+    """Enterprise safety suite for catastrophic parser hangs and infinite loops."""
+    
+    @patch('src.core.document_parser._has_meaningful_text', return_value=False)
+    @patch('fitz.open')
+    def test_extract_text_aborts_on_fitz_hang(self, mock_fitz_open, mock_has_meaningful_text):
+        """
+        Mock fitz.open to sleep indefinitely (simulating a C-extension deadlock).
+        Assert that the EnterpriseTimeoutCircuitBreaker intercepts and aborts
+        execution, raising a TimeoutError within the configured time limit.
+        """
+        import time
+        from unittest.mock import MagicMock
+        
+        # Simulate a process hang that would normally block the main thread indefinitely
+        def hanging_open(*args, **kwargs):
+            time.sleep(5.0)
+            return MagicMock()
+            
+        mock_fitz_open.side_effect = hanging_open
+        
+        pdf_bytes = _make_pdf_bytes(
+            "This is a document designed to trigger OCR due to image parsing."
+        )
+        
+        start_time = time.perf_counter()
+        
+        with pytest.raises(TimeoutError) as exc_info:
+            # We enforce a strict 1-second timeout for the test to ensure
+            # the circuit breaker is working without stalling the CI pipeline.
+            extract_text(
+                pdf_bytes, 
+                "hanging_submission.pdf", 
+                timeout_seconds=1.0
+            )
+            
+        duration = time.perf_counter() - start_time
+        
+        # The duration should be extremely close to the 1.0s timeout limit,
+        # verifying the circuit breaker interrupted the 5.0s mock hang.
+        assert duration < 2.0, f"Circuit breaker failed! Duration: {duration}s"
+        assert "exceeded time limit" in str(exc_info.value).lower()
+        
+    def test_circuit_breaker_allows_normal_execution(self):
+        """Ensure the circuit breaker does not interfere with normal rapid extraction."""
+        pdf_bytes = _make_pdf_bytes("Normal rapid extraction document.")
+        
+        start_time = time.perf_counter()
+        # Generous timeout for normal execution
+        result = extract_text(pdf_bytes, "normal.pdf", timeout_seconds=10.0)
+        duration = time.perf_counter() - start_time
+        
+        assert len(result) > 0
+        assert duration < 10.0
