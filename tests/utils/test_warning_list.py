@@ -480,3 +480,85 @@ def test_truncate_search_query_numeric():
     assert _truncate_search_query(12345) == "12345"
     assert _truncate_search_query(98.6) == "98.6"
     assert _truncate_search_query(None) == ""
+
+
+def test_warning_list_severity_sorting_and_pagination():
+    """Test sorting a list of 10 mixed warnings by severity (High > Medium > Low) and paginating results."""
+    mixed_warnings = [
+        {"doc_a": "Doc1.pdf", "doc_b": "Ref1.pdf", "similarity": 0.30, "severity": "Low"},
+        {"doc_a": "Doc2.pdf", "doc_b": "Ref2.pdf", "similarity": 0.85, "severity": "High"},
+        {"doc_a": "Doc3.pdf", "doc_b": "Ref3.pdf", "similarity": 0.60, "severity": "Medium"},
+        {"doc_a": "Doc4.pdf", "doc_b": "Ref4.pdf", "similarity": 0.25, "severity": "Low"},
+        {"doc_a": "Doc5.pdf", "doc_b": "Ref5.pdf", "similarity": 0.95, "severity": "High"},
+        {"doc_a": "Doc6.pdf", "doc_b": "Ref6.pdf", "similarity": 0.70, "severity": "Medium"},
+        {"doc_a": "Doc7.pdf", "doc_b": "Ref7.pdf", "similarity": 0.90, "severity": "High"},
+        {"doc_a": "Doc8.pdf", "doc_b": "Ref8.pdf", "similarity": 0.55, "severity": "Medium"},
+        {"doc_a": "Doc9.pdf", "doc_b": "Ref9.pdf", "similarity": 0.15, "severity": "Low"},
+        {"doc_a": "Doc10.pdf", "doc_b": "Ref10.pdf", "similarity": 0.88, "severity": "High"},
+    ]
+
+    # Test sorting by severity_rank descending (High > Medium > Low)
+    sorted_items = sort_warnings(
+        mixed_warnings,
+        primary_field="severity_rank",
+        primary_descending=True,
+    )
+
+    assert len(sorted_items) == 10
+    severities = [item["severity"] for item in sorted_items]
+
+    # Assert High severity warnings appear first
+    assert severities[:4] == ["High", "High", "High", "High"]
+    assert severities[4:7] == ["Medium", "Medium", "Medium"]
+    assert severities[7:] == ["Low", "Low", "Low"]
+
+    # Test paginating results (page size 5)
+    page_1 = paginate_warnings(sorted_items, page=1, page_size=5)
+    assert page_1.total_items == 10
+    assert page_1.total_pages == 2
+    assert len(page_1.items) == 5
+    assert page_1.items[0]["severity"] == "High"
+
+    page_2 = paginate_warnings(sorted_items, page=2, page_size=5)
+    assert len(page_2.items) == 5
+    assert page_2.items[0]["severity"] == "Medium"
+
+
+def test_warning_list_class_sorting_and_pagination():
+    """Test WarningList collection manager filtering by severity and preparing paginated results."""
+    from src.utils.warning_list import WarningList, prepare_warning_page
+
+    mixed_warnings = [
+        {"doc_a": "Doc1.pdf", "doc_b": "Ref1.pdf", "similarity": 0.20, "severity": "Low"},
+        {"doc_a": "Doc2.pdf", "doc_b": "Ref2.pdf", "similarity": 0.90, "severity": "High"},
+        {"doc_a": "Doc3.pdf", "doc_b": "Ref3.pdf", "similarity": 0.65, "severity": "Medium"},
+        {"doc_a": "Doc4.pdf", "doc_b": "Ref4.pdf", "similarity": 0.10, "severity": "Low"},
+        {"doc_a": "Doc5.pdf", "doc_b": "Ref5.pdf", "similarity": 0.92, "severity": "High"},
+        {"doc_a": "Doc6.pdf", "doc_b": "Ref6.pdf", "similarity": 0.70, "severity": "Medium"},
+        {"doc_a": "Doc7.pdf", "doc_b": "Ref7.pdf", "similarity": 0.89, "severity": "High"},
+        {"doc_a": "Doc8.pdf", "doc_b": "Ref8.pdf", "similarity": 0.50, "severity": "Medium"},
+        {"doc_a": "Doc9.pdf", "doc_b": "Ref9.pdf", "similarity": 0.30, "severity": "Low"},
+        {"doc_a": "Doc10.pdf", "doc_b": "Ref10.pdf", "similarity": 0.98, "severity": "High"},
+    ]
+
+    wl = WarningList(mixed_warnings)
+    assert len(wl) == 10
+
+    high_warnings = wl.filter_by_severity("High")
+    assert len(high_warnings) == 4
+    assert all(w.severity == "High" for w in high_warnings)
+
+    sorted_list, page = prepare_warning_page(
+        mixed_warnings,
+        primary_field="severity_rank",
+        primary_descending=True,
+        page=1,
+        page_size=5,
+    )
+
+    assert sorted_list[0]["severity"] == "High"
+    assert sorted_list[1]["severity"] == "High"
+    assert sorted_list[2]["severity"] == "High"
+    assert sorted_list[3]["severity"] == "High"
+    assert page.total_pages == 2
+
