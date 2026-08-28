@@ -20,7 +20,8 @@ def count_words(text: str) -> int:
     Count the number of words in the given text.
 
     Words are defined as sequences of characters separated by whitespace.
-    Punctuation is stripped before counting.
+    Punctuation is stripped before counting. For CJK scripts, individual
+    characters are counted as individual word units.
 
     Args:
         text: The text to analyze
@@ -30,6 +31,13 @@ def count_words(text: str) -> int:
     """
     if not text:
         return 0
+
+    cjk_chars = re.findall(r"[\u4e00-\u9fff]", text)
+    if cjk_chars:
+        # Replace CJK characters with space to avoid merging adjacent English words
+        non_cjk_text = re.sub(r"[\u4e00-\u9fff]", " ", text)
+        words = re.findall(r"\b\w+\b", non_cjk_text.lower())
+        return len(cjk_chars) + len(words)
 
     # Remove punctuation and split on whitespace
     words = re.findall(r"\b\w+\b", text.lower())
