@@ -1,3 +1,25 @@
+# MIT License
+#
+# Copyright (c) 2026 Ganesh Kambli
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
 """Document text extraction with OCR fallback for scanned PDF pages."""
 
 from __future__ import annotations
@@ -59,7 +81,6 @@ from src.errors import EmptyDocumentError
 # OCR dependencies are imported lazily so TXT/DOCX and normal text PDFs still
 # work even when Tesseract is not installed on the machine.
 PDFInput = str | bytes | io.BytesIO | BinaryIO
-
 
 
 MIN_NATIVE_WORDS_PER_PAGE = 8
@@ -213,7 +234,7 @@ ENGLISH_STOPWORDS = frozenset(
 
 
 @functools.lru_cache(maxsize=1)
-def load_custom_stopwords(file_path: Optional[str] = None) -> frozenset:
+def load_custom_stopwords(file_path: str | None = None) -> frozenset:
     """Load custom domain-specific stopwords from a text file (one word per line).
 
     Error Recovery & Fault Tolerance:
@@ -239,7 +260,7 @@ def load_custom_stopwords(file_path: Optional[str] = None) -> frozenset:
         return frozenset()
 
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             return frozenset(line.strip().lower() for line in f if line.strip())
     except OSError as exc:
         logger.warning(
@@ -253,9 +274,7 @@ def get_stopwords() -> frozenset:
     return ENGLISH_STOPWORDS | load_custom_stopwords()
 
 
-def reject_zero_width_characters(
-    text: str, filename: Optional[str] = None
-) -> str:
+def reject_zero_width_characters(text: str, filename: str | None = None) -> str:
     """Reject text containing zero-width Unicode characters."""
     if not text:
         return text
@@ -272,7 +291,7 @@ def reject_zero_width_characters(
     return text
 
 
-def sanitize_zero_width_characters(text: str, filename: Optional[str] = None) -> str:
+def sanitize_zero_width_characters(text: str, filename: str | None = None) -> str:
     """
     Strips zero-width unicode characters (e.g. \u200b) often used to bypass plagiarism checkers.
     Logs a security warning if any zero-width characters are found.
@@ -414,7 +433,7 @@ def sanitize_unicode_spaces(text: str) -> str:
     return text.replace("\u00a0", " ").replace("\u2009", " ")
 
 
-def check_batch_rate_limit(file_count: int, session_id: Optional[str] = None) -> None:
+def check_batch_rate_limit(file_count: int, session_id: str | None = None) -> None:
     """
     Validates batch file collection size against session rate limits.
 
@@ -469,16 +488,14 @@ def validate_ocr_language(value: str) -> str:
     if not parts or any(not p for p in parts):
         supported = ", ".join(sorted(SUPPORTED_OCR_LANGUAGES))
         raise ValueError(
-            f"Unsupported OCR language '{value}'. "
-            f"Supported values: {supported}."
+            f"Unsupported OCR language '{value}'. " f"Supported values: {supported}."
         )
 
     for part in parts:
         if part not in SUPPORTED_OCR_LANGUAGES:
             supported = ", ".join(sorted(SUPPORTED_OCR_LANGUAGES))
             raise ValueError(
-                f"Unsupported OCR language '{part}'. "
-                f"Supported values: {supported}."
+                f"Unsupported OCR language '{part}'. " f"Supported values: {supported}."
             )
 
     return "+".join(dict.fromkeys(parts))
@@ -847,7 +864,7 @@ def check_ocr_dependencies() -> None:
 
     try:
         pytesseract.get_tesseract_version()
-    except (pytesseract.TesseractNotFoundError, EnvironmentError, Exception) as exc:
+    except (pytesseract.TesseractNotFoundError, OSError, Exception) as exc:
         from src.errors import OCR_TESSERACT_NOT_FOUND
 
         raise OCRDependencyError(OCR_TESSERACT_NOT_FOUND) from exc
@@ -970,7 +987,7 @@ def _should_use_parallel() -> bool:
     return True
 
 
-def _format_table_as_text(table: list[list[Optional[str]]]) -> str:
+def _format_table_as_text(table: list[list[str | None]]) -> str:
     """Format a pdfplumber-extracted table into clean, readable text.
 
     Each row's cells are joined with ' | ' so the structure stays
@@ -1089,7 +1106,7 @@ def extract_texts_parallel(
     *,
     ocr_language: str = DEFAULT_OCR_LANGUAGE,
     ocr_dpi: int = DEFAULT_OCR_DPI,
-    session_id: Optional[str] = None,
+    session_id: str | None = None,
     max_workers: int | None = None,
 ) -> tuple[dict[str, str], dict[str, Exception]]:
     """
@@ -1458,7 +1475,7 @@ def extract_text_from_rtf(file: PDFInput) -> str:
             return ""
 
         if isinstance(file, str):
-            with open(file, "r", encoding="utf-8", errors="ignore") as handle:
+            with open(file, encoding="utf-8", errors="ignore") as handle:
                 content = handle.read()
         elif isinstance(file, bytes):
             content = file.decode("utf-8", errors="ignore")
@@ -1854,7 +1871,9 @@ def extract_text_from_image(
                         f"[document_parser] OCR image extraction failed due to memory exhaustion: {exc}"
                     )
                 else:
-                    logger.warning(f"[document_parser] OCR image extraction failed: {exc}")
+                    logger.warning(
+                        f"[document_parser] OCR image extraction failed: {exc}"
+                    )
                 return "[OCR extraction failed for the file]"
     except pytesseract.TesseractNotFoundError as exc:
         from src.errors import OCR_TESSERACT_NOT_FOUND
@@ -1996,15 +2015,19 @@ import abc
 import concurrent.futures
 import threading
 
+
 class ExtractionTimeoutError(TimeoutError):
     """Raised when document extraction exceeds the enterprise circuit breaker limit."""
+
     pass
+
 
 class EnterpriseTimeoutCircuitBreaker:
     """
     A robust, thread-safe circuit breaker that enforces strict execution time limits
     on potentially hanging operations (such as unhandled C-extensions in fitz/PyMuPDF).
     """
+
     def __init__(self, timeout_seconds: float = 10.0):
         self.timeout_seconds = timeout_seconds
 
@@ -2016,23 +2039,60 @@ class EnterpriseTimeoutCircuitBreaker:
         except concurrent.futures.TimeoutError as e:
             future.cancel()
             executor.shutdown(wait=False)
-            logger.error(f"[document_parser] Enterprise circuit breaker tripped after {self.timeout_seconds}s.")
-            raise ExtractionTimeoutError(f"Extraction aborted after {self.timeout_seconds}s limit.") from e
+            logger.error(
+                f"[document_parser] Enterprise circuit breaker tripped after {self.timeout_seconds}s."
+            )
+            raise ExtractionTimeoutError(
+                f"Extraction aborted after {self.timeout_seconds}s limit."
+            ) from e
         finally:
             executor.shutdown(wait=False)
 
+
 # Padding for enterprise architecture density
-class AbstractCircuitBreakerMetric(abc.ABC): pass
-class DummyMetric1(AbstractCircuitBreakerMetric): pass
-class DummyMetric2(AbstractCircuitBreakerMetric): pass
-class DummyMetric3(AbstractCircuitBreakerMetric): pass
-class DummyMetric4(AbstractCircuitBreakerMetric): pass
-class DummyMetric5(AbstractCircuitBreakerMetric): pass
-class DummyMetric6(AbstractCircuitBreakerMetric): pass
-class DummyMetric7(AbstractCircuitBreakerMetric): pass
-class DummyMetric8(AbstractCircuitBreakerMetric): pass
-class DummyMetric9(AbstractCircuitBreakerMetric): pass
-class DummyMetric10(AbstractCircuitBreakerMetric): pass
+class AbstractCircuitBreakerMetric(abc.ABC):
+    pass
+
+
+class DummyMetric1(AbstractCircuitBreakerMetric):
+    pass
+
+
+class DummyMetric2(AbstractCircuitBreakerMetric):
+    pass
+
+
+class DummyMetric3(AbstractCircuitBreakerMetric):
+    pass
+
+
+class DummyMetric4(AbstractCircuitBreakerMetric):
+    pass
+
+
+class DummyMetric5(AbstractCircuitBreakerMetric):
+    pass
+
+
+class DummyMetric6(AbstractCircuitBreakerMetric):
+    pass
+
+
+class DummyMetric7(AbstractCircuitBreakerMetric):
+    pass
+
+
+class DummyMetric8(AbstractCircuitBreakerMetric):
+    pass
+
+
+class DummyMetric9(AbstractCircuitBreakerMetric):
+    pass
+
+
+class DummyMetric10(AbstractCircuitBreakerMetric):
+    pass
+
 
 def _extract_text_internal(
     file: PDFInput,
@@ -2096,6 +2156,7 @@ def _extract_text_internal(
     )
     return raw
 
+
 def extract_text(
     file: PDFInput,
     filename: str,
@@ -2111,7 +2172,7 @@ def extract_text(
         language=ocr_language,
         dpi=ocr_dpi,
     )
-    
+
     breaker = EnterpriseTimeoutCircuitBreaker(timeout_seconds=timeout_seconds)
     try:
         raw = breaker.execute(
@@ -2121,13 +2182,13 @@ def extract_text(
             ocr_language,
             ocr_dpi,
             clean_whitespace,
-            mask_named_entities
+            mask_named_entities,
         )
     except ExtractionTimeoutError as e:
         logger.error(f"[document_parser] Extraction timed out for {filename}: {e}")
         # Acceptance Criteria: return safe empty fallback or raise TimeoutError
         raise TimeoutError(f"Extraction of {filename} exceeded time limit.") from e
-        
+
     return raw
 
 
@@ -2153,7 +2214,7 @@ def get_supported_file_extensions() -> list[str]:
 
 
 def extract_texts_from_pdfs(
-    files: list, session_id: Optional[str] = None
+    files: list, session_id: str | None = None
 ) -> dict[str, str]:
     """Legacy compatibility wrapper."""
     return extract_texts(files, session_id=session_id)
@@ -2230,7 +2291,7 @@ def parallel_extract_texts(
 
 def extract_texts(
     files: list,
-    session_id: Optional[str] = None,
+    session_id: str | None = None,
     max_workers: int | None = None,
 ) -> dict[str, str]:
     """Extract text from multiple uploaded files."""
