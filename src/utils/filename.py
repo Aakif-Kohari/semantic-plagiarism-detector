@@ -134,7 +134,7 @@ def sanitize_filename(
         raise ValueError("max_length must be at least 8.")
 
     raw = html.unescape(str(filename or ""))
-    raw = unicodedata.normalize("NFKC", raw)
+    raw = unicodedata.normalize("NFC", raw)
     raw = _CONTROL_RE.sub("", raw)
 
     # Strip markup before selecting the basename. Closing tags contain "/"
@@ -330,7 +330,7 @@ def get_final_extension(filename: object) -> str:
     from hiding an executable payload, such as ``document.pdf.exe``.
     """
     raw = html.unescape(str(filename or ""))
-    raw = unicodedata.normalize("NFKC", raw)
+    raw = unicodedata.normalize("NFC", raw)
     raw = _CONTROL_RE.sub("", raw)
     raw = _HTML_TAG_RE.sub("", raw)
     basename = _basename(raw).strip()
