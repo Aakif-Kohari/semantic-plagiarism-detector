@@ -307,6 +307,24 @@ CALIBRATED_THRESHOLDS_PATH: Final[str] = os.path.join(
     "calibrated_thresholds.json",
 )
 
+# Incremental FAISS index metadata (Issue #3913)
+FAISS_INDEX_METADATA_PATH: Final[str] = os.path.join(
+    os.path.dirname(__file__),
+    "..",
+    "..",
+    "config",
+    "faiss_index_metadata.json",
+)
+
+# Enable incremental index updates instead of full rebuild
+INCREMENTAL_INDEX_ENABLED: Final[bool] = os.getenv(
+    "INCREMENTAL_INDEX_ENABLED", "true"
+).strip().lower() not in ("false", "0", "")
+
+# Threshold for document changes triggering full index rebuild (%)
+INCREMENTAL_INDEX_REBUILD_THRESHOLD: Final[float] = float(
+    os.getenv("INCREMENTAL_INDEX_REBUILD_THRESHOLD", "50.0")
+)
 
 def load_calibrated_thresholds(
     calibration_id: Optional[str] = None,
