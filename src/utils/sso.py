@@ -38,6 +38,8 @@ from requests.adapters import HTTPAdapter
 from urllib3.util import Retry
 from dotenv import load_dotenv
 
+from src.errors import SSOConfigurationError
+
 logger = logging.getLogger(__name__)
 
 # State expiration constant - 10 minutes
@@ -174,7 +176,7 @@ def get_google_auth_url() -> Tuple[str, str, Dict[str, Any]]:
     _load_env()
     client_id = os.getenv("GOOGLE_CLIENT_ID")
     if not client_id:
-        raise ValueError("GOOGLE_CLIENT_ID environment variable is not configured")
+        raise SSOConfigurationError("GOOGLE_CLIENT_ID environment variable is not configured")
 
     redirect_uri = _get_redirect_uri()
     state = f"google_{secrets.token_urlsafe(16)}"
@@ -236,10 +238,10 @@ def exchange_google_code(code: str, state: str | None = None, code_verifier: str
     _load_env()
     client_id = os.getenv("GOOGLE_CLIENT_ID")
     if not client_id:
-        raise ValueError("GOOGLE_CLIENT_ID environment variable is not configured")
+        raise SSOConfigurationError("GOOGLE_CLIENT_ID environment variable is not configured")
     client_secret = os.getenv("GOOGLE_CLIENT_SECRET")
     if not client_secret:
-        raise ValueError("GOOGLE_CLIENT_SECRET environment variable is not configured")
+        raise SSOConfigurationError("GOOGLE_CLIENT_SECRET environment variable is not configured")
     redirect_uri = _get_redirect_uri()
 
     token_data = {
@@ -393,7 +395,7 @@ def get_github_auth_url() -> Tuple[str, str, Dict[str, Any]]:
     _load_env()
     client_id = os.getenv("GITHUB_CLIENT_ID")
     if not client_id:
-        raise ValueError("GITHUB_CLIENT_ID environment variable is not configured")
+        raise SSOConfigurationError("GITHUB_CLIENT_ID environment variable is not configured")
 
     redirect_uri = _get_redirect_uri()
     state = f"github_{secrets.token_urlsafe(16)}"
@@ -435,10 +437,10 @@ def exchange_github_code(code: str, state: str | None = None) -> tuple[SSOUserPr
     _load_env()
     client_id = os.getenv("GITHUB_CLIENT_ID")
     if not client_id:
-        raise ValueError("GITHUB_CLIENT_ID environment variable is not configured")
+        raise SSOConfigurationError("GITHUB_CLIENT_ID environment variable is not configured")
     client_secret = os.getenv("GITHUB_CLIENT_SECRET")
     if not client_secret:
-        raise ValueError("GOOGLE_CLIENT_SECRET environment variable is not configured")
+        raise SSOConfigurationError("GITHUB_CLIENT_SECRET environment variable is not configured")
     redirect_uri = _get_redirect_uri()
 
     # Setup retrying OAuth session
@@ -613,7 +615,7 @@ def get_azure_auth_url() -> tuple[str, str]:
     _load_env()
     client_id = os.getenv("AZURE_CLIENT_ID")
     if not client_id:
-        raise ValueError("AZURE_CLIENT_ID environment variable is not configured")
+        raise SSOConfigurationError("AZURE_CLIENT_ID environment variable is not configured")
     tenant_id = os.getenv("AZURE_TENANT_ID", "common")
     redirect_uri = _get_redirect_uri()
     state = f"azure_{secrets.token_urlsafe(16)}"
@@ -654,10 +656,10 @@ def exchange_azure_code(
     _load_env()
     client_id = os.getenv("AZURE_CLIENT_ID")
     if not client_id:
-        raise ValueError("AZURE_CLIENT_ID environment variable is not configured")
+        raise SSOConfigurationError("AZURE_CLIENT_ID environment variable is not configured")
     client_secret = os.getenv("AZURE_CLIENT_SECRET")
     if not client_secret:
-        raise ValueError("AZURE_CLIENT_SECRET environment variable is not configured")
+        raise SSOConfigurationError("AZURE_CLIENT_SECRET environment variable is not configured")
     tenant_id = os.getenv("AZURE_TENANT_ID", "common")
     redirect_uri = _get_redirect_uri()
 
