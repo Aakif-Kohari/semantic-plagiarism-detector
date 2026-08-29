@@ -242,7 +242,6 @@ def translate_text(
     return translated
 
 
- feature/translation-fallback-service
 def translate_text_secondary(
     text: str,
     target_lang: str = "en",
@@ -306,7 +305,6 @@ def translate_text_batch(
             except Exception:
                 results.append(f"(Translation Error: {exc})")
         return results
- main
 
 
 def get_language_name(code: str) -> str:
