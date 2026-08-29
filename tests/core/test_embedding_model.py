@@ -769,3 +769,20 @@ class TestModelCacheFolderConfig:
             EmbeddingModelManager.get_instance(quantize_model=False).get_model()
 
         assert "Model cache target: default (~/.cache/huggingface)" in caplog.text
+
+
+def test_warmup_embedding_model_success():
+    """Verify that warmup_embedding_model returns True when embed_chunks executes successfully."""
+    with patch("src.core.embedding_model.embed_chunks", return_value=np.ones((1, 384))) as mock_embed:
+        result = embedding_model.warmup_embedding_model()
+        assert result is True
+        mock_embed.assert_called_once_with(["Warmup"])
+
+
+def test_warmup_embedding_model_failure():
+    """Verify that warmup_embedding_model catches exceptions and returns False."""
+    with patch("src.core.embedding_model.embed_chunks", side_effect=Exception("Model loading error")) as mock_embed:
+        result = embedding_model.warmup_embedding_model()
+        assert result is False
+        mock_embed.assert_called_once_with(["Warmup"])
+

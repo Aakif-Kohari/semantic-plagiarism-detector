@@ -568,3 +568,19 @@ def get_document_embedding(doc_embedding: np.ndarray) -> np.ndarray:
     if doc_embedding.ndim == 1:
         return doc_embedding  # Already a single embedding
     return np.mean(doc_embedding, axis=0)
+
+
+def warmup_embedding_model() -> bool:
+    """Executes a dummy inference pass on startup to pre-load weights
+    and trigger JIT compilation, eliminating first-request latency overhead.
+    """
+    logger.info("Initializing embedding model warmup routine...")
+    try:
+        dummy_text = "Warmup"
+        _ = embed_chunks([dummy_text])
+        logger.info("Embedding model warmup completed successfully. JIT layers compiled.")
+        return True
+    except Exception as e:
+        logger.error(f"Embedding model warmup failed: {str(e)}", exc_info=True)
+        # Fail gracefully to avoid blocking the main runtime setup if the network/device drops
+        return False

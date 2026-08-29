@@ -51,6 +51,12 @@ app = FastAPI(
     dependencies=[Depends(verify_bearer_token)],
 )
 
+
+@app.on_event("startup")
+def startup_event():
+    from src.core.embedding_model import warmup_embedding_model
+    warmup_embedding_model()
+
 # Enable CORS for external LMS frontends
 origins = os.getenv("CORS_ALLOWED_ORIGINS", "*")
 if origins.strip() == "*":
