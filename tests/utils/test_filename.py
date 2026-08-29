@@ -102,6 +102,12 @@ def test_unique_filename_resolves_case_insensitive_collisions():
     assert unique_filename("REPORT.PDF", existing) == "REPORT_2.pdf"
 
 
+def test_unique_filename_preserves_new_upload_casing_on_collision():
+    """Issue #3726: the *new* upload's casing must survive collision
+    resolution, even though the collision check itself is case-insensitive.
+    """
+    assert unique_filename("Report.pdf", ["report.pdf"]) == "Report_1.pdf"
+
 def test_mapping_preserves_entries_after_sanitization_collision():
     files = {
         "<b>report</b>.pdf": b"one",

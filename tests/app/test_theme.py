@@ -18,6 +18,7 @@ from app.theme import (
     tier_color,
     tier_from_severity_label,
 )
+from app.css_constants import spd_root_css_variables
 
 
 def test_render_notification_badge_with_negative_count():
@@ -219,6 +220,74 @@ def test_inject_css_generates_css_without_errors():
     assert len(css.strip()) > 0
     assert "block-container" in css
     assert "stAlert" in css
+
+
+class TestSpdRootCssVariables:
+    """Tests for the --spd-* namespaced CSS custom properties (Issue #3762)."""
+
+    def test_returns_root_block(self):
+        css = spd_root_css_variables(THEMES["Light"], "#0D9488")
+        assert ":root {" in css
+
+    def test_includes_primary_and_bg_from_issue_examples(self):
+        """The two variable names given as examples in the issue text
+        (--spd-primary-color, --spd-bg-card) must be present verbatim."""
+        css = spd_root_css_variables(THEMES["Light"], "#0D9488")
+        assert "--spd-primary-color:" in css
+        assert "--spd-bg-card:" in css
+
+    def test_includes_all_expected_variables(self):
+        css = spd_root_css_variables(THEMES["Light"], "#0D9488")
+        for var in [
+            "--spd-primary",
+            "--spd-bg",
+            "--spd-bg-card",
+            "--spd-bg-surface",
+            "--spd-text",
+            "--spd-text-muted",
+            "--spd-border",
+            "--spd-input-bg",
+            "--spd-danger",
+            "--spd-danger-soft",
+            "--spd-warning",
+            "--spd-warning-soft",
+            "--spd-success",
+            "--spd-success-soft",
+            "--spd-neutral-soft",
+        ]:
+            assert f"{var}:" in css
+
+    def test_uses_supplied_accent_color(self):
+        css = spd_root_css_variables(THEMES["Light"], "#123456")
+        assert "--spd-primary: #123456;" in css
+        assert "--spd-primary-color: #123456;" in css
+
+    def test_light_and_dark_themes_produce_different_output(self):
+        light_css = spd_root_css_variables(THEMES["Light"], "#0D9488")
+        dark_css = spd_root_css_variables(THEMES["Dark"], "#2DD4BF")
+        assert light_css != dark_css
+        assert THEMES["Light"]["background"] in light_css
+        assert THEMES["Dark"]["background"] in dark_css
+
+    def test_balanced_braces(self):
+        css = spd_root_css_variables(THEMES["Light"], "#0D9488")
+        assert css.count("{") == css.count("}")
+
+
+def test_inject_css_includes_spd_namespaced_variables():
+    """inject_css() must emit the --spd-* variables alongside the existing
+    generic ones (Issue #3762)."""
+    with patch("app.theme.st.markdown") as mock_markdown:
+        inject_css()
+
+    css = mock_markdown.call_args_list[0].args[0]
+    assert "--spd-primary:" in css
+    assert "--spd-bg:" in css
+    assert "--spd-bg-card:" in css
+    # The pre-existing generic variables must still be present -- this is
+    # additive, not a replacement.
+    assert "--primary-bg:" in css
+    assert "--accent-color:" in css
 
 
 def test_sanitize_hex_color_valid_and_invalid():

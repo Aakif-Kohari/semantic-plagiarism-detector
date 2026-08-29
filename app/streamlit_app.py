@@ -1008,6 +1008,13 @@ init_db()
 
 # Purge stale temp files older than 2 hours on startup
 purge_expired_temp_files()
+
+# Preload and warm up embedding model on startup exactly once
+from src.core.embedding_model import warmup_embedding_model
+@st.cache_resource
+def run_warmup():
+    warmup_embedding_model()
+run_warmup()
 # Start lightweight REST API server for /healthz endpoint in background
 import threading
 
@@ -1570,12 +1577,19 @@ def update_global_activity():
             _code = st.query_params["code"]
             _state = st.query_params["state"]
             from src.db.auth import get_or_create_sso_user
-            from src.utils.sso import exchange_github_code, exchange_google_code
+            from src.utils.sso import (
+                SSOConfigurationError,
+                exchange_github_code,
+                exchange_google_code,
+            )
             _user_info, _error_msg = None, None
-            if _state.startswith("google_"):
-                _user_info, _error_msg = exchange_google_code(_code)
-            elif _state.startswith("github_"):
-                _user_info, _error_msg = exchange_github_code(_code)
+            try:
+                if _state.startswith("google_"):
+                    _user_info, _error_msg = exchange_google_code(_code)
+                elif _state.startswith("github_"):
+                    _user_info, _error_msg = exchange_github_code(_code)
+            except (SSOConfigurationError, ValueError) as _exc:
+                _user_info, _error_msg = None, f"Configuration Error: {_exc}"
             if _user_info and _user_info.get("email"):
                 _email = _user_info["email"]
                 if not is_user_active(_email):

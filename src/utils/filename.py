@@ -11,8 +11,7 @@ from collections.abc import Collection, Mapping
 from pathlib import PurePath
 from typing import IO, TypeVar
 
-DEFAULT_FILENAME = "document"
-
+DEFAULT_FILENAME = os.getenv("DEFAULT_FALLBACK_FILENAME", "document")
 # Upper bound on a sanitized filename, in characters.
 #
 # 128 leaves headroom under the 255-byte limit most filesystems impose, which

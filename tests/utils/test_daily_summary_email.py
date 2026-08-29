@@ -187,7 +187,6 @@ def test_get_admin_emails_no_valid_db_emails(mock_get_users):
 
     assert emails == ["fallback@example.com"]
 
-
 @patch("src.utils.daily_summary_email.get_all_users")
 @patch.dict("os.environ", {"ADMIN_EMAIL": "invalid-admin-email"}, clear=True)
 def test_get_admin_emails_no_valid_db_or_env_email(mock_get_users):
@@ -199,6 +198,32 @@ def test_get_admin_emails_no_valid_db_or_env_email(mock_get_users):
     emails = get_admin_emails()
 
     assert emails == []
+
+
+@patch("src.utils.daily_summary_email.get_all_users")
+@patch.dict("os.environ", {"ADMIN_EMAIL": "admin1@example.com, admin2@example.com;admin3@example.org"})
+def test_get_admin_emails_comma_and_semicolon_separated(mock_get_users):
+    """Test get_admin_emails handles mixed comma and semicolon separated lists in env."""
+    mock_get_users.return_value = []  # Fallback to env variable
+    
+    emails = get_admin_emails()
+    
+    assert emails == ["admin1@example.com", "admin2@example.com", "admin3@example.org"]
+
+
+@patch("src.utils.daily_summary_email.get_all_users")
+@patch.dict("os.environ", {"ADMIN_EMAIL": "admin1@example.com,invalid-email, admin2@example.com"})
+def test_get_admin_emails_separated_with_invalid_skips_and_warns(mock_get_users, caplog):
+    """Test get_admin_emails filters out invalid email tokens from a list and logs warnings."""
+    import logging
+    mock_get_users.return_value = []
+    
+    with caplog.at_level(logging.WARNING):
+        emails = get_admin_emails()
+        
+    assert emails == ["admin1@example.com", "admin2@example.com"]
+    assert any("Skipping invalid admin email token configuration" in record.message for record in caplog.records)
+
 
 
 def test_build_email_html_body_with_incidents_legacy_args(mock_incidents):

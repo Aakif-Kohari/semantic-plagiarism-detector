@@ -184,6 +184,29 @@ class TestFetchLatestGithubVersion:
         call_args = mock_client.get.call_args
         assert call_args[0][0] == custom_url
 
+    def test_fetch_latest_github_version_graceful_failures(self) -> None:
+        """Verify that 403, 404, and 500 error codes safely return None without throwing exceptions."""
+        import httpx
+
+        for status_code in [403, 404, 500]:
+            mock_response = MagicMock(spec=httpx.Response)
+            mock_response.status_code = status_code
+            mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+                message=f"Error {status_code}",
+                request=MagicMock(spec=httpx.Request),
+                response=mock_response
+            )
+
+            mock_client = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_client.get = AsyncMock(return_value=mock_response)
+
+            with patch.object(_vc_mod.httpx, "AsyncClient", return_value=mock_client):
+                tag = self._run(fetch_latest_github_version())
+
+            assert tag is None
+
 
 # ── check_for_update_sync ──────────────────────────────────────────────────────
 
