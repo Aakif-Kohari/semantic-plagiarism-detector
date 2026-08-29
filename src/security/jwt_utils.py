@@ -125,13 +125,37 @@ def create_jwt_token(
     """
     alg = (algorithm or get_jwt_algorithm()).upper()
 
-    is_test_env = (os.getenv("APP_ENV") == "test") or _IS_TEST
-    if len(resolved_secret) < 32 and not is_test_env:
-        logger.critical(
-            "SECURITY WARNING: JWT secret key is less than 32 characters! "
-            "This makes HMAC signatures vulnerable to offline brute-force attacks."
-        )
-        raise ValueError("JWT secret key must be at least 32 characters long in production.")
+    # Resolve the signing key before anything else touches it. This block was
+    # dropped by a bad merge (see #4081), which left the checks below reading
+    # names that were never bound. Key resolution is per-algorithm because an
+    # RSA private key and an HMAC shared secret are not interchangeable, and
+    # the verify path (verify_jwt_token) is laid out the same way.
+    private_key: Optional[str] = None
+    resolved_secret: Optional[str] = None
+
+    if alg == "RS256":
+        private_key = secret_key or os.getenv("JWT_PRIVATE_KEY", JWT_PRIVATE_KEY)
+        if not private_key:
+            raise ValueError(
+                "JWT_PRIVATE_KEY environment variable or secret_key parameter must be set for RS256 signing."
+            )
+    else:
+        resolved_secret = secret_key if secret_key is not None else os.getenv("JWT_SECRET_KEY", JWT_SECRET_KEY)
+        if not resolved_secret:
+            raise ValueError(
+                "JWT_SECRET_KEY environment variable must be set. "
+                "Do not use default secrets in production."
+            )
+
+        # HMAC only. A PEM private key is not a shared secret, so counting its
+        # characters says nothing about brute-force resistance.
+        is_test_env = (os.getenv("APP_ENV") == "test") or _IS_TEST
+        if len(resolved_secret) < 32 and not is_test_env:
+            logger.critical(
+                "SECURITY WARNING: JWT secret key is less than 32 characters! "
+                "This makes HMAC signatures vulnerable to offline brute-force attacks."
+            )
+            raise ValueError("JWT secret key must be at least 32 characters long in production.")
 
     header = {"alg": alg, "typ": "JWT"}
     now = int(time.time())
