@@ -27,6 +27,7 @@ from src.core.similarity import document_similarity_matrix, flag_plagiarismfrom 
 from src.utils.tracing import get_tracer
 
 logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 class PipelineResult(NamedTuple):
@@ -207,13 +208,23 @@ def run_full_pipeline(
         with tracer.start_as_current_span("pipeline.incident_sync"):
             pass
 
+        # Enrich flags with evidence if available
+        enriched_flags = flags
+        if chunked_docs and embeddings:
+            for flag in enriched_flags:
+                if "evidence" not in flag:
+                    logger.debug(
+                        "Flag for %s vs %s has no evidence attached",
+                        flag.get("doc_a"),
+                        flag.get("doc_b"),
+                    )
+
         return PipelineResult(
             raw_texts=raw_texts,
             chunked_docs=chunked_docs,
             embeddings=embeddings,
             sim_df=sim_df,
-            chunk_sim_df=chunk_sim_df,
-            faiss_index=faiss_index,
+            chunk_sim_df=chunk_sim_df,            faiss_index=faiss_index,
             registry=registry,
             ai_probabilities=ai_probabilities,
             flags=flags,
