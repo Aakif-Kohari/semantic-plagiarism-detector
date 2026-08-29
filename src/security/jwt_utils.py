@@ -252,6 +252,64 @@ def verify_refresh_token(
     return _verify_jwt_token(token, "refresh", secret_key, clock_skew_seconds=clock_skew_seconds)
 
 
+def get_unverified_jwt_header(token: str) -> dict[str, Any]:
+    """Decode and return the header of a JWT without verifying the signature.
+
+    When rotating JWT keys with multiple key IDs (kid), the verification
+    layer needs to inspect the unverified header to determine which
+    public key to load.  This helper splits the compact JWS token,
+    base64-decodes the first segment, and returns the parsed JSON header.
+
+    Args:
+        token: A compact-serialised JWT string (three dot-separated segments).
+
+    Returns:
+        A dictionary containing the decoded header claims (e.g. ``alg``,
+        ``typ``, ``kid``).
+
+    Raises:
+        JWTDecodeError: If *token* is empty, not a string, does not
+            contain exactly three dot-separated segments, or the header
+            cannot be base64-decoded or parsed as JSON.
+    """
+    if not token or not isinstance(token, str):
+        raise JWTDecodeError("Cannot decode header: token must be a non-empty string.")
+
+    token = token.strip()
+    parts = token.split(".")
+
+    if len(parts) != 3:
+        raise JWTDecodeError(
+            f"Cannot decode header: expected 3 dot-separated segments, got {len(parts)}."
+        )
+
+    encoded_header = parts[0]
+
+    if not encoded_header:
+        raise JWTDecodeError("Cannot decode header: header segment is empty.")
+
+    try:
+        header_bytes = base64url_decode(encoded_header)
+    except Exception as exc:
+        raise JWTDecodeError(
+            "Cannot decode header: invalid base64url encoding."
+        ) from exc
+
+    try:
+        header = json.loads(header_bytes.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise JWTDecodeError(
+            "Cannot decode header: header is not valid JSON."
+        ) from exc
+
+    if not isinstance(header, dict):
+        raise JWTDecodeError(
+            "Cannot decode header: decoded header is not a JSON object."
+        )
+
+    return header
+
+
 def verify_access_token(
     token: str,
     secret_key: Optional[str] = None,
@@ -272,3 +330,214 @@ def verify_access_token(
         ValueError: If token signature is invalid, expired, wrong type, or secret is missing.
     """
     return _verify_jwt_token(token, "access", secret_key, clock_skew_seconds=clock_skew_seconds)
+
+
+# ---------------------------------------------------------------------------
+# Key-rotation helpers
+# ---------------------------------------------------------------------------
+
+
+class JWTKeyRegistry:
+    """In-memory registry mapping ``kid`` values to HMAC secret keys.
+
+    This supports JWT key rotation: new keys are registered with a fresh
+    ``kid``, old keys can be retired, and the verification layer looks up
+    the right key by inspecting the unverified header.
+
+    Example::
+
+        registry = JWTKeyRegistry()
+        registry.register_key("2024-01", secret_a)
+        registry.register_key("2024-07", secret_b)
+
+        header = get_unverified_jwt_header(token)
+        key = registry.get_key(header["kid"])
+        payload = _verify_jwt_token(token, "access", secret_key=key)
+    """
+
+    def __init__(self) -> None:
+        self._keys: dict[str, str] = {}
+        self._active_kid: Optional[str] = None
+
+    # -- mutation -----------------------------------------------------------
+
+    def register_key(self, kid: str, secret: str) -> None:
+        """Register or update a secret key under the given *kid*.
+
+        Args:
+            kid: Key identifier (must be a non-empty string).
+            secret: The HMAC secret associated with *kid*.
+
+        Raises:
+            ValueError: If *kid* or *secret* is empty.
+        """
+        if not kid or not isinstance(kid, str):
+            raise ValueError("kid must be a non-empty string.")
+        if not secret or not isinstance(secret, str):
+            raise ValueError("secret must be a non-empty string.")
+        self._keys[kid.strip()] = secret
+
+    def retire_key(self, kid: str) -> bool:
+        """Remove a key from the registry.
+
+        Returns ``True`` if the key existed and was removed, ``False``
+        otherwise.
+        """
+        removed = self._keys.pop(kid, None) is not None
+        if removed and self._active_kid == kid:
+            self._active_kid = None
+        return removed
+
+    def set_active(self, kid: str) -> None:
+        """Mark *kid* as the current active signing key.
+
+        Raises:
+            KeyError: If *kid* is not registered.
+        """
+        if kid not in self._keys:
+            raise KeyError(f"kid '{kid}' is not registered.")
+        self._active_kid = kid
+
+    # -- queries ------------------------------------------------------------
+
+    def get_key(self, kid: str) -> str:
+        """Return the secret for *kid*, or raise ``KeyError``."""
+        try:
+            return self._keys[kid]
+        except KeyError:
+            raise KeyError(f"No secret registered for kid '{kid}'.") from None
+
+    def get_active_key(self) -> tuple[str, str]:
+        """Return ``(kid, secret)`` for the active key.
+
+        Raises:
+            RuntimeError: If no key has been marked active.
+        """
+        if self._active_kid is None:
+            raise RuntimeError("No active key set. Call set_active() first.")
+        return self._active_kid, self._keys[self._active_kid]
+
+    @property
+    def kids(self) -> list[str]:
+        """Return a sorted list of registered kid values."""
+        return sorted(self._keys.keys())
+
+    def __len__(self) -> int:
+        return len(self._keys)
+
+    def __contains__(self, kid: str) -> bool:
+        return kid in self._keys
+
+    def __repr__(self) -> str:
+        active = self._active_kid or "(none)"
+        return f"JWTKeyRegistry(kids={self.kids!r}, active={active!r})"
+
+
+
+def verify_token_with_kid(
+    token: str,
+    registry: JWTKeyRegistry,
+    expected_type: str,
+    clock_skew_seconds: int = 10,
+) -> dict[str, Any]:
+    """Verify a token using the kid-based key registry.
+
+    This is the recommended verification path when key rotation is
+    enabled.  It inspects the unverified header, looks up the secret
+    in *registry*, and delegates to :func:`_verify_jwt_token`.
+
+    Args:
+        token: A compact-serialised JWT.
+        registry: A :class:`JWTKeyRegistry` holding all active keys.
+        expected_type: Expected ``type`` claim (``"access"`` or ``"refresh"``).
+        clock_skew_seconds: Clock-drift allowance.
+
+    Returns:
+        Decoded payload dictionary.
+
+    Raises:
+        JWTDecodeError: If the header cannot be decoded or the kid is
+            unknown.
+        JWTSignatureError / JWTExpiredError: Propagated from verification.
+    """
+    header = get_unverified_jwt_header(token)
+    kid = header.get("kid")
+
+    if kid is None:
+        raise JWTDecodeError("Token header is missing 'kid' claim.")
+
+    if kid not in registry:
+        raise JWTDecodeError(f"Unknown key id '{kid}' in token header.")
+
+    secret = registry.get_key(kid)
+    return _verify_jwt_token(token, expected_type, secret_key=secret, clock_skew_seconds=clock_skew_seconds)
+
+
+
+def verify_access_token_with_kid(
+    token: str,
+    registry: JWTKeyRegistry,
+    clock_skew_seconds: int = 10,
+) -> dict[str, Any]:
+    """Convenience wrapper for access-token verification via kid registry."""
+    return verify_token_with_kid(token, registry, "access", clock_skew_seconds)
+
+
+
+def verify_refresh_token_with_kid(
+    token: str,
+    registry: JWTKeyRegistry,
+    clock_skew_seconds: int = 10,
+) -> dict[str, Any]:
+    """Convenience wrapper for refresh-token verification via kid registry."""
+    return verify_token_with_kid(token, registry, "refresh", clock_skew_seconds)
+
+
+
+def create_jwt_token_with_kid(
+    data: dict[str, Any],
+    kid: str,
+    registry: JWTKeyRegistry,
+    expires_in_seconds: int = 3600,
+) -> str:
+    """Create a JWT whose header includes ``kid`` and is signed by the
+    corresponding secret from *registry*.
+
+    Args:
+        data: Claims to include in the payload.
+        kid: Key identifier — must be registered in *registry*.
+        registry: The key registry holding secrets.
+        expires_in_seconds: Token lifetime.
+
+    Returns:
+        Compact JWT string.
+
+    Raises:
+        KeyError: If *kid* is not in the registry.
+    """
+    secret = registry.get_key(kid)
+    # Inject kid into the token creation flow
+    header = {"alg": JWT_ALGORITHM, "typ": "JWT", "kid": kid}
+    now = int(time.time())
+    payload = {
+        **data,
+        "iat": now,
+        "exp": now + expires_in_seconds,
+    }
+
+    encoded_header = base64url_encode(
+        json.dumps(header, separators=(",", ":")).encode("utf-8")
+    )
+    encoded_payload = base64url_encode(
+        json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    )
+
+    signing_input = f"{encoded_header}.{encoded_payload}".encode("utf-8")
+    signature = hmac.new(
+        secret.encode("utf-8"),
+        signing_input,
+        hashlib.sha256,
+    ).digest()
+    encoded_signature = base64url_encode(signature)
+
+    return f"{encoded_header}.{encoded_payload}.{encoded_signature}"
