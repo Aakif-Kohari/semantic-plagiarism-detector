@@ -58,6 +58,30 @@ class RevokeResponse(BaseModel):
     )
 
 
+class TwoFactorSetupRequest(BaseModel):
+    """Request schema for 2FA setup."""
+
+    username: str | None = Field(
+        default=None, description="Username to set up 2FA for"
+    )
+    issuer: str | None = Field(
+        default="SemanticPlagiarismDetector", description="TOTP Issuer name for authenticator apps"
+    )
+
+
+class TwoFactorSetupResponse(BaseModel):
+    """Response schema for 2FA setup including TOTP secret, otpauth URL, and base64 PNG QR code data URI."""
+
+    secret: str = Field(..., description="Base32 TOTP secret key")
+    otpauth_url: str = Field(..., description="otpauth:// TOTP URI for authenticator apps")
+    qr_code_data_uri: str = Field(
+        ..., description="Base64-encoded PNG QR code data URI (data:image/png;base64,...)"
+    )
+    message: str = Field(
+        default="2FA setup initialized successfully.", description="Status message"
+    )
+
+
 # ============================================================================
 # Health Check Schemas
 # ============================================================================

