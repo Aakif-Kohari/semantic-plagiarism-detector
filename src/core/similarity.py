@@ -11,10 +11,13 @@ cosine similarity reduces to the dot product, making this very fast.
 Recent Additions (Issue #1956):
 - Added find_cross_lingual_matches() for back-translated chunk matching.
 """
-
 import logging
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
+from src.core.threshold_calibration import (
+    compute_calibration_metrics,
+    find_optimal_threshold,
+)
 logger = logging.getLogger(__name__)
 
 import faiss  # type: ignore
