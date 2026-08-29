@@ -200,6 +200,53 @@ def build_similarity_workbook(
                 col_len + 3, 12
             )
 
+        # Create Flagged Pairs worksheet (write-only mode)
+        flagged_ws = wb.create_sheet(title="Flagged Pairs")
+
+        # Write header row for flagged sheet
+        flagged_header_row = []
+        for col_name in ["Document A", "Document B", "Similarity Score", "Severity"]:
+            cell = WriteOnlyCell(flagged_ws, value=col_name)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = header_align
+            flagged_header_row.append(cell)
+        flagged_ws.append(flagged_header_row)
+
+        # Populate flagged pairs (upper triangle only)
+        docs = list(df.index)
+        for i in range(len(docs)):
+            for j in range(i + 1, len(docs)):
+                val = df.iloc[i, j]
+                if pd.notna(val) and float(val) >= mid_threshold:
+                    score = float(val)
+                    severity = "Moderate"
+                    if score >= 0.85:
+                        severity = "High"
+                    if score >= 0.95:
+                        severity = "Critical"
+
+                    row_data = [
+                        sanitize_spreadsheet_value(str(docs[i])),
+                        sanitize_spreadsheet_value(str(docs[j])),
+                        score,
+                        severity,
+                    ]
+                    row_cells = []
+                    for c_idx, item in enumerate(row_data):
+                        cell = WriteOnlyCell(flagged_ws, value=item)
+                        if c_idx == 2:
+                            cell.number_format = "0.0%"
+                            cell.alignment = Alignment(horizontal="right")
+                        row_cells.append(cell)
+                    flagged_ws.append(row_cells)
+
+        # Set column widths for flagged sheet
+        flagged_ws.column_dimensions["A"].width = 25
+        flagged_ws.column_dimensions["B"].width = 25
+        flagged_ws.column_dimensions["C"].width = 18
+        flagged_ws.column_dimensions["D"].width = 15
+
         return wb
 
     # Default write_only=False (in-memory DOM)
@@ -290,6 +337,58 @@ def build_similarity_workbook(
         max_len = max(len(str(cell.value or "")) for cell in col)
         col_letter = col[0].column_letter
         ws.column_dimensions[col_letter].width = max(max_len + 3, 12)
+
+    # Create Flagged Pairs worksheet
+    flagged_ws = wb.create_sheet(title=sanitize_sheet_title("Flagged Pairs"))
+
+    # Write headers and style them
+    flagged_ws.cell(row=1, column=1, value="Document A")
+    flagged_ws.cell(row=1, column=2, value="Document B")
+    flagged_ws.cell(row=1, column=3, value="Similarity Score")
+    flagged_ws.cell(row=1, column=4, value="Severity")
+
+    for cell in flagged_ws[1]:
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+
+    # Populate flagged pairs (upper triangle only)
+    docs = list(df.index)
+    current_row = 2
+    for i in range(len(docs)):
+        for j in range(i + 1, len(docs)):
+            val = df.iloc[i, j]
+            if pd.notna(val) and float(val) >= mid_threshold:
+                score = float(val)
+                severity = "Moderate"
+                if score >= 0.85:
+                    severity = "High"
+                if score >= 0.95:
+                    severity = "Critical"
+
+                flagged_ws.cell(
+                    row=current_row,
+                    column=1,
+                    value=sanitize_spreadsheet_value(str(docs[i])),
+                )
+                flagged_ws.cell(
+                    row=current_row,
+                    column=2,
+                    value=sanitize_spreadsheet_value(str(docs[j])),
+                )
+
+                score_cell = flagged_ws.cell(row=current_row, column=3, value=score)
+                score_cell.number_format = "0.0%"
+                score_cell.alignment = Alignment(horizontal="right")
+
+                flagged_ws.cell(row=current_row, column=4, value=severity)
+                current_row += 1
+
+    # Set column widths for flagged sheet
+    flagged_ws.column_dimensions["A"].width = 25
+    flagged_ws.column_dimensions["B"].width = 25
+    flagged_ws.column_dimensions["C"].width = 18
+    flagged_ws.column_dimensions["D"].width = 15
 
     return wb
 

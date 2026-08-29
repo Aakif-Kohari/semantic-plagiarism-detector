@@ -86,8 +86,20 @@ def get_admin_emails() -> list[str]:
         return admin_emails
 
     env_email = os.getenv("ADMIN_EMAIL")
-    if env_email and is_valid_email(env_email):
-        return [env_email.strip()]
+    if env_email:
+        raw_emails = re.split(r"[,;]", env_email)
+        valid_emails = []
+        for e in raw_emails:
+            cleaned = e.strip()
+            if cleaned:
+                if is_valid_email(cleaned):
+                    valid_emails.append(cleaned)
+                else:
+                    logger.warning(
+                        f"Skipping invalid admin email token configuration: \"{cleaned}\""
+                    )
+        if valid_emails:
+            return valid_emails
 
     return []
 
