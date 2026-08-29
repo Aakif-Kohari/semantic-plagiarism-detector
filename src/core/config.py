@@ -223,6 +223,16 @@ DEFAULT_DIFF_MIN_MATCH_LENGTH: Final[int] = int(
     os.getenv("DEFAULT_DIFF_MIN_MATCH_LENGTH", "4")
 )
 
+# Cross-Encoder re-ranking stage (Issue #3911). FAISS/bi-encoder retrieval
+# stays the first-stage candidate search; only the top-K highest scoring
+# candidates are passed through the cross-encoder for precise re-scoring.
+CROSS_ENCODER_RERANKING_ENABLED: Final[bool] = os.getenv(
+    "CROSS_ENCODER_RERANKING_ENABLED", "true"
+).strip().lower() not in ("false", "0", "")
+DEFAULT_CROSS_ENCODER_MODEL: Final[str] = os.getenv(
+    "CROSS_ENCODER_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2"
+)
+DEFAULT_CROSS_ENCODER_TOP_K: Final[int] = int(os.getenv("CROSS_ENCODER_TOP_K", "50"))
 
 @dataclass(frozen=True)
 class SimilarityThresholds:

@@ -23,12 +23,14 @@ import pandas as pd
 from sklearn.metrics.pairwise import cosine_similarity
 
 from src.core.config import (
+    CROSS_ENCODER_RERANKING_ENABLED,
+    DEFAULT_CROSS_ENCODER_MODEL,
+    DEFAULT_CROSS_ENCODER_TOP_K,
     DEFAULT_THRESHOLDS,
     PLAGIARISM_THRESHOLD,
     is_plagiarism,
     severity_from_score,
-)
-from src.core.cross_lingual import detect_chunk_language
+)from src.core.cross_lingual import detect_chunk_language
 
 # ── Distance / similarity conversion ──────────────────────────────────────────
 
@@ -710,6 +712,9 @@ def flag_plagiarism(
     embeddings: dict = None,
     *,
     candidate_pairs: Optional[set[tuple[str, str]]] = None,
+    use_cross_encoder: bool = CROSS_ENCODER_RERANKING_ENABLED,
+    cross_encoder_model: str = DEFAULT_CROSS_ENCODER_MODEL,
+    cross_encoder_top_k: int = DEFAULT_CROSS_ENCODER_TOP_K,
 ) -> list[dict]:
     """Identify document pairs whose similarity reaches the threshold.
 
@@ -719,8 +724,15 @@ def flag_plagiarism(
     When *candidate_pairs* is provided (e.g. from :func:`find_candidate_pairs`),
     only those pairs are checked instead of the full upper triangle, which
     significantly reduces computation for large document sets.
-    """
-    flags = []
+
+    When *use_cross_encoder* is True and both *chunked_docs* and *embeddings*
+    are supplied, the highest-scoring *cross_encoder_top_k* flags are
+    re-ranked with :func:`rerank_candidates_with_cross_encoder`. The original
+    FAISS/bi-encoder score is preserved as ``semantic_score`` and the refined
+    score is added as ``cross_encoder_score``; if the cross-encoder model is
+    unavailable, flags fall back to the original similarity score unchanged.
+    """       flags = []
+    _chunk_pair_texts: dict[tuple[str, str], tuple[str, str]] = {}
     doc_names = similarity_df.columns.tolist()
     name_to_idx = {name: i for i, name in enumerate(doc_names)}
 
@@ -742,14 +754,17 @@ def flag_plagiarism(
             doc_a = doc_names[i]
             doc_b = doc_names[j]
             matched_length = 0
+            chunk_pair_texts = None
 
             if chunked_docs is not None and embeddings is not None:
                 sim_matrix = cosine_similarity(embeddings[doc_a], embeddings[doc_b])
                 idx_a, idx_b = np.unravel_index(np.argmax(sim_matrix), sim_matrix.shape)
-                chunk = chunked_docs[doc_a][idx_a]
-                chunk_text = chunk.text if hasattr(chunk, "text") else chunk
+                chunk_a = chunked_docs[doc_a][idx_a]
+                chunk_b = chunked_docs[doc_b][idx_b]
+                chunk_text = chunk_a.text if hasattr(chunk_a, "text") else chunk_a
+                chunk_text_b = chunk_b.text if hasattr(chunk_b, "text") else chunk_b
                 matched_length = len(chunk_text.split())
-
+                chunk_pair_texts = (chunk_text, chunk_text_b)
             flags.append(
                 {
                     "doc_a": doc_a,
@@ -763,11 +778,37 @@ def flag_plagiarism(
                     ),
                 }
             )
+            if chunk_pair_texts is not None:
+                _chunk_pair_texts[(doc_a, doc_b)] = chunk_pair_texts
 
     flags.sort(key=lambda item: item["similarity"], reverse=True)
 
-    return flags
+    if use_cross_encoder and chunked_docs is not None and embeddings is not None and flags:
+        rerank_input = [
+            (
+                _chunk_pair_texts[(f["doc_a"], f["doc_b"])][0],
+                _chunk_pair_texts[(f["doc_a"], f["doc_b"])][1],
+                f["similarity"],
+                idx,
+            )
+            for idx, f in enumerate(flags)
+            if (f["doc_a"], f["doc_b"]) in _chunk_pair_texts
+        ]
+        reranked = rerank_candidates_with_cross_encoder(
+            rerank_input,
+            model_name=cross_encoder_model,
+            top_k=cross_encoder_top_k,
+        )
+        for _, _, cross_score, flag_idx in reranked:
+            flags[flag_idx]["semantic_score"] = flags[flag_idx]["similarity"]
+            flags[flag_idx]["cross_encoder_score"] = cross_score
 
+        flags.sort(
+            key=lambda item: item.get("cross_encoder_score", item["similarity"]),
+            reverse=True,
+        )
+
+    return flags
 
 def find_most_similar_chunks(
     chunks_a: list[str],
