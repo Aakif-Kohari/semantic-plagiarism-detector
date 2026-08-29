@@ -14,6 +14,7 @@ import json
 import logging
 import os
 import time
+import uuid
 from typing import Any, Dict, List, Optional, Set
 
 logger = logging.getLogger(__name__)
@@ -101,6 +102,7 @@ def create_jwt_token(
         **data,
         "iat": now,
         "exp": now + expires_in_seconds,
+        "jti": str(uuid.uuid4()),
     }
 
     encoded_header = base64url_encode(
