@@ -166,7 +166,8 @@ def count_unique_words(text: str) -> int:
     """
     Count the number of unique words in the given text.
 
-    Word comparison is case-insensitive.
+    Word comparison is case-insensitive. Populates the set directly using
+    re.finditer to avoid intermediate list allocation for large texts (Issue #3706).
 
     Args:
         text: The text to analyze
@@ -177,12 +178,183 @@ def count_unique_words(text: str) -> int:
     if not text:
         return 0
 
-    # Get all words (lowercase)
-    words = re.findall(r"\b\w+\b", text.lower())
+    cjk_chars = set(re.findall(r"[\u4e00-\u9fff]", text))
+    if cjk_chars:
+        non_cjk_text = re.sub(r"[\u4e00-\u9fff]", " ", text)
+        words = set(m.group(0).lower() for m in re.finditer(r"\b\w+\b", non_cjk_text))
+        return len(cjk_chars | words)
 
-    # Count unique words
-    unique_words = set(words)
+    unique_words = set(m.group(0).lower() for m in re.finditer(r"\b\w+\b", text))
     return len(unique_words)
+
+
+def get_unique_words_set(text: str) -> set[str]:
+    """Return the set of unique lowercased words extracted from text via generator iteration.
+
+    Args:
+        text: The text to analyze.
+
+    Returns:
+        set[str]: Set of distinct word tokens.
+    """
+    if not text:
+        return set()
+
+    cjk_chars = set(re.findall(r"[\u4e00-\u9fff]", text))
+    if cjk_chars:
+        non_cjk = re.sub(r"[\u4e00-\u9fff]", " ", text)
+        words = set(m.group(0).lower() for m in re.finditer(r"\b\w+\b", non_cjk))
+        return cjk_chars | words
+
+    return set(m.group(0).lower() for m in re.finditer(r"\b\w+\b", text))
+
+
+def iter_word_tokens(text: str) -> Iterable[str]:
+    """Lazily yield lowercased word tokens without allocating a full list in memory.
+
+    Args:
+        text: The text to analyze.
+
+    Yields:
+        str: Individual lowercased word tokens.
+    """
+    if not text:
+        return
+    for match in re.finditer(r"\b\w+\b", text):
+        yield match.group(0).lower()
+
+
+def compute_vocabulary_richness(text: str) -> dict[str, float]:
+    """Compute advanced lexical diversity indices based on unique and total word counts.
+
+    Calculates:
+        - types: Unique word count (V)
+        - tokens: Total word count (N)
+        - ttr: Type-Token Ratio (V / N)
+        - guiraud_r: Guiraud's R index (V / sqrt(N))
+        - herdan_c: Herdan's C index (log(V) / log(N))
+
+    Args:
+        text: The text to analyze.
+
+    Returns:
+        dict[str, float]: Dictionary of computed lexical richness metrics.
+    """
+    import math
+
+    tokens = count_words(text)
+    if tokens == 0:
+        return {
+            "tokens": 0,
+            "types": 0,
+            "ttr": 0.0,
+            "guiraud_r": 0.0,
+            "herdan_c": 0.0,
+        }
+
+    types = count_unique_words(text)
+    ttr = types / tokens
+    guiraud_r = types / math.sqrt(tokens) if tokens > 0 else 0.0
+    herdan_c = math.log(types) / math.log(tokens) if tokens > 1 and types > 0 else 1.0
+
+    return {
+        "tokens": tokens,
+        "types": types,
+        "ttr": round(ttr, 4),
+        "guiraud_r": round(guiraud_r, 4),
+        "herdan_c": round(herdan_c, 4),
+    }
+
+
+def batch_count_unique_words(texts: list[str]) -> list[int]:
+    """Compute unique word counts across a batch list of documents with generator efficiency.
+
+    Args:
+        texts: List of document strings.
+
+    Returns:
+        list[int]: List of unique word counts corresponding to each document.
+    """
+    return [count_unique_words(t) for t in texts]
+
+
+def stream_word_frequencies(text: str) -> dict[str, int]:
+    """Compute word occurrence frequencies using iterative token stream.
+
+    Args:
+        text: Input text string.
+
+    Returns:
+        dict[str, int]: Frequency map of lowercased word tokens.
+    """
+    from collections import Counter
+    if not text:
+        return {}
+    return dict(Counter(iter_word_tokens(text)))
+
+
+def compute_hapax_legomena(text: str) -> list[str]:
+    """Identify words that appear exactly once in the entire text (Hapax Legomena).
+
+    A high proportion of hapax legomena often correlates with sophisticated vocabulary
+    or unique stylistic fingerprinting useful for authorship attribution.
+
+    Args:
+        text: Input text to analyze.
+
+    Returns:
+        list[str]: Sorted list of single-occurrence words.
+    """
+    freqs = stream_word_frequencies(text)
+    return sorted([word for word, count in freqs.items() if count == 1])
+
+
+def compute_hapax_dislegomena(text: str) -> list[str]:
+    """Identify words that appear exactly twice in the text (Hapax Dislegomena).
+
+    Args:
+        text: Input text to analyze.
+
+    Returns:
+        list[str]: Sorted list of double-occurrence words.
+    """
+    freqs = stream_word_frequencies(text)
+    return sorted([word for word, count in freqs.items() if count == 2])
+
+
+def compute_yule_k_characteristic(text: str) -> float:
+    """Calculate Yule's Characteristic K metric for vocabulary richness.
+
+    Yule's K is a mathematically invariant measure of vocabulary diversity
+    that remains relatively independent of total text length.
+
+    Formula:
+        K = 10^4 * (sum(i^2 * V_i) - N) / N^2
+        where V_i is the number of words occurring i times, and N is total tokens.
+
+    Args:
+        text: Input text to analyze.
+
+    Returns:
+        float: Yule's K characteristic value (higher indicates lower lexical diversity).
+    """
+    from collections import Counter
+
+    tokens = count_words(text)
+    if tokens <= 1:
+        return 0.0
+
+    freqs = stream_word_frequencies(text)
+    spectrum = Counter(freqs.values())
+
+    s1 = sum(count * freq for freq, count in spectrum.items())
+    s2 = sum(count * (freq ** 2) for freq, count in spectrum.items())
+
+    if s1 <= 1:
+        return 0.0
+
+    k = 10000.0 * (s2 - s1) / (s1 ** 2)
+    return round(k, 2)
 
 
 def get_unique_word_ratio(text: str) -> float:
