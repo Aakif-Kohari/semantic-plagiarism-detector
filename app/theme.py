@@ -170,6 +170,7 @@ try:
         SIDEBAR_USER_BADGE,
         SIM_PILL,
         WELCOME_BANNER,
+        spd_root_css_variables,
     )
 except ImportError:
     # Fallbacks for isolated testing
@@ -351,6 +352,11 @@ def inject_css() -> None:
     """
     colors = sanitize_theme_colors(get_colors())
     accent_hex = get_theme_accent_color()
+
+    # Issue #3762: namespaced "--spd-*" CSS custom properties, generated from
+    # the same colors used for the generic :root block below, so both stay
+    # in sync when the theme is switched.
+    spd_root_css = spd_root_css_variables(colors, accent_hex)
 
     main_css = f"""
         @import url('https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,600;0,6..72,700;1,6..72,400&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap');
