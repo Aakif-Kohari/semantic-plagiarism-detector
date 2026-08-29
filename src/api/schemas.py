@@ -452,6 +452,23 @@ class ClearDataResponse(BaseModel):
     message: str = Field(..., description="Summary message describing clearing action")
 
 
+class CorpusStatsResponse(BaseModel):
+    """Response schema for high-level corpus statistics."""
+
+    total_documents: int = Field(
+        ..., description="Total count of active documents in the corpus"
+    )
+    total_chunks: int = Field(
+        ..., description="Total count of text chunks in the corpus"
+    )
+    total_embeddings: int = Field(
+        ..., description="Total count of vector embeddings stored"
+    )
+    last_updated: str = Field(
+        ..., description="ISO 8601 UTC timestamp of last corpus update"
+    )
+
+
 class IncidentResponse(ClearDataResponse):
     """Response schema for incident clearing operations."""
 
@@ -1169,6 +1186,7 @@ __all__ = [
     
     # Admin
     'ClearDataResponse',
+    'CorpusStatsResponse',
     'IncidentResponse',
     
     # Batch Analysis History

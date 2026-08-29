@@ -70,6 +70,11 @@ class JWTExpiredError(ValueError):
     pass
 
 
+class JWTNotYetValidError(ValueError):
+    """Raised when the token's 'nbf' timestamp is in the future."""
+    pass
+
+
 class JWTSignatureError(ValueError):
     """Raised when the cryptographic signature validation fails."""
     pass
@@ -120,27 +125,13 @@ def create_jwt_token(
     """
     alg = (algorithm or get_jwt_algorithm()).upper()
 
-    if alg == "RS256":
-        private_key = secret_key or os.getenv("JWT_PRIVATE_KEY", JWT_PRIVATE_KEY)
-        if not private_key:
-            raise ValueError(
-                "JWT_PRIVATE_KEY environment variable or secret_key parameter must be set for RS256 signing."
-            )
-    else:
-        resolved_secret = secret_key if secret_key is not None else os.getenv("JWT_SECRET_KEY", JWT_SECRET_KEY)
-        if not resolved_secret:
-            raise ValueError(
-                "JWT_SECRET_KEY environment variable must be set. "
-                "Do not use default secrets in production."
-            )
-
-        is_test_env = (os.getenv("APP_ENV") == "test") or _IS_TEST
-        if len(resolved_secret) < 32 and not is_test_env:
-            logger.critical(
-                "SECURITY WARNING: JWT secret key is less than 32 characters! "
-                "This makes HMAC signatures vulnerable to offline brute-force attacks."
-            )
-            raise ValueError("JWT secret key must be at least 32 characters long in production.")
+    is_test_env = (os.getenv("APP_ENV") == "test") or _IS_TEST
+    if len(resolved_secret) < 32 and not is_test_env:
+        logger.critical(
+            "SECURITY WARNING: JWT secret key is less than 32 characters! "
+            "This makes HMAC signatures vulnerable to offline brute-force attacks."
+        )
+        raise ValueError("JWT secret key must be at least 32 characters long in production.")
 
     header = {"alg": alg, "typ": "JWT"}
     now = int(time.time())
@@ -278,6 +269,15 @@ def _verify_jwt_token(
         if int(time.time()) >= exp_int + clock_skew_seconds:
             raise JWTExpiredError(f"{expected_type.capitalize()} token has expired.")
 
+    nbf = payload.get("nbf")
+    if nbf is not None:
+        try:
+            nbf_int = int(nbf)
+        except (TypeError, ValueError) as exc:
+            raise JWTDecodeError(f"Invalid {expected_type} token: malformed nbf claim.") from exc
+        if int(time.time()) < nbf_int - clock_skew_seconds:
+            raise JWTNotYetValidError(f"{expected_type.capitalize()} token is not yet valid (nbf).")
+
     token_type = payload.get("type")
     if token_type and not hmac.compare_digest(token_type, expected_type):
         raise JWTDecodeError(f"Invalid token type: expected '{expected_type}', got '{token_type}'.")
@@ -311,7 +311,13 @@ def verify_refresh_token(
 
     # Support static / testing refresh tokens only in test environment
     if token in VALID_STATIC_REFRESH_TOKENS:
-        if not _IS_TEST:
+        is_test_env = (os.getenv("APP_ENV") == "test") or _IS_TEST
+        if not is_test_env:
+            logger.warning(
+                "SECURITY ALERT: Attempted to use static testing refresh token '%s' outside of test environment (APP_ENV='%s').",
+                token,
+                os.getenv("APP_ENV", "production"),
+            )
             raise JWTDecodeError(
                 "Invalid refresh token: static testing tokens are not allowed outside test environment."
             )

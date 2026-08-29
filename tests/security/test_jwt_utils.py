@@ -21,6 +21,7 @@ from src.security.jwt_utils import (
     verify_token_with_kid,
     JWTDecodeError,
     JWTExpiredError,
+    JWTNotYetValidError,
     JWTSignatureError,
 )
 
@@ -62,6 +63,16 @@ def test_static_refresh_tokens():
     assert payload["type"] == "refresh"
 
 
+def test_static_refresh_token_rejected_in_production(monkeypatch, caplog):
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setattr(jwt_utils, "_IS_TEST", False)
+
+    with pytest.raises(JWTDecodeError, match="static testing tokens are not allowed"):
+        verify_refresh_token("valid-refresh-token")
+
+    assert "SECURITY ALERT" in caplog.text
+
+
 def test_invalid_signature():
     token = create_access_token(sub="charlie")
     header, payload, _sig = token.split(".")
@@ -74,6 +85,14 @@ def test_invalid_signature():
 def test_expired_token():
     token = create_jwt_token({"sub": "david", "type": "access"}, expires_in_seconds=-10)
     with pytest.raises(JWTExpiredError, match="expired"):
+        verify_access_token(token)
+
+
+def test_nbf_claim_future_token_rejected():
+    import time
+    future_nbf = int(time.time()) + 3600
+    token = create_jwt_token({"sub": "future_user", "type": "access", "nbf": future_nbf})
+    with pytest.raises(JWTNotYetValidError, match="is not yet valid \\(nbf\\)"):
         verify_access_token(token)
 
 
