@@ -268,6 +268,7 @@ def translate_text_secondary(
 
     return f"[Offline Fallback -> {target_lang}]: {text}"
 
+
 def translate_text_batch(
     texts: list[str],
     target_lang: str = "en",
