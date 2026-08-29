@@ -774,7 +774,6 @@ class TestBackTranslateChunkRealTranslation:
         mock_translate.assert_not_called()
 
 
- feature/translation-fallback-service
 def test_fallback_translation_service_disabled(monkeypatch):
     """Verify that if primary fails and secondary is disabled, returns original text."""
     monkeypatch.setenv("SECONDARY_TRANSLATOR_ENABLED", "false")
@@ -912,4 +911,4 @@ def test_back_translate_chunks_batching_groups_of_10():
         mock_batch.assert_any_call([f"Chunk {i}" for i in range(10)], target_lang="en", source_lang="es")
         mock_batch.assert_any_call([f"Chunk {i}" for i in range(10, 20)], target_lang="en", source_lang="es")
         mock_batch.assert_any_call([f"Chunk {i}" for i in range(20, 25)], target_lang="en", source_lang="es")
- main
+
