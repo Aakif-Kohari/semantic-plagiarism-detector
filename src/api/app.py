@@ -56,8 +56,52 @@ app = FastAPI(
 
 
 @app.on_event("startup")
-def startup_event():
+def startup_event() -> None:
+    """Run the one-off work the API needs before it serves its first request.
+
+    Two things happen here, and they are deliberately independent: warming the
+    embedding model is best-effort, printing the configuration summary is not.
+    A warm-up that cannot run — no cached weights, no network, a machine with
+    no room for the model — must not stop the process from coming up, because
+    most of the API surface (auth, corpus listing, admin) does not need
+    embeddings at all.
+    """
+    _warmup_embedding_model()
     print_startup_config_summary()
+
+
+def _warmup_embedding_model() -> bool:
+    """Pre-load the embedding weights so the first real request is not slow.
+
+    The import is deliberately deferred to call time rather than module scope:
+    pulling in ``src.core.embedding_model`` drags in the whole ML stack, and
+    ``src/api/app.py`` is imported by tooling that has no business paying for
+    that (test collection, ``--help`` on the CLI, OpenAPI schema dumps).
+
+    Returns:
+        ``True`` if the warm-up pass completed, ``False`` if it was skipped or
+        failed. Never raises — a failed warm-up costs latency on the first
+        request, not availability.
+    """
+    try:
+        from src.core.embedding_model import warmup_embedding_model
+    except Exception:
+        # The ML extras are optional; an API deployment that only serves the
+        # non-embedding routes is a supported configuration.
+        logger.warning(
+            "Embedding model unavailable; skipping startup warmup. "
+            "The first scan request will pay the model load cost.",
+            exc_info=True,
+        )
+        return False
+
+    try:
+        return bool(warmup_embedding_model())
+    except Exception:
+        logger.warning(
+            "Embedding model warmup failed; continuing startup.", exc_info=True
+        )
+        return False
 
 
 # Enable CORS for external LMS frontends

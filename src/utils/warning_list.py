@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import html
-import re
-from typing import Any, Callable, Iterable, Mapping, Sequence
+import json
+import refrom typing import Any, Callable, Iterable, Mapping, Sequence
 
 import pandas as pd
 import streamlit as st
@@ -28,7 +28,11 @@ MAX_SEARCH_QUERY_LENGTH = 200
 WARNING_SHORT_DOCUMENT = (
     "Document contains fewer than 50 words; similarity scoring may be unreliable."
 )
-
+WARNING_BINARY_CHARACTERS = (
+    "Document contains an unusually high ratio of non-printable control "
+    "characters; the file may be binary or corrupted rather than text."
+)
+CONTROL_CHARACTER_RATIO_THRESHOLD = 0.01
 _SORT_KEYS = {
     "warn_sort_similarity": "similarity",
     "warn_sort_doc_a": "doc_a",
@@ -55,7 +59,7 @@ class DocumentWarning:
     message: str = ""
     warning_type: str = ""
     details: dict[str, Any] = field(default_factory=dict)
-
+    occurrence_count: int = 1
     def to_dict(self) -> dict[str, Any]:
         return {
             "doc_a": self.doc_a,
@@ -64,9 +68,9 @@ class DocumentWarning:
             "severity": self.severity,
             "message": self.message,
             "warning_type": self.warning_type,
+            "occurrence_count": self.occurrence_count,
             **self.details,
         }
-
 
 class WarningList:
     """Collection manager for document warnings supporting filtering by severity."""
@@ -82,7 +86,7 @@ class WarningList:
 
     def add_warning(self, item: DocumentWarning | Mapping[str, Any]) -> None:
         if isinstance(item, DocumentWarning):
-            self.warnings.append(item)
+            dw = item
         elif isinstance(item, Mapping):
             dw = DocumentWarning(
                 doc_a=str(item.get("doc_a", "")),
@@ -93,8 +97,17 @@ class WarningList:
                 warning_type=str(item.get("warning_type", "")),
                 details=dict(item),
             )
-            self.warnings.append(dw)
+        else:
+            return
 
+        # Same (filename, code) pair already recorded — bump its count
+        # instead of adding a duplicate row to the UI warning panel.
+        for existing in self.warnings:
+            if existing.doc_a == dw.doc_a and existing.warning_type == dw.warning_type:
+                existing.occurrence_count += 1
+                return
+
+        self.warnings.append(dw)
     def filter_by_severity(self, severity: str) -> list[DocumentWarning]:
         """Filter warnings by severity level (e.g. 'High', 'Medium', 'Low')."""
         target = str(severity or "").strip().casefold()
@@ -139,8 +152,39 @@ def filter_by_severity(
     return wl.filter_by_severity(target_severity)
 
 
-def _normalise_warning(
-    warning: Mapping[str, Any],
+def _warning_to_export_record(
+    item: DocumentWarning | Mapping[str, Any],
+) -> dict[str, str]:
+    """Flatten a warning into the Filename/Warning Code/Severity/Message row used for export."""
+    data = item.to_dict() if isinstance(item, DocumentWarning) else dict(item)
+    return {
+        "Filename": str(data.get("doc_a", "")),
+        "Warning Code": str(data.get("warning_type", "")),
+        "Severity": str(data.get("severity", "")),
+        "Message": str(data.get("message", "")),
+    }
+
+
+def export_warnings_to_csv(
+    warnings: Iterable[DocumentWarning | Mapping[str, Any]],
+) -> str:
+    """Export warnings to a CSV string with Filename, Warning Code, Severity, Message columns."""
+    records = [_warning_to_export_record(item) for item in warnings]
+    df = pd.DataFrame(
+        records, columns=["Filename", "Warning Code", "Severity", "Message"]
+    )
+    return df.to_csv(index=False)
+
+
+def export_warnings_to_json(
+    warnings: Iterable[DocumentWarning | Mapping[str, Any]],
+) -> str:
+    """Export warnings to a JSON string with Filename, Warning Code, Severity, Message keys."""
+    records = [_warning_to_export_record(item) for item in warnings]
+    return json.dumps(records, indent=2)
+
+
+def _normalise_warning(    warning: Mapping[str, Any],
 ) -> dict[str, Any]:
     try:
         similarity = float(warning.get("similarity", 0.0))
@@ -172,6 +216,20 @@ def _normalise_warning(
             except (TypeError, ValueError):
                 pass
 
+    for cc_key in (
+        "control_char_ratio",
+        "control_char_ratio_a",
+        "control_char_ratio_b",
+    ):
+        val = warning.get(cc_key)
+        if val is not None:
+            try:
+                if float(val) > CONTROL_CHARACTER_RATIO_THRESHOLD:
+                    if WARNING_BINARY_CHARACTERS not in warnings_list:
+                        warnings_list.append(WARNING_BINARY_CHARACTERS)
+                    break
+            except (TypeError, ValueError):
+                pass
     res = {
         **dict(warning),
         "doc_a": str(warning.get("doc_a", "")).strip(),

@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `show_notification()` toast helper with success/warning/error/info icons (`app/components/notifications.py`).
 
 ### Fixed
+- Handled empty file validation cleanly in `is_executable_upload` by explicitly returning `False` on empty byte payloads (`src/security/mime_validator.py`).
 - Mobile viewports (<768px): tighter main padding and shorter plotly chart heights (`app/css_constants.py`).
 - Add `role="button"` and `aria-label` on custom HTML tag chips and notification badges (`app/components/`).
 - Graceful degradation when reportlab is not installed: badge generator module loads without reportlab and raises a clear error only when PDF generation is requested (`src/utils/badge_generator.py`).
@@ -38,6 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Explicitly excluded `.env`, `.git/`, `.venv/`, `*.sqlite`, and bytecode caches in `.dockerignore` to prevent leaking secrets and development artifacts into production containers (`.dockerignore`).
 
 ### Changed
+- Optimized `count_unique_words` to populate the word set directly using `re.finditer` generator expressions, eliminating intermediate list allocations on large documents (`src/utils/text_stats.py`).
 - Optimized `clear_session` and `clear_pattern` with Redis pipelining to batch deletions into a single network round-trip (`src/utils/redis_cache.py`).
 - Warning list pagination no longer writes `st.session_state` directly; page updates are applied via a view-layer callback (`src/utils/warning_list.py`).
 - Diff highlighter default match length is configurable via `DEFAULT_DIFF_MIN_MATCH_LENGTH` (`src/core/config.py`, `src/utils/diff_highlighter.py`).
