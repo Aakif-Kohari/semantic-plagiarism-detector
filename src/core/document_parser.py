@@ -34,6 +34,7 @@ import shutil
 import socket
 import subprocess
 import tempfile
+import time
 import xml.etree.ElementTree
 import zipfile
 from collections import Counter
@@ -2119,6 +2120,7 @@ def _extract_text_internal(
     ocr_dpi: int,
     clean_whitespace: bool,
     mask_named_entities: bool,
+    to_lowercase: bool = False,
 ) -> str:
     """Internal synchronous extraction logic."""
     file_bytes = _read_pdf_bytes(file)
@@ -2147,8 +2149,13 @@ def _extract_text_internal(
     else:
         raw = extract_text_from_txt(file)
 
+    if isinstance(raw, ParsedDocxText):
+        raw = raw.text
+
     raw = strip_bibliography(raw)
     raw = normalize_unicode_spaces(raw)
+    raw = normalize_extended_punctuation(raw)
+    raw = normalize_unicode_nfc(raw)
     raw = reject_zero_width_characters(raw, filename=filename)
 
     if clean_whitespace and raw:
@@ -2159,7 +2166,8 @@ def _extract_text_internal(
     if mask_named_entities and raw:
         raw = mask_named_entities_in_text(raw)
 
-    raw = normalize_extended_punctuation(raw)
+    if to_lowercase and raw:
+        raw = raw.lower()
 
     if not raw or not raw.strip():
         logger.warning(
@@ -2183,6 +2191,7 @@ def extract_text(
     ocr_dpi: int = DEFAULT_OCR_DPI,
     clean_whitespace: bool = True,
     mask_named_entities: bool = False,
+    to_lowercase: bool = False,
     timeout_seconds: float = 10.0,
 ) -> str:
     """Route extraction according to a filename extension with an enforced timeout."""
@@ -2191,6 +2200,8 @@ def extract_text(
         dpi=ocr_dpi,
     )
 
+    extension = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    start_time = time.perf_counter()
     breaker = EnterpriseTimeoutCircuitBreaker(timeout_seconds=timeout_seconds)
     try:
         raw = breaker.execute(
@@ -2201,11 +2212,20 @@ def extract_text(
             ocr_dpi,
             clean_whitespace,
             mask_named_entities,
+            to_lowercase,
         )
     except ExtractionTimeoutError as e:
         logger.error(f"[document_parser] Extraction timed out for {filename}: {e}")
         # Acceptance Criteria: return safe empty fallback or raise TimeoutError
         raise TimeoutError(f"Extraction of {filename} exceeded time limit.") from e
+    finally:
+        elapsed = time.perf_counter() - start_time
+        try:
+            from src.core.metrics import spd_doc_parse_seconds
+
+            spd_doc_parse_seconds.labels(extension=extension).observe(elapsed)
+        except Exception:
+            pass
 
     return raw
 

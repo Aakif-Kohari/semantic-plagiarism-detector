@@ -247,3 +247,43 @@ def test_generate_latest_sets_active_threads_gauge():
     assert metrics.active_threads_gauge._name == "spd_active_threads"
 
 
+# ── Document Parsing Duration Histogram ────────────────────────────────────────
+
+
+def test_spd_doc_parse_seconds_definition():
+    """Verify that spd_doc_parse_seconds is defined with the correct name, docstring, and labels."""
+    assert hasattr(metrics, "spd_doc_parse_seconds")
+    hist = metrics.spd_doc_parse_seconds
+    assert hist._name == "spd_doc_parse_seconds"
+    assert hist._documentation == "Document parsing time in seconds"
+    assert hist._labelnames == ("extension",)
+
+
+def test_spd_doc_parse_seconds_observe_extensions():
+    """Verify that spd_doc_parse_seconds can record time segmented by file extension."""
+    extensions = ["pdf", "docx", "txt"]
+    for ext in extensions:
+        label_child = metrics.spd_doc_parse_seconds.labels(extension=ext)
+        before_count = sum(b.get() for b in label_child._buckets)
+        with label_child.time():
+            pass
+        after_count = sum(b.get() for b in label_child._buckets)
+        assert after_count == before_count + 1
+        assert label_child._sum.get() >= 0
+
+
+def test_extract_text_observes_spd_doc_parse_seconds():
+    """Verify that extract_text in document_parser records duration in spd_doc_parse_seconds."""
+    from src.core.document_parser import extract_text
+
+    label_child = metrics.spd_doc_parse_seconds.labels(extension="txt")
+    before_count = sum(b.get() for b in label_child._buckets)
+
+    content = b"This is a valid sample document text with enough content."
+    result = extract_text(content, "sample_document.txt")
+
+    assert "sample document" in result
+    after_count = sum(b.get() for b in label_child._buckets)
+    assert after_count == before_count + 1
+
+
