@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Graceful degradation when reportlab is not installed: badge generator module loads without reportlab and raises a clear error only when PDF generation is requested (`src/utils/badge_generator.py`).
 - Embed bundled DejaVu Sans / Roboto TTF in ReportLab PDF reports so non-ASCII document names render correctly (`src/utils/pdf_report.py`).
 - Graceful degradation when reportlab is not installed: badge generator module loads without reportlab and raises a clear error only when PDF generation is requested (`src/utils/badge_generator.py`).
+- Rewrote the passive-voice counter's generator filter, which used an `if`/`else` conditional where a filter clause belongs and kept the Writing Style Analyzer page from parsing; the empty-token guard it was reaching for is now an `and` term ordered before the subscript (`app/pages/5_Writing_Style_Analyzer.py`).
 - Fixed assertion mismatch in `test_sync_flagged_incidents_bulk_upsert` to verify that `severity_rank` is updated to `"Critical"` and other ranks during bulk upsert (`tests/db/test_incidents.py`, `tests/db/test_incidents_bulk.py`).
 - Fixed unreadable line overflowing for long URLs in ReportLab PDF reports by adding `wordWrap='CJK'` to paragraph styles and inserting zero-width spaces into long URLs (`src/utils/pdf_report.py`).
 - Robust claim parsing in `.github/workflows/ecsoc-automation.yml` using structured hidden HTML comments to prevent breaking on greeting message variations.
