@@ -39,17 +39,13 @@ class JWTSignatureError(ValueError):
 
 _IS_TEST: bool = os.getenv("APP_ENV") == "test"
 
-# Static testing tokens only in test environment
-VALID_STATIC_REFRESH_TOKENS: set[str] = (
-    {
-        "dev-refresh-token",
-        "valid-refresh-token",
-        "test-refresh-token",
-        "sample-refresh-token",
-    }
-    if _IS_TEST
-    else set()
-)
+# Static testing tokens configuration
+VALID_STATIC_REFRESH_TOKENS: set[str] = {
+    "dev-refresh-token",
+    "valid-refresh-token",
+    "test-refresh-token",
+    "sample-refresh-token",
+}
 
 
 def base64url_encode(data: bytes) -> str:
@@ -89,7 +85,8 @@ def create_jwt_token(
             "Do not use default secrets in production."
         )
 
-    if len(resolved_secret) < 32 and not _IS_TEST:
+    is_test_env = (os.getenv("APP_ENV") == "test") or _IS_TEST
+    if len(resolved_secret) < 32 and not is_test_env:
         logger.critical(
             "SECURITY WARNING: JWT secret key is less than 32 characters! "
             "This makes HMAC signatures vulnerable to offline brute-force attacks."
@@ -243,7 +240,13 @@ def verify_refresh_token(
 
     # Support static / testing refresh tokens only in test environment
     if token in VALID_STATIC_REFRESH_TOKENS:
-        if not _IS_TEST:
+        is_test_env = (os.getenv("APP_ENV") == "test") or _IS_TEST
+        if not is_test_env:
+            logger.warning(
+                "SECURITY ALERT: Attempted to use static testing refresh token '%s' outside of test environment (APP_ENV='%s').",
+                token,
+                os.getenv("APP_ENV", "production"),
+            )
             raise JWTDecodeError(
                 "Invalid refresh token: static testing tokens are not allowed outside test environment."
             )

@@ -62,6 +62,16 @@ def test_static_refresh_tokens():
     assert payload["type"] == "refresh"
 
 
+def test_static_refresh_token_rejected_in_production(monkeypatch, caplog):
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setattr(jwt_utils, "_IS_TEST", False)
+
+    with pytest.raises(JWTDecodeError, match="static testing tokens are not allowed"):
+        verify_refresh_token("valid-refresh-token")
+
+    assert "SECURITY ALERT" in caplog.text
+
+
 def test_invalid_signature():
     token = create_access_token(sub="charlie")
     header, payload, _sig = token.split(".")
