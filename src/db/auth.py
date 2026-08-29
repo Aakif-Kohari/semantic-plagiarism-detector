@@ -1,3 +1,25 @@
+# MIT License
+#
+# Copyright (c) 2026 Ganesh Kambli
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
 """
 src/db/auth.py
 --------------
@@ -102,36 +124,35 @@ LOCKOUT_WINDOW_MINUTES = 15
 
 
 def is_account_locked(
-    username: str, 
+    username: str,
     max_attempts: int = MAX_FAILED_ATTEMPTS,
-    window_minutes: int = LOCKOUT_WINDOW_MINUTES
+    window_minutes: int = LOCKOUT_WINDOW_MINUTES,
 ) -> bool:
     """Check if an account is temporarily locked due to too many failed login attempts.
-    
+
     Args:
         username: The username to check.
         max_attempts: Maximum allowed failed attempts before lockout.
         window_minutes: Time window in minutes for counting attempts.
-        
+
     Returns:
         True if the account is locked, False otherwise.
     """
     if not username:
         return False
-        
-    failed_count = count_recent_failed_logins(
-        username, 
-        window_minutes=window_minutes
-    )
-    
+
+    failed_count = count_recent_failed_logins(username, window_minutes=window_minutes)
+
     is_locked = failed_count >= max_attempts
-    
+
     if is_locked:
         logger.warning(
             "Account lockout triggered for %s: %d failed attempts in last %d minutes.",
-            username, failed_count, window_minutes
+            username,
+            failed_count,
+            window_minutes,
         )
-        
+
     return is_locked
 
 
@@ -254,7 +275,7 @@ class AuthRepository(BaseRepository):
             end_date=end_date,
         )
         query = (
-            f"SELECT id, event_type, username, timestamp, details FROM security_audit_log{where_clause}"
+            f"SELECT id, event_type, username, timestamp, details FROM security_audit_log{where_clause}"  # nosec
             " ORDER BY id DESC LIMIT ? OFFSET ?"
         )
         query_params = params + (limit, offset)
@@ -290,7 +311,7 @@ class AuthRepository(BaseRepository):
             start_date=start_date,
             end_date=end_date,
         )
-        query = f"SELECT COUNT(*) FROM security_audit_log{where_clause}"
+        query = f"SELECT COUNT(*) FROM security_audit_log{where_clause}"  # nosec
 
         try:
             with self.connection(read_only=True) as conn:
@@ -579,7 +600,7 @@ def verify_user(
     If return_details is True, returns a dict
     ``{"authenticated": bool, "must_change_password": bool, "password_expired": bool}``.
     Otherwise returns a boolean (True on success, False on failure).
-    
+
     Implements account lockout protection (Issue #2704) by checking for
     recent failed login attempts before verifying the password hash.
     """
@@ -590,7 +611,7 @@ def verify_user(
         if return_details:
             return {"authenticated": False, "must_change_password": False}
         return False
-    
+
     try:
         with _connect() as conn:
             row = conn.execute(
@@ -614,7 +635,7 @@ def verify_user(
             log_security_event(
                 event_type="login_blocked_lockout",
                 username=username,
-                details=f"Login attempt blocked due to lockout ({MAX_FAILED_ATTEMPTS} failures in {LOCKOUT_WINDOW_MINUTES}m)"
+                details=f"Login attempt blocked due to lockout ({MAX_FAILED_ATTEMPTS} failures in {LOCKOUT_WINDOW_MINUTES}m)",
             )
             if return_details:
                 return {"authenticated": False, "must_change_password": False}
@@ -662,15 +683,15 @@ def verify_user(
                 log_security_event(
                     event_type="login_success_password_expired",
                     username=username,
-                    details="Successful login but password requires rotation"
+                    details="Successful login but password requires rotation",
                 )
             else:
                 log_security_event(
                     event_type="login_success",
                     username=username,
-                    details="Successful authentication"
+                    details="Successful authentication",
                 )
-        
+
         if return_details:
             return {
                 "authenticated": authenticated,
@@ -781,7 +802,7 @@ def get_user_roles(user_ids: list[int]) -> dict[int, str]:
         placeholders = ",".join("?" for _ in user_ids)
         with _connect() as conn:
             rows = conn.execute(
-                f"SELECT id, role FROM users WHERE id IN ({placeholders})",
+                f"SELECT id, role FROM users WHERE id IN ({placeholders})",  # nosec
                 tuple(user_ids),
             ).fetchall()
             return {row[0]: row[1] for row in rows}
@@ -866,7 +887,7 @@ def delete_user(username: str) -> None:
             for table_name in ("user_sessions", "authorization_tokens"):
                 if table_exists(conn, table_name):
                     conn.execute(
-                        f"DELETE FROM {table_name} WHERE username = ?",
+                        f"DELETE FROM {table_name} WHERE username = ?",  # nosec
                         (username,),
                     )
 
@@ -989,10 +1010,11 @@ def _get_fernet_key() -> bytes:
     """Load or derive a valid 32-byte Fernet key from environment variables."""
     import base64
     import hashlib
+
     key_str = os.getenv("OTP_ENCRYPTION_KEY") or os.getenv("ENCRYPTION_KEY")
     if not key_str:
         key_str = "default-fallback-otp-encryption-key-do-not-use-in-production"
-    
+
     hashed = hashlib.sha256(key_str.encode("utf-8")).digest()
     return base64.urlsafe_b64encode(hashed)
 
@@ -1002,6 +1024,7 @@ def _encrypt_otp_secret(secret: str) -> str:
     if not secret:
         return secret
     from cryptography.fernet import Fernet
+
     key = _get_fernet_key()
     f = Fernet(key)
     return f.encrypt(secret.encode("utf-8")).decode("utf-8")
@@ -1012,6 +1035,7 @@ def _decrypt_otp_secret(encrypted_secret: str) -> str:
     if not encrypted_secret:
         return encrypted_secret
     from cryptography.fernet import Fernet, InvalidToken
+
     key = _get_fernet_key()
     f = Fernet(key)
     try:
@@ -1169,8 +1193,8 @@ def set_password_expiration(
         with _connect() as conn:
             cursor = conn.execute(
                 """
-                UPDATE users 
-                SET password_expires_at = ? 
+                UPDATE users
+                SET password_expires_at = ?
                 WHERE username = ?
                 """,
                 (expiration_date, username),
@@ -1534,6 +1558,7 @@ try:
         maxsize=_REVOKED_TOKEN_CACHE_MAXSIZE, ttl=_REVOKED_TOKEN_CACHE_TTL
     )
 except ImportError:
+
     class _FallbackTTLCache(dict):
         def __init__(self, maxsize: int = 10000, ttl: int = 60):
             super().__init__()
@@ -1621,7 +1646,9 @@ def _cleanup_revoked_tokens() -> int:
                             exp_int = int(exp)
                             if now_ts >= exp_int:
                                 expired_signatures.append(token_sig)
-                                token_hash = hashlib.sha256(token_sig.encode("utf-8")).hexdigest()
+                                token_hash = hashlib.sha256(
+                                    token_sig.encode("utf-8")
+                                ).hexdigest()
                                 expired_signatures.append(token_hash)
                     except Exception:
                         pass
@@ -1629,14 +1656,16 @@ def _cleanup_revoked_tokens() -> int:
             if expired_signatures:
                 placeholders = ",".join("?" for _ in expired_signatures)
                 cur = conn.execute(
-                    f"DELETE FROM revoked_tokens WHERE token_signature IN ({placeholders})",
-                    expired_signatures
+                    f"DELETE FROM revoked_tokens WHERE token_signature IN ({placeholders})",  # nosec
+                    expired_signatures,
                 )
                 deleted_count = cur.rowcount
                 conn.commit()
                 if deleted_count > 0:
                     clear_revocation_cache()
-                    logger.info(f"Cleaned up {deleted_count} expired entries from revoked_tokens table.")
+                    logger.info(
+                        f"Cleaned up {deleted_count} expired entries from revoked_tokens table."
+                    )
     except Exception as e:
         logger.error(f"Failed to cleanup revoked tokens: {e}")
     return deleted_count
@@ -1701,7 +1730,6 @@ def revoke_token(token: str, details: str | None = None) -> None:
         raise sqlite3.Error(f"Failed to revoke token: {e}") from e
 
 
-
 def is_token_revoked(token: str) -> bool:
     """Return True if the token or its SHA-256 signature exists in revoked_tokens.
 
@@ -1752,7 +1780,6 @@ def is_token_revoked(token: str) -> bool:
         return False
 
 
-
 def get_upload_count(username: str | None = None) -> int:
     """Return total number of uploads for a user or system-wide."""
     try:
@@ -1788,6 +1815,8 @@ from typing import Set
 
 import streamlit as st
 
+from app.session_keys import SessionKeys
+
 # ============================================================================
 # ROLE DEFINITIONS
 # ============================================================================
@@ -1802,7 +1831,7 @@ class UserRole(Enum):
     SUPER_ADMIN = "super_admin"
 
     @classmethod
-    def from_string(cls, role: str) -> "UserRole":
+    def from_string(cls, role: str) -> UserRole:
         """Convert string to UserRole enum."""
         try:
             return cls(role.lower())
@@ -1819,7 +1848,7 @@ class UserRole(Enum):
         }
         return levels.get(self, 0)
 
-    def has_permission(self, required_role: "UserRole") -> bool:
+    def has_permission(self, required_role: UserRole) -> bool:
         """Check if this role has permission for a required role."""
         return self.level() >= required_role.level()
 
@@ -2001,7 +2030,7 @@ def require_permission(permission: Permission):
         @wraps(func)
         def wrapper(*args, **kwargs):
             # Get username from session state
-            username = st.session_state.get(SessionKeys.USERNAME)  # noqa: F821
+            username = st.session_state.get(SessionKeys.USERNAME)
             if not username:
                 st.error("🔒 Authentication required.")
                 return None
@@ -2030,7 +2059,7 @@ def require_role(required_role: UserRole):
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
-            username = st.session_state.get(SessionKeys.USERNAME)  # noqa: F821
+            username = st.session_state.get(SessionKeys.USERNAME)
             if not username:
                 st.error("🔒 Authentication required.")
                 return None
@@ -2404,8 +2433,8 @@ def get_or_create_sso_user_enhanced(
                 or existing_provider_id != provider_user_id
             ):
                 conn.execute(
-                    """UPDATE users 
-                       SET sso_provider = ?, 
+                    """UPDATE users
+                       SET sso_provider = ?,
                            sso_provider_user_id = ?,
                            updated_at = CURRENT_TIMESTAMP
                        WHERE username = ?""",
@@ -2442,7 +2471,7 @@ def get_or_create_sso_user_enhanced(
 
         # Insert new user with SSO info
         cursor = conn.execute(
-            """INSERT INTO users 
+            """INSERT INTO users
                (username, password, role, sso_provider, sso_provider_user_id, created_at, updated_at)
                VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)""",
             (username, hashed, role, provider, provider_user_id),
@@ -2536,7 +2565,7 @@ def verify_sso_recovery_token(username: str, token: str) -> bool:
 
         with _connect() as conn:
             row = conn.execute(
-                """SELECT expires_at, used_at FROM sso_recovery_tokens 
+                """SELECT expires_at, used_at FROM sso_recovery_tokens
                    WHERE username = ? AND token_hash = ?""",
                 (username, token_hash),
             ).fetchone()
@@ -2564,7 +2593,7 @@ def verify_sso_recovery_token(username: str, token: str) -> bool:
         return False
 
 
-def get_sso_user_info(username: str) -> Optional[dict[str, Any]]:
+def get_sso_user_info(username: str) -> dict[str, Any] | None:
     """
     Get SSO user information.
 
@@ -2578,7 +2607,7 @@ def get_sso_user_info(username: str) -> Optional[dict[str, Any]]:
         username = _validate_username(username)
         with _connect() as conn:
             row = conn.execute(
-                """SELECT id, username, role, sso_provider, sso_provider_user_id, 
+                """SELECT id, username, role, sso_provider, sso_provider_user_id,
                           created_at, updated_at, status
                    FROM users WHERE username = ? AND sso_provider IS NOT NULL""",
                 (username,),
@@ -2614,7 +2643,7 @@ def list_sso_users() -> list[dict[str, Any]]:
     try:
         with _connect() as conn:
             rows = conn.execute(
-                """SELECT id, username, role, sso_provider, sso_provider_user_id, 
+                """SELECT id, username, role, sso_provider, sso_provider_user_id,
                           created_at, updated_at, status
                    FROM users WHERE sso_provider IS NOT NULL
                    ORDER BY created_at DESC"""
@@ -2753,7 +2782,7 @@ def render_role_selector(username: str, current_role: str) -> None:
 
     if selected != current_role:
         if st.button(f"Update Role for {username}", key=f"role_update_{username}"):
-            admin = st.session_state.get(SessionKeys.USERNAME)  # noqa: F821
+            admin = st.session_state.get(SessionKeys.USERNAME)
             new_role = UserRole.from_string(selected)
             if promote_user(username, new_role, admin):
                 st.success(f"✅ Role updated to {selected} for {username}")

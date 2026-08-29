@@ -124,12 +124,213 @@ EXECUTABLE_MAGIC_SIGNATURES: tuple[bytes, ...] = (
 
 
 def is_executable_upload(file_bytes: bytes, filename: str) -> bool:
-    """Return True if the upload looks like an executable or shell script."""
+    """Return True if the upload looks like an executable or shell script.
+
+    Issue #3718: Ensure empty files (b"") return False immediately without
+    running extension or magic byte checks.
+
+    Args:
+        file_bytes: Raw binary content of the uploaded file.
+        filename: Declared file name with extension.
+
+    Returns:
+        bool: True if the file matches executable extensions or magic bytes; False otherwise.
+    """
+    if not file_bytes:
+        return False
+
     extension = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
     if extension in BLOCKED_EXECUTABLE_EXTENSIONS:
         return True
 
     return file_bytes.startswith(EXECUTABLE_MAGIC_SIGNATURES)
+
+
+def is_empty_or_whitespace_upload(file_bytes: bytes) -> bool:
+    """Check whether an uploaded byte sequence is empty or composed exclusively of whitespace.
+
+    Args:
+        file_bytes: Raw binary payload.
+
+    Returns:
+        bool: True if payload is zero-length or only whitespace.
+    """
+    if not file_bytes:
+        return True
+    return bool(file_bytes.strip() == b"")
+
+
+def inspect_upload_safety(
+    file_bytes: bytes, filename: str
+) -> dict[str, Any]:
+    """Perform a comprehensive pre-ingestion security scan on an uploaded file payload.
+
+    Evaluates:
+        - is_empty: Whether payload has 0 bytes.
+        - is_executable: Whether payload exhibits executable extensions or magic bytes.
+        - is_valid_mime: Whether payload matches declared document MIME structure.
+        - detected_size: Byte length of upload.
+        - extension: Normalized lowercase extension.
+
+    Args:
+        file_bytes: Raw byte buffer of the upload.
+        filename: Declared file name.
+
+    Returns:
+        dict[str, Any]: Security assessment report for the upload.
+    """
+    is_empty = not bool(file_bytes)
+    is_exec = is_executable_upload(file_bytes, filename)
+    extension = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+
+    valid_mime = False
+    if not is_empty and not is_exec:
+        valid_mime = validate_mime_type(file_bytes, filename)
+
+    return {
+        "filename": filename,
+        "extension": extension,
+        "size_bytes": len(file_bytes) if file_bytes else 0,
+        "is_empty": is_empty,
+        "is_executable": is_exec,
+        "is_valid_mime": valid_mime,
+        "status": "rejected_empty" if is_empty else ("rejected_executable" if is_exec else ("accepted" if valid_mime else "rejected_invalid_mime")),
+    }
+
+
+def batch_validate_upload_payloads(
+    uploads: list[tuple[bytes, str]],
+) -> list[dict[str, Any]]:
+    """Perform batch security and MIME validation across multiple uploaded documents.
+
+    Args:
+        uploads: List of tuples containing (file_bytes, filename).
+
+    Returns:
+        list[dict[str, Any]]: List of per-file safety reports.
+    """
+    return [inspect_upload_safety(b, name) for b, name in uploads]
+
+
+def validate_upload_payload_safety(
+    file_bytes: bytes, filename: str, max_size_bytes: int = 100_000_000
+) -> tuple[bool, str]:
+    """Validate uploaded payload safety returning a pass/fail flag with actionable reason string.
+
+    Args:
+        file_bytes: Raw binary upload data.
+        filename: Declared file name.
+        max_size_bytes: Optional upper file size constraint in bytes (default 100MB).
+
+    Returns:
+        tuple[bool, str]: (is_safe, reason_message)
+    """
+    if not file_bytes:
+        return False, "Uploaded file is empty (0 bytes)."
+
+    if len(file_bytes) > max_size_bytes:
+        return False, f"File size ({len(file_bytes):,} bytes) exceeds maximum allowance ({max_size_bytes:,} bytes)."
+
+    if is_executable_upload(file_bytes, filename):
+        return False, f"File '{filename}' rejected as executable or dangerous script payload."
+
+    if not validate_single_extension(filename):
+        return False, f"File '{filename}' blocked due to executable double extension."
+
+    if not validate_mime_type(file_bytes, filename):
+        return False, f"File '{filename}' content does not match declared MIME signature."
+
+    return True, "File payload passed all security and MIME validation checks."
+
+
+def classify_upload_threat_vector(file_bytes: bytes, filename: str) -> dict[str, Any]:
+    """Classify the risk category of an upload based on header analysis.
+
+    Risk Levels:
+        - "NONE": Safe document matching expected format.
+        - "EMPTY": Zero byte payload (invalid but benign).
+        - "EXECUTABLE_EXTENSION": Blocked dangerous extension.
+        - "MAGIC_BYTE_MISMATCH": Dangerous binary disguised as document.
+        - "CORRUPT_ARCHIVE": Damaged or tampered container.
+
+    Args:
+        file_bytes: Binary content.
+        filename: Declared name.
+
+    Returns:
+        dict[str, Any]: Risk level, description, and recommendation.
+    """
+    if not file_bytes:
+        return {
+            "threat_level": "LOW",
+            "threat_category": "EMPTY_PAYLOAD",
+            "is_dangerous": False,
+            "description": "Zero byte file upload.",
+            "recommendation": "Prompt user to select a non-empty document.",
+        }
+
+    extension = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    if extension in BLOCKED_EXECUTABLE_EXTENSIONS:
+        return {
+            "threat_level": "HIGH",
+            "threat_category": "EXECUTABLE_EXTENSION",
+            "is_dangerous": True,
+            "description": f"Dangerous file extension '{extension}' is blocked.",
+            "recommendation": "Reject immediately and log security event.",
+        }
+
+    if file_bytes.startswith(EXECUTABLE_MAGIC_SIGNATURES):
+        return {
+            "threat_level": "CRITICAL",
+            "threat_category": "MAGIC_BYTE_MISMATCH",
+            "is_dangerous": True,
+            "description": "Executable or shell script magic bytes found inside declared document.",
+            "recommendation": "Block file and flag incident for administrator review.",
+        }
+
+    return {
+        "threat_level": "NONE",
+        "threat_category": "SAFE_DOCUMENT",
+        "is_dangerous": False,
+        "description": "Standard document upload structure.",
+        "recommendation": "Proceed with ingestion pipeline.",
+    }
+
+
+def audit_file_stream_safety(stream_chunks: list[bytes], filename: str) -> dict[str, Any]:
+    """Audit safety for streamed file chunks before merging into storage.
+
+    Args:
+        stream_chunks: List of byte chunks received from network stream.
+        filename: Target filename.
+
+    Returns:
+        dict[str, Any]: Assessment of total stream bytes and early rejection result.
+    """
+    total_bytes = sum(len(c) for c in stream_chunks) if stream_chunks else 0
+    if total_bytes == 0:
+        return {
+            "is_safe": False,
+            "total_bytes": 0,
+            "reason": "Stream is completely empty.",
+            "early_rejected": True,
+        }
+
+    first_chunk = stream_chunks[0] if stream_chunks else b""
+    if is_executable_upload(first_chunk, filename):
+        return {
+            "is_safe": False,
+            "total_bytes": total_bytes,
+            "reason": "Executable signature detected in leading chunk.",
+            "early_rejected": True,
+        }
+
+    return {
+        "is_safe": True,
+        "total_bytes": total_bytes,
+        "reason": "Stream header appears safe.",
+        "early_rejected": False,
+    }
 
 
 def _normalized_zip_name(name: str) -> str:

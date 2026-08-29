@@ -1,3 +1,25 @@
+# MIT License
+#
+# Copyright (c) 2026 Ganesh Kambli
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
 """
 badge_generator.py
 ------------------
@@ -13,10 +35,8 @@ named colors, providing a robust fallback mechanism for theme configurations.
 Issue #2898: Fallback behavior for named colors in Badge Generator.
 """
 
-import html
-import logging
-import re
 import hashlib
+import html
 import logging
 import re
 import xml.etree.ElementTree as ET
@@ -33,9 +53,11 @@ except ImportError:
     ImageFont = None
     PngImagePlugin = None
 
+
 def has_pillow() -> bool:
     """Check if PIL/Pillow is installed."""
     return Image is not None
+
 
 try:
     from reportlab.lib.colors import HexColor
@@ -385,12 +407,12 @@ def generate_badge_png(
             if font_path.exists():
                 try:
                     return ImageFont.truetype(str(font_path), size)
-                except (IOError, OSError):
+                except OSError:
                     pass
         for system_font in ["arial.ttf", "DejaVuSans.ttf"]:
             try:
                 return ImageFont.truetype(system_font, size)
-            except (IOError, OSError):
+            except OSError:
                 pass
         return ImageFont.load_default()
 
@@ -473,7 +495,9 @@ def generate_badge_png(
 
     # Create PngInfo for accessibility alt-text metadata
     pnginfo = PngImagePlugin.PngInfo()
-    pnginfo.add_text("Description", f"Originality Verified Certificate for {student_name}")
+    pnginfo.add_text(
+        "Description", f"Originality Verified Certificate for {student_name}"
+    )
 
     # Save to buffer
     buffer = BytesIO()
@@ -750,4 +774,4 @@ def generate_svg_badge(
 def get_badge_cache_key(label: str, message: str, color: str) -> str:
     """Generate a deterministic cache key for a badge configuration."""
     raw_key = f"{label}|{message}|{color}"
-    return hashlib.md5(raw_key.encode("utf-8")).hexdigest()
+    return hashlib.md5(raw_key.encode("utf-8")).hexdigest()  # nosec

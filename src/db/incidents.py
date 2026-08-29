@@ -1,8 +1,31 @@
+# MIT License
+#
+# Copyright (c) 2026 Ganesh Kambli
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
 from __future__ import annotations
 
 import csv
 import hashlib
 import io
+import logging
 import math
 import os
 import sqlite3
@@ -20,10 +43,13 @@ from src.core.config import (
     normalize_severity_label,
     severity_from_score,
 )
+from src.core.metrics import plagiarism_incidents_total
 from src.db.base import BaseRepository
 from src.db.migrations import migrate_corpus_database, table_exists
 from src.db.migrations.common import column_exists
 from src.db.schemas import MatchResult
+
+logger = logging.getLogger(__name__)
 
 # Seed the incidents default DB path from the centralized app_config.
 # ``DEFAULT_DB_PATH`` is intentionally kept as a module-level constant so
@@ -133,7 +159,7 @@ def build_incident_id(doc_a: str, doc_b: str) -> str:
         migrated by this change.
     """
     first, second = _normalise_pair(doc_a, doc_b)
-    digest = hashlib.sha256(f"{first}||{second}".encode("utf-8")).hexdigest()
+    digest = hashlib.sha256(f"{first}||{second}".encode()).hexdigest()
     return f"INC-{digest[:12].upper()}"
 
 
@@ -261,7 +287,7 @@ def _fetch_all_incidents(
 
     return [
         MatchResult(
-            incident_id=_parse_incident_id(row["incident_id"]),
+            incident_id=row["incident_id"],
             document_a=row["document_a"],
             document_b=row["document_b"],
             similarity_score=row["similarity_score"],
@@ -374,6 +400,10 @@ def sync_flagged_incidents(
                 conn.commit()
                 get_recent_incidents.cache_clear()
 
+                for record in bulk_records:
+                    sev = str(record[4] or "Medium")
+                    plagiarism_incidents_total.labels(severity=sev).inc()
+
             rows = conn.execute("""
                 SELECT pi.incident_id, pi.document_a, pi.document_b,
                        pi.similarity_score, pi.severity_rank,
@@ -385,11 +415,12 @@ def sync_flagged_incidents(
                 WHERE (da.is_deleted IS NULL OR da.is_deleted = 0)
                   AND (db.is_deleted IS NULL OR db.is_deleted = 0)
                 ORDER BY pi.date_flagged DESC, pi.incident_id ASC
-                """).fetchall()
+                """
+            ).fetchall()
 
             return [
                 MatchResult(
-                    incident_id=_parse_incident_id(row["incident_id"]),
+                    incident_id=row["incident_id"],
                     document_a=row["document_a"],
                     document_b=row["document_b"],
                     similarity_score=row["similarity_score"],
@@ -449,14 +480,16 @@ def get_total_incidents_count(
     """
     init_incident_db(db_path)
     with closing(_get_connection(db_path)) as conn:
-        row = conn.execute("""
+        row = conn.execute(
+            """
             SELECT COUNT(*)
             FROM plagiarism_incidents pi
             LEFT JOIN documents da ON pi.document_a = da.filename
             LEFT JOIN documents db ON pi.document_b = db.filename
             WHERE (da.is_deleted IS NULL OR da.is_deleted = 0)
               AND (db.is_deleted IS NULL OR db.is_deleted = 0)
-            """).fetchone()
+            """
+        ).fetchone()
     return int(row[0]) if row is not None else 0
 
 
@@ -499,6 +532,7 @@ def get_incident_by_id(
     if db_path is None:
         db_path = DEFAULT_DB_PATH
     init_incident_db(db_path)
+    alt_id = f"INC-{hex(incident_id)[2:].upper()}" if isinstance(incident_id, int) else str(incident_id)
     with closing(_get_connection(db_path)) as conn:
         conn.row_factory = sqlite3.Row
         row = conn.execute(
@@ -510,11 +544,11 @@ def get_incident_by_id(
             FROM plagiarism_incidents pi
             LEFT JOIN documents da ON pi.document_a = da.filename
             LEFT JOIN documents db ON pi.document_b = db.filename
-            WHERE (pi.incident_id = ? OR pi.incident_id = ?)
+            WHERE (pi.incident_id = ? OR pi.incident_id = ? OR pi.incident_id = ?)
               AND (da.is_deleted IS NULL OR da.is_deleted = 0)
               AND (db.is_deleted IS NULL OR db.is_deleted = 0)
             """,
-            (incident_id, str(incident_id)),
+            (incident_id, str(incident_id), alt_id),
         ).fetchone()
 
         if row is None:
@@ -794,11 +828,13 @@ def update_review_status(
 
     init_incident_db(db_path)
 
+    alt_id = f"INC-{hex(incident_id)[2:].upper()}" if isinstance(incident_id, int) else str(incident_id)
+
     with closing(sqlite3.connect(str(db_path))) as conn:
         try:
             cursor = conn.execute(
-                "UPDATE plagiarism_incidents SET review_status = ? WHERE incident_id = ?",
-                (status, str(incident_id).strip()),
+                "UPDATE plagiarism_incidents SET review_status = ? WHERE (incident_id = ? OR incident_id = ? OR incident_id = ?)",
+                (status, incident_id, str(incident_id).strip(), alt_id),
             )
 
             conn.commit()
@@ -829,12 +865,12 @@ def bulk_update_incident_status(
 
     init_incident_db(db_path)
     cleaned_ids = [str(i).strip() for i in incident_ids]
-    
+
     with closing(sqlite3.connect(str(db_path))) as conn:
         try:
             placeholders = ",".join(["?"] * len(cleaned_ids))
             cursor = conn.execute(
-                f"UPDATE plagiarism_incidents SET review_status = ? WHERE incident_id IN ({placeholders})",
+                f"UPDATE plagiarism_incidents SET review_status = ? WHERE incident_id IN ({placeholders})",  # nosec
                 [status, *cleaned_ids],
             )
             conn.commit()
@@ -934,7 +970,8 @@ def get_incidents_count_by_date(
     init_incident_db(db_path)
     with closing(_get_connection(db_path)) as conn:
         conn.row_factory = sqlite3.Row
-        rows = conn.execute("""
+        rows = conn.execute(
+            """
             SELECT
                 DATE(pi.date_flagged) as date,
                 COUNT(*) as count
@@ -945,7 +982,8 @@ def get_incidents_count_by_date(
               AND (db.is_deleted IS NULL OR db.is_deleted = 0)
             GROUP BY DATE(pi.date_flagged)
             ORDER BY date ASC
-            """).fetchall()
+            """
+        ).fetchall()
         return [dict(row) for row in rows]
 
 
@@ -1038,7 +1076,7 @@ def get_false_positives(db_path: str | Path = DEFAULT_DB_PATH) -> set[tuple[str,
         rows = conn.execute(
             "SELECT document_a, document_b FROM false_positives"
         ).fetchall()
-        return set((row[0], row[1]) for row in rows)
+        return {(row[0], row[1]) for row in rows}
 
 
 # ── Paginated query support ────────────────────────────────────────────────────
@@ -1084,7 +1122,7 @@ def query_incidents_paginated(
     page_size: int = 50,
     sort_by: str = "date_flagged",
     sort_order: str = "DESC",
-    severity_filter: Optional[str] = None,
+    severity_filter: str | None = None,
     search_query: str = "",
     db_path: str | Path = DEFAULT_DB_PATH,
 ) -> PaginatedIncidents:
@@ -1140,7 +1178,7 @@ def query_incidents_paginated(
 
         # Total count
         count_row = conn.execute(
-            f"SELECT COUNT(*) FROM plagiarism_incidents pi {_JOIN_DOCUMENTS} {where_sql}",
+            f"SELECT COUNT(*) FROM plagiarism_incidents pi {_JOIN_DOCUMENTS} {where_sql}",  # nosec
             params,
         ).fetchone()
         total_count = count_row[0] if count_row else 0
@@ -1149,7 +1187,7 @@ def query_incidents_paginated(
         # Paginated fetch
         order_sql = f"pi.{sort_by} {sort_order}, pi.incident_id ASC"
         rows = conn.execute(
-            f"""
+            f"""  # nosec
             SELECT pi.incident_id, pi.document_a, pi.document_b,
                    pi.similarity_score, pi.severity_rank,
                    pi.review_status, pi.date_flagged, pi.last_seen,
@@ -1345,7 +1383,7 @@ def log_incident(
     now: str | None = None,
     threshold: float | None = None,
     allow_self_plagiarism_flags: bool = True,
-) -> Optional[MatchResult]:
+) -> MatchResult | None:
     """Log a single plagiarism incident and clear get_recent_incidents cache.
 
     Args:

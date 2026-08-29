@@ -33,6 +33,9 @@ logger = logging.getLogger(__name__)
 
 # ── API Initialization ────────────────────────────────────────────────────────
 
+from src.core.app_config import print_startup_config_summary
+
+
 app = FastAPI(
     title="Semantic Plagiarism Detector API",
     description="REST API for programmatically checking documents for semantic plagiarism.",
@@ -50,6 +53,17 @@ app = FastAPI(
     ],
     dependencies=[Depends(verify_bearer_token)],
 )
+
+
+@app.on_event("startup")
+def startup_event():
+ feature/model-warmup-startup-4009
+    from src.core.embedding_model import warmup_embedding_model
+    warmup_embedding_model()
+
+    print_startup_config_summary()
+
+ main
 
 # Enable CORS for external LMS frontends
 origins = os.getenv("CORS_ALLOWED_ORIGINS", "*")

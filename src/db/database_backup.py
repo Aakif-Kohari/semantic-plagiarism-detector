@@ -1,3 +1,25 @@
+# MIT License
+#
+# Copyright (c) 2026 Ganesh Kambli
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
 """
 database_backup.py
 ------------------
@@ -39,7 +61,6 @@ from __future__ import annotations
 import gzip
 import io
 import logging
-from src.db.corpus_db import get_corpus_db_path
 import os
 import re
 import shutil
@@ -49,11 +70,13 @@ import tempfile
 import time
 import zipfile
 from contextlib import closing
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Generator, Optional, Union
 
 from src.core.app_config import get_backup_dir
 from src.db.connection import DEFAULT_SQLITE_TIMEOUT, apply_busy_timeout
+from src.db.corpus_db import get_corpus_db_path
 
 # ── Logger Configuration ───────────────────────────────────────────────────────
 logger = logging.getLogger(__name__)
@@ -147,7 +170,10 @@ def iter_sqlite_snapshot_chunks(
                 yield chunk
 
 
-def create_sqlite_snapshot(database_path: str | Path) -> bytes:
+def create_sqlite_snapshot(
+    database_path: str | Path,
+    check_integrity: bool = False,
+) -> bytes:
     """
     Return a transactionally consistent SQLite snapshot.
 
@@ -157,6 +183,8 @@ def create_sqlite_snapshot(database_path: str | Path) -> bytes:
 
     Args:
         database_path: Path to the source SQLite database.
+        check_integrity: If True, checks the integrity of the source database
+                         using PRAGMA quick_check before creating a snapshot.
 
     Returns:
         bytes: The raw bytes of the SQLite snapshot.
@@ -164,8 +192,44 @@ def create_sqlite_snapshot(database_path: str | Path) -> bytes:
     Raises:
         FileNotFoundError: If the source database does not exist.
         IsADirectoryError: If the source path is a directory.
-        sqlite3.DatabaseError: If the generated backup is invalid.
+        sqlite3.DatabaseError: If the integrity check fails or the generated backup is invalid.
     """
+    if check_integrity:
+        source_path = Path(database_path).expanduser().resolve()
+        if not source_path.exists():
+            raise FileNotFoundError(f"SQLite database does not exist: {source_path}")
+        if not source_path.is_file():
+            raise IsADirectoryError(
+                f"SQLite database path is not a file: {source_path}"
+            )
+
+        source_uri = f"{source_path.as_uri()}?mode=ro"
+        with closing(
+            sqlite3.connect(
+                source_uri,
+                uri=True,
+                check_same_thread=False,
+            )
+        ) as source_connection:
+            apply_busy_timeout(source_connection, DEFAULT_SQLITE_TIMEOUT)
+            cursor = source_connection.cursor()
+            try:
+                cursor.execute("PRAGMA quick_check;")
+                result = cursor.fetchone()
+                if not result or result[0] != "ok":
+                    details = result[0] if result else "Unknown error"
+                    raise sqlite3.DatabaseError(
+                        f"Database integrity check failed: {details}"
+                    )
+            except sqlite3.DatabaseError as exc:
+                if "Database integrity check failed" not in str(exc):
+                    raise sqlite3.DatabaseError(
+                        f"Database integrity check failed: {exc}"
+                    ) from exc
+                raise
+            finally:
+                cursor.close()
+
     return b"".join(iter_sqlite_snapshot_chunks(database_path))
 
 
@@ -207,21 +271,32 @@ def create_database_backup(
         raise FileNotFoundError(f"Source database file does not exist: {database_path}")
 
     source_name = Path(database_path).name
-    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%SZ")
     destination_dir = Path(backup_dir).expanduser()
     destination_dir.mkdir(parents=True, exist_ok=True)
 
-    if compress_backup:
-        backup_path = destination_dir / f"{source_name}.{timestamp}.db.gz"
-        compression_level = int(os.getenv("BACKUP_GZIP_COMPRESSION_LEVEL", "6"))
-        with gzip.GzipFile(backup_path, "wb", compresslevel=compression_level) as gz_file:
-            for chunk in iter_sqlite_snapshot_chunks(database_path):
-                gz_file.write(chunk)
-    else:
-        backup_path = destination_dir / f"{source_name}.{timestamp}.db"
-        with open(backup_path, "wb") as f:
-            for chunk in iter_sqlite_snapshot_chunks(database_path):
-                f.write(chunk)
+    backup_path = None
+    try:
+        if compress_backup:
+            backup_path = destination_dir / f"{source_name}.{timestamp}.db.gz"
+            compression_level = int(os.getenv("BACKUP_GZIP_COMPRESSION_LEVEL", "6"))
+            with gzip.GzipFile(
+                backup_path, "wb", compresslevel=compression_level
+            ) as gz_file:
+                for chunk in iter_sqlite_snapshot_chunks(database_path):
+                    gz_file.write(chunk)
+        else:
+            backup_path = destination_dir / f"{source_name}.{timestamp}.db"
+            with open(backup_path, "wb") as f:
+                for chunk in iter_sqlite_snapshot_chunks(database_path):
+                    f.write(chunk)
+    except Exception:
+        if backup_path and os.path.exists(backup_path):
+            try:
+                os.unlink(backup_path)
+            except OSError:
+                pass
+        raise
 
     try:
         os.chmod(backup_path, 0o600)
@@ -367,7 +442,7 @@ def get_database_table_stats(db_path: str | Path) -> dict[str, int]:
             for table_name in table_names:
                 try:
                     count_cursor = connection.execute(
-                        f'SELECT COUNT(*) FROM "{table_name}"'
+                        f'SELECT COUNT(*) FROM "{table_name}"'  # nosec
                     )
                     row = count_cursor.fetchone()
                     row_count = int(row[0]) if row else 0
@@ -480,7 +555,7 @@ def get_table_schema_info(db_path: str | Path, table_name: str) -> list[dict]:
 
 def create_password_protected_backup(
     snapshot_bytes: bytes,
-    password: Optional[str] = None,
+    password: str | None = None,
     *,
     archive_name: str = "corpus.db",
 ) -> bytes:
@@ -697,7 +772,8 @@ def cleanup_old_backups(
         }
 
     db_files = [
-        f for f in backup_path.iterdir()
+        f
+        for f in backup_path.iterdir()
         if f.is_file() and (f.name.endswith(".db") or f.name.endswith(".db.gz"))
     ]
     if not db_files:
@@ -940,4 +1016,46 @@ def checkpoint_wal_log(db_path: str | Path) -> bool:
             target_path,
             exc,
         )
+        return False
+
+
+def verify_backup_file(backup_path: str | Path) -> bool:
+    """
+    Verify the integrity of a database backup archive.
+
+    This function checks if the backup file exists, and attempts to
+    decompress/read the first 100 bytes of the file, asserting that
+    the start of the decompressed content matches the SQLite file header.
+
+    Args:
+        backup_path: Path to the backup file (typically .db.gz or .db).
+
+    Returns:
+        bool: True if the file exists and is a valid SQLite database
+              (or valid gzip archive of one), False otherwise.
+    """
+    path = Path(backup_path).expanduser().resolve()
+    if not path.exists() or not path.is_file():
+        logger.error(
+            "Backup verification failed: file does not exist or is not a file: %s", path
+        )
+        return False
+
+    try:
+        with open(path, "rb") as f:
+            magic = f.read(2)
+
+        is_gzip = magic == b"\x1f\x8b"
+
+        if is_gzip:
+            with gzip.open(path, "rb") as gz:
+                content = gz.read(100)
+        else:
+            with open(path, "rb") as f:
+                content = f.read(100)
+
+        return content.startswith(SQLITE_HEADER)
+
+    except Exception as exc:
+        logger.error("Error verifying backup file %s: %s", path, exc)
         return False

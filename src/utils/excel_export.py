@@ -110,6 +110,9 @@ def build_similarity_workbook(
     threshold: float = 0.59,
     write_only: bool = False,
     sheet_title: str = DEFAULT_WORKSHEET_TITLE,
+    low_threshold: float = 0.0,
+    mid_threshold: float = 0.59,
+    high_threshold: float = 1.0,
 ) -> Workbook:
     """Helper function that builds and styles the openpyxl Workbook.
 
@@ -121,11 +124,18 @@ def build_similarity_workbook(
         sheet_title: Worksheet title. Passed through
             :func:`sanitize_sheet_title`, so a caller may hand in an untrusted
             label (a course or assignment name) without the export aborting.
+        low_threshold: Low breakpoint for the 3-color scale.
+        mid_threshold: Mid breakpoint for the 3-color scale.
+        high_threshold: High breakpoint for the 3-color scale.
 
     Returns:
         Workbook: Configured openpyxl Workbook instance.
     """
     safe_sheet_title = sanitize_sheet_title(sheet_title)
+
+    # Older callers pass ``threshold`` as the yellow midpoint.
+    if threshold != 0.59 and mid_threshold == 0.59:
+        mid_threshold = threshold
 
     if write_only:
         wb = Workbook(write_only=True)
@@ -199,14 +209,14 @@ def build_similarity_workbook(
 
             color_scale = ColorScaleRule(
                 start_type="num",
-                start_value=0.0,
-                start_color="FFFFFF",  # White (0%)
+                start_value=low_threshold,
+                start_color="FFFFFF",  # White (low)
                 mid_type="num",
-                mid_value=threshold,
-                mid_color="FEF08A",  # Yellow (At threshold)
+                mid_value=mid_threshold,
+                mid_color="FEF08A",  # Yellow (mid)
                 end_type="num",
-                end_value=1.0,
-                end_color="EF4444",  # Red (100%)
+                end_value=high_threshold,
+                end_color="EF4444",  # Red (high)
             )
             ws.conditional_formatting.add(matrix_range, color_scale)
 
@@ -221,6 +231,53 @@ def build_similarity_workbook(
             ws.column_dimensions[get_column_letter(col_idx)].width = max(
                 col_len + 3, 12
             )
+
+        # Create Flagged Pairs worksheet (write-only mode)
+        flagged_ws = wb.create_sheet(title="Flagged Pairs")
+
+        # Write header row for flagged sheet
+        flagged_header_row = []
+        for col_name in ["Document A", "Document B", "Similarity Score", "Severity"]:
+            cell = WriteOnlyCell(flagged_ws, value=col_name)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = header_align
+            flagged_header_row.append(cell)
+        flagged_ws.append(flagged_header_row)
+
+        # Populate flagged pairs (upper triangle only)
+        docs = list(df.index)
+        for i in range(len(docs)):
+            for j in range(i + 1, len(docs)):
+                val = df.iloc[i, j]
+                if pd.notna(val) and float(val) >= mid_threshold:
+                    score = float(val)
+                    severity = "Moderate"
+                    if score >= 0.85:
+                        severity = "High"
+                    if score >= 0.95:
+                        severity = "Critical"
+
+                    row_data = [
+                        sanitize_spreadsheet_value(str(docs[i])),
+                        sanitize_spreadsheet_value(str(docs[j])),
+                        score,
+                        severity,
+                    ]
+                    row_cells = []
+                    for c_idx, item in enumerate(row_data):
+                        cell = WriteOnlyCell(flagged_ws, value=item)
+                        if c_idx == 2:
+                            cell.number_format = "0.0%"
+                            cell.alignment = Alignment(horizontal="right")
+                        row_cells.append(cell)
+                    flagged_ws.append(row_cells)
+
+        # Set column widths for flagged sheet
+        flagged_ws.column_dimensions["A"].width = 25
+        flagged_ws.column_dimensions["B"].width = 25
+        flagged_ws.column_dimensions["C"].width = 18
+        flagged_ws.column_dimensions["D"].width = 15
 
         return wb
 
@@ -260,9 +317,13 @@ def build_similarity_workbook(
             )
 
         for col_idx, val in enumerate(row, start=2):
-            cell = ws.cell(row=row_idx, column=col_idx, value=float(val))
-            cell.number_format = "0.0%"
-            cell.alignment = Alignment(horizontal="right")
+            if pd.isna(val):
+                cell = ws.cell(row=row_idx, column=col_idx, value="-")
+                cell.alignment = Alignment(horizontal="right")
+            else:
+                cell = ws.cell(row=row_idx, column=col_idx, value=float(val))
+                cell.number_format = "0.0%"
+                cell.alignment = Alignment(horizontal="right")
 
     # Header styling
     header_fill = PatternFill(
@@ -292,14 +353,14 @@ def build_similarity_workbook(
 
         color_scale = ColorScaleRule(
             start_type="num",
-            start_value=0.0,
-            start_color="FFFFFF",  # White (0%)
+            start_value=low_threshold,
+            start_color="FFFFFF",  # White (low)
             mid_type="num",
-            mid_value=threshold,
-            mid_color="FEF08A",  # Yellow (At threshold)
+            mid_value=mid_threshold,
+            mid_color="FEF08A",  # Yellow (mid)
             end_type="num",
-            end_value=1.0,
-            end_color="EF4444",  # Red (100%)
+            end_value=high_threshold,
+            end_color="EF4444",  # Red (high)
         )
         ws.conditional_formatting.add(matrix_range, color_scale)
 
@@ -308,6 +369,58 @@ def build_similarity_workbook(
         max_len = max(len(str(cell.value or "")) for cell in col)
         col_letter = col[0].column_letter
         ws.column_dimensions[col_letter].width = max(max_len + 3, 12)
+
+    # Create Flagged Pairs worksheet
+    flagged_ws = wb.create_sheet(title=sanitize_sheet_title("Flagged Pairs"))
+
+    # Write headers and style them
+    flagged_ws.cell(row=1, column=1, value="Document A")
+    flagged_ws.cell(row=1, column=2, value="Document B")
+    flagged_ws.cell(row=1, column=3, value="Similarity Score")
+    flagged_ws.cell(row=1, column=4, value="Severity")
+
+    for cell in flagged_ws[1]:
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+
+    # Populate flagged pairs (upper triangle only)
+    docs = list(df.index)
+    current_row = 2
+    for i in range(len(docs)):
+        for j in range(i + 1, len(docs)):
+            val = df.iloc[i, j]
+            if pd.notna(val) and float(val) >= mid_threshold:
+                score = float(val)
+                severity = "Moderate"
+                if score >= 0.85:
+                    severity = "High"
+                if score >= 0.95:
+                    severity = "Critical"
+
+                flagged_ws.cell(
+                    row=current_row,
+                    column=1,
+                    value=sanitize_spreadsheet_value(str(docs[i])),
+                )
+                flagged_ws.cell(
+                    row=current_row,
+                    column=2,
+                    value=sanitize_spreadsheet_value(str(docs[j])),
+                )
+
+                score_cell = flagged_ws.cell(row=current_row, column=3, value=score)
+                score_cell.number_format = "0.0%"
+                score_cell.alignment = Alignment(horizontal="right")
+
+                flagged_ws.cell(row=current_row, column=4, value=severity)
+                current_row += 1
+
+    # Set column widths for flagged sheet
+    flagged_ws.column_dimensions["A"].width = 25
+    flagged_ws.column_dimensions["B"].width = 25
+    flagged_ws.column_dimensions["C"].width = 18
+    flagged_ws.column_dimensions["D"].width = 15
 
     return wb
 
@@ -320,7 +433,11 @@ def export_similarity_matrix_to_excel(
 ) -> bytes:
     """Exports a similarity matrix DataFrame into an in-memory Excel file (.xlsx) with formatting."""
     wb = build_similarity_workbook(
-        df, threshold=threshold, write_only=write_only, sheet_title=sheet_title
+        df,
+        threshold=threshold,
+        write_only=write_only,
+        sheet_title=sheet_title,
+        mid_threshold=threshold,
     )
     output = io.BytesIO()
     wb.save(output)
@@ -341,7 +458,11 @@ def export_similarity_matrix_to_temp_file(
         str: Absolute path to the created temporary Excel file.
     """
     wb = build_similarity_workbook(
-        df, threshold=threshold, write_only=write_only, sheet_title=sheet_title
+        df,
+        threshold=threshold,
+        write_only=write_only,
+        sheet_title=sheet_title,
+        mid_threshold=threshold,
     )
     temp_path = _create_managed_temp_file(suffix=".xlsx", prefix="similarity_matrix_")
     wb.save(temp_path)
