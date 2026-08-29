@@ -2,6 +2,8 @@ import io
 import zipfile
 from unittest.mock import patch
 
+import pytest
+
 from src.security.mime_validator import (
     is_executable_upload,
     validate_mime_type,
@@ -252,20 +254,22 @@ def test_too_many_archive_members_are_rejected(monkeypatch):
     )
 
 
-def test_ooxml_validation_does_not_trust_python_magic():
-    with patch(
-        "magic.from_buffer",
-        return_value="application/zip",
-    ) as magic_mock:
-        assert (
-            validate_mime_type(
-                build_zip({"random.bin": b"123"}),
-                "spoofed.docx",
-            )
-            is False
-        )
+def test_ooxml_validation_does_not_trust_python_magic(monkeypatch):
+    called = []
 
-    magic_mock.assert_not_called()
+    def mock_check(*args, **kwargs):
+        called.append(True)
+        return True
+
+    monkeypatch.setattr("src.security.mime_validator._check_magic_bytes", mock_check)
+    assert (
+        validate_mime_type(
+            build_zip({"random.bin": b"123"}),
+            "spoofed.docx",
+        )
+        is False
+    )
+    assert len(called) == 0
 
 
 def test_validate_mime_type_text():
@@ -296,25 +300,25 @@ def test_validate_mime_type_unsupported_extension():
     )
 
 
-def test_validate_mime_type_magic_fallback():
-    with patch(
-        "magic.from_buffer",
-        side_effect=ImportError("No magic module"),
-    ):
-        assert (
-            validate_mime_type(
-                b"%PDF-1.4\n%...\n",
-                "test.pdf",
-            )
-            is True
+def test_validate_mime_type_magic_fallback(monkeypatch):
+    monkeypatch.setattr(
+        "src.security.mime_validator._check_magic_bytes",
+        lambda *args, **kwargs: None,
+    )
+    assert (
+        validate_mime_type(
+            b"%PDF-1.4\n%...\n",
+            "test.pdf",
         )
-        assert (
-            validate_mime_type(
-                b"MZ\x90\x00\x03\x00\x00\x00",
-                "malicious.pdf",
-            )
-            is False
+        is True
+    )
+    assert (
+        validate_mime_type(
+            b"MZ\x90\x00\x03\x00\x00\x00",
+            "malicious.pdf",
         )
+        is False
+    )
 
 
 def test_validate_mime_type_accepts_valid_legacy_doc_header(monkeypatch):
