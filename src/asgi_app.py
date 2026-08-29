@@ -350,6 +350,8 @@ async def _lifespan(app):
     init_tracer_provider()
     validate_bearer_tokens_config()
     await start_scheduler()
+    from src.core.embedding_model import warmup_embedding_model
+    warmup_embedding_model()
     try:
         yield
     finally:
