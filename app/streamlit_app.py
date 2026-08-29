@@ -1008,6 +1008,13 @@ init_db()
 
 # Purge stale temp files older than 2 hours on startup
 purge_expired_temp_files()
+
+# Preload and warm up embedding model on startup exactly once
+from src.core.embedding_model import warmup_embedding_model
+@st.cache_resource
+def run_warmup():
+    warmup_embedding_model()
+run_warmup()
 # Start lightweight REST API server for /healthz endpoint in background
 import threading
 
