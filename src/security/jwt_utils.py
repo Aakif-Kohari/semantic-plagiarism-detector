@@ -20,7 +20,45 @@ from typing import Any, Dict, List, Optional, Set
 logger = logging.getLogger(__name__)
 
 JWT_SECRET_KEY: Optional[str] = os.getenv("JWT_SECRET_KEY")
-JWT_ALGORITHM: str = "HS256"
+JWT_ALGORITHM: str = os.getenv("JWT_ALGORITHM", "HS256").upper()
+JWT_PUBLIC_KEY: Optional[str] = os.getenv("JWT_PUBLIC_KEY")
+JWT_PRIVATE_KEY: Optional[str] = os.getenv("JWT_PRIVATE_KEY")
+
+
+def get_jwt_algorithm() -> str:
+    """Return the active JWT signing algorithm from environment (e.g. HS256, RS256)."""
+    return os.getenv("JWT_ALGORITHM", JWT_ALGORITHM).upper()
+
+
+def _sign_rs256(signing_input: bytes, private_key_pem: str) -> bytes:
+    """Sign bytes using RS256 (RSA-SHA256) with a PEM-encoded private key."""
+    try:
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import padding
+
+        key = serialization.load_pem_private_key(
+            private_key_pem.encode("utf-8") if isinstance(private_key_pem, str) else private_key_pem,
+            password=None,
+        )
+        return key.sign(signing_input, padding.PKCS1v15(), hashes.SHA256())
+    except Exception as exc:
+        raise ValueError(f"Failed to sign token with RS256 private key: {exc}") from exc
+
+
+def _verify_rs256(signing_input: bytes, signature: bytes, public_key_pem: str) -> bool:
+    """Verify RS256 signature using a PEM-encoded public key."""
+    try:
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import padding
+
+        key = serialization.load_pem_public_key(
+            public_key_pem.encode("utf-8") if isinstance(public_key_pem, str) else public_key_pem
+        )
+        key.verify(signature, signing_input, padding.PKCS1v15(), hashes.SHA256())
+        return True
+    except Exception:
+        return False
+
 
 class JWTDecodeError(ValueError):
     """Raised when the JWT structure is malformed or cannot be base64-decoded."""
@@ -68,27 +106,24 @@ def create_jwt_token(
     data: dict[str, Any],
     expires_in_seconds: int = 3600,
     secret_key: Optional[str] = None,
+    algorithm: Optional[str] = None,
 ) -> str:
     """
-    Create a signed JWT token with header, payload, expiration timestamp, and HMAC-SHA256 signature.
+    Create a signed JWT token with header, payload, expiration timestamp, and signature.
 
     Args:
         data: Dictionary of claims to include in the payload.
         expires_in_seconds: Lifetime of token in seconds (default 3600).
-        secret_key: HMAC secret key used to sign the token. Uses JWT_SECRET_KEY if None.
+        secret_key: HMAC secret key or RSA private key used to sign the token.
+        algorithm: Signing algorithm override (e.g. HS256, RS256).
 
     Returns:
         3-part dot-separated JWT token string.
 
     Raises:
-        ValueError: If no secret key is available or if the key is too short in production.
+        ValueError: If no secret key is available or if key validation fails.
     """
-    resolved_secret = secret_key if secret_key is not None else os.getenv("JWT_SECRET_KEY", JWT_SECRET_KEY)
-    if not resolved_secret:
-        raise ValueError(
-            "JWT_SECRET_KEY environment variable must be set. "
-            "Do not use default secrets in production."
-        )
+    alg = (algorithm or get_jwt_algorithm()).upper()
 
     is_test_env = (os.getenv("APP_ENV") == "test") or _IS_TEST
     if len(resolved_secret) < 32 and not is_test_env:
@@ -98,7 +133,7 @@ def create_jwt_token(
         )
         raise ValueError("JWT secret key must be at least 32 characters long in production.")
 
-    header = {"alg": JWT_ALGORITHM, "typ": "JWT"}
+    header = {"alg": alg, "typ": "JWT"}
     now = int(time.time())
     payload = {
         **data,
@@ -115,11 +150,16 @@ def create_jwt_token(
     )
 
     signing_input = f"{encoded_header}.{encoded_payload}".encode("utf-8")
-    signature = hmac.new(
-        resolved_secret.encode("utf-8"),
-        signing_input,
-        hashlib.sha256,
-    ).digest()
+
+    if alg == "RS256":
+        signature = _sign_rs256(signing_input, private_key)
+    else:
+        signature = hmac.new(
+            resolved_secret.encode("utf-8"),
+            signing_input,
+            hashlib.sha256,
+        ).digest()
+
     encoded_signature = base64url_encode(signature)
 
     return f"{encoded_header}.{encoded_payload}.{encoded_signature}"
@@ -162,40 +202,57 @@ def _verify_jwt_token(
     expected_type: str,
     secret_key: Optional[str] = None,
     clock_skew_seconds: int = 10,
+    algorithm: Optional[str] = None,
 ) -> dict[str, Any]:
     """Shared implementation for verifying JWT signatures, expiration, and types."""
     if not token or not isinstance(token, str):
         raise JWTDecodeError(f"Invalid {expected_type} token: token cannot be empty.")
 
     token = token.strip()
-
-    resolved_secret = secret_key if secret_key is not None else os.getenv("JWT_SECRET_KEY", JWT_SECRET_KEY)
-    if not resolved_secret:
-        raise ValueError(
-            "JWT_SECRET_KEY environment variable must be set. "
-            "Cannot verify tokens without a secret key."
-        )
-
     parts = token.split(".")
     if len(parts) != 3:
         raise JWTDecodeError(f"Invalid {expected_type} token: malformed JWT structure.")
 
     encoded_header, encoded_payload, encoded_signature = parts
 
+    try:
+        header_bytes = base64url_decode(encoded_header)
+        header = json.loads(header_bytes.decode("utf-8"))
+    except Exception:
+        header = {}
+
+    alg = (algorithm or header.get("alg") or get_jwt_algorithm()).upper()
     signing_input = f"{encoded_header}.{encoded_payload}".encode("utf-8")
-    expected_sig = hmac.new(
-        resolved_secret.encode("utf-8"),
-        signing_input,
-        hashlib.sha256,
-    ).digest()
 
     try:
         actual_sig = base64url_decode(encoded_signature)
     except Exception as exc:
         raise JWTDecodeError(f"Invalid {expected_type} token: invalid base64 signature encoding.") from exc
 
-    if not hmac.compare_digest(expected_sig, actual_sig):
-        raise JWTSignatureError(f"Invalid {expected_type} token: signature verification failed.")
+    if alg == "RS256":
+        public_key = secret_key or os.getenv("JWT_PUBLIC_KEY", JWT_PUBLIC_KEY)
+        if not public_key:
+            raise ValueError(
+                "JWT_PUBLIC_KEY environment variable or secret_key parameter must be set for RS256 verification."
+            )
+        if not _verify_rs256(signing_input, actual_sig, public_key):
+            raise JWTSignatureError(f"Invalid {expected_type} token: RS256 signature verification failed.")
+    else:
+        resolved_secret = secret_key if secret_key is not None else os.getenv("JWT_SECRET_KEY", JWT_SECRET_KEY)
+        if not resolved_secret:
+            raise ValueError(
+                "JWT_SECRET_KEY environment variable must be set. "
+                "Cannot verify tokens without a secret key."
+            )
+
+        expected_sig = hmac.new(
+            resolved_secret.encode("utf-8"),
+            signing_input,
+            hashlib.sha256,
+        ).digest()
+
+        if not hmac.compare_digest(expected_sig, actual_sig):
+            raise JWTSignatureError(f"Invalid {expected_type} token: signature verification failed.")
 
     try:
         payload_bytes = base64url_decode(encoded_payload)

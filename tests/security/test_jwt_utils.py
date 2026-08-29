@@ -501,3 +501,45 @@ class TestCreateJwtTokenWithKid:
         assert payload["scopes"] == ["read"]
         assert "jti" not in payload or isinstance(payload.get("jti"), str)
 
+
+def test_rs256_token_creation_and_verification(monkeypatch):
+    """Test generating and verifying RS256 asymmetric signed JWT tokens."""
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+
+    # Generate test RSA keypair
+    private_key_obj = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    private_pem = private_key_obj.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    ).decode("utf-8")
+
+    public_pem = private_key_obj.public_key().public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    ).decode("utf-8")
+
+    monkeypatch.setenv("JWT_ALGORITHM", "RS256")
+    monkeypatch.setenv("JWT_PRIVATE_KEY", private_pem)
+    monkeypatch.setenv("JWT_PUBLIC_KEY", public_pem)
+
+    token = create_access_token(sub="rsa_user", scopes=["admin"])
+    header = get_unverified_jwt_header(token)
+    assert header["alg"] == "RS256"
+
+    payload = verify_access_token(token)
+    assert payload["sub"] == "rsa_user"
+    assert payload["type"] == "access"
+
+
+def test_rs256_missing_keys_raises_value_error(monkeypatch):
+    """Test ValueError is raised if RS256 is configured without public/private keys."""
+    monkeypatch.setenv("JWT_ALGORITHM", "RS256")
+    monkeypatch.delenv("JWT_PRIVATE_KEY", raising=False)
+    monkeypatch.delenv("JWT_PUBLIC_KEY", raising=False)
+
+    with pytest.raises(ValueError, match="JWT_PRIVATE_KEY"):
+        create_access_token(sub="user")
+
+
