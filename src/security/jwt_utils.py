@@ -32,6 +32,11 @@ class JWTExpiredError(ValueError):
     pass
 
 
+class JWTNotYetValidError(ValueError):
+    """Raised when the token's 'nbf' timestamp is in the future."""
+    pass
+
+
 class JWTSignatureError(ValueError):
     """Raised when the cryptographic signature validation fails."""
     pass
@@ -206,6 +211,15 @@ def _verify_jwt_token(
             raise JWTDecodeError(f"Invalid {expected_type} token: malformed exp claim.") from exc
         if int(time.time()) >= exp_int + clock_skew_seconds:
             raise JWTExpiredError(f"{expected_type.capitalize()} token has expired.")
+
+    nbf = payload.get("nbf")
+    if nbf is not None:
+        try:
+            nbf_int = int(nbf)
+        except (TypeError, ValueError) as exc:
+            raise JWTDecodeError(f"Invalid {expected_type} token: malformed nbf claim.") from exc
+        if int(time.time()) < nbf_int - clock_skew_seconds:
+            raise JWTNotYetValidError(f"{expected_type.capitalize()} token is not yet valid (nbf).")
 
     token_type = payload.get("type")
     if token_type and not hmac.compare_digest(token_type, expected_type):

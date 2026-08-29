@@ -21,6 +21,7 @@ from src.security.jwt_utils import (
     verify_token_with_kid,
     JWTDecodeError,
     JWTExpiredError,
+    JWTNotYetValidError,
     JWTSignatureError,
 )
 
@@ -84,6 +85,14 @@ def test_invalid_signature():
 def test_expired_token():
     token = create_jwt_token({"sub": "david", "type": "access"}, expires_in_seconds=-10)
     with pytest.raises(JWTExpiredError, match="expired"):
+        verify_access_token(token)
+
+
+def test_nbf_claim_future_token_rejected():
+    import time
+    future_nbf = int(time.time()) + 3600
+    token = create_jwt_token({"sub": "future_user", "type": "access", "nbf": future_nbf})
+    with pytest.raises(JWTNotYetValidError, match="is not yet valid \\(nbf\\)"):
         verify_access_token(token)
 
 
