@@ -49,6 +49,30 @@ class RevokeRequest(BaseModel):
     token: str | None = Field(default=None, description="API Bearer token to revoke")
 
 
+class PasswordChangeSchema(BaseModel):
+    """Request schema for password change."""
+
+    old_password: str = Field(..., description="Current password")
+    new_password: str = Field(
+        ..., description="New password complying with complexity rules"
+    )
+
+
+class ForgotPasswordRequest(BaseModel):
+    """Request schema for initiating password reset."""
+
+    email: str = Field(..., description="User's email/username")
+
+
+class ResetPasswordRequest(BaseModel):
+    """Request schema for executing password reset using a token."""
+
+    token: str = Field(..., description="Valid short-lived reset token")
+    new_password: str = Field(
+        ..., description="New password complying with complexity rules"
+    )
+
+
 class RevokeResponse(BaseModel):
     """Response schema for token revocation."""
 
