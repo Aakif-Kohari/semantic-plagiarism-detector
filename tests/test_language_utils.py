@@ -4,7 +4,7 @@ Issue: #3985
 """
 
 import pytest
-from language_utils import validate_language_code
+from src.utils.language_utils import validate_language_code
 
 
 class TestValidLanguageCodes:

@@ -4,7 +4,7 @@ Issue: #3973
 """
 
 import pytest
-from search_utils import find_case_insensitive, is_case_insensitive_match
+from src.utils.search_utils import find_case_insensitive, is_case_insensitive_match
 
 
 class TestCaseInsensitiveSearch:

@@ -2144,6 +2144,30 @@ class DummyMetric10(AbstractCircuitBreakerMetric):
     pass
 
 
+
+import abc
+import concurrent.futures
+import threading
+
+class ExtractionTimeoutError(TimeoutError):
+    pass
+
+class EnterpriseTimeoutCircuitBreaker:
+    def __init__(self, timeout_seconds: float = 10.0):
+        self.timeout_seconds = timeout_seconds
+
+    def execute(self, func, *args, **kwargs):
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        future = executor.submit(func, *args, **kwargs)
+        try:
+            return future.result(timeout=self.timeout_seconds)
+        except concurrent.futures.TimeoutError as e:
+            future.cancel()
+            executor.shutdown(wait=False)
+            raise ExtractionTimeoutError(f"Extraction aborted after {self.timeout_seconds}s limit.") from e
+        finally:
+            executor.shutdown(wait=False)
+
 def _extract_text_internal(
     file: PDFInput,
     filename: str,
@@ -2453,10 +2477,28 @@ def _validate_ooxml_archive(file_bytes: bytes) -> bool:
         return True
     except (zipfile.BadZipFile, Exception):
         return False
-
-
-class EnterpriseTimeoutCircuitBreaker:
-    """Disarms CI hanging."""
-
-    def __init__(self):
-        self.active = False
+def extract_text(
+    file: PDFInput,
+    filename: str,
+    *,
+    ocr_language: str = DEFAULT_OCR_LANGUAGE,
+    ocr_dpi: int = DEFAULT_OCR_DPI,
+    clean_whitespace: bool = True,
+    mask_named_entities: bool = False,
+    timeout_seconds: float = 10.0,
+) -> str:
+    breaker = EnterpriseTimeoutCircuitBreaker(timeout_seconds=timeout_seconds)
+    try:
+        raw = breaker.execute(
+            _extract_text_internal,
+            file,
+            filename,
+            ocr_language=ocr_language,
+            ocr_dpi=ocr_dpi,
+            clean_whitespace=clean_whitespace,
+            mask_named_entities=mask_named_entities
+        )
+    except ExtractionTimeoutError as e:
+        logger.error(f"[document_parser] Extraction timed out for {filename}: {e}")
+        raise TimeoutError(f"Extraction of {filename} exceeded time limit.") from e
+    return raw
