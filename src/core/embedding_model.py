@@ -45,6 +45,12 @@ from src.exceptions import ModelInitializationError
 
 logger = logging.getLogger(__name__)
 
+try:
+    import optimum.onnxruntime
+    _ONNX_AVAILABLE = True
+except ImportError:
+    _ONNX_AVAILABLE = False
+
 # ── Singleton model loader ─────────────────────────────────────────────────────
 _DEFAULT_MODEL_NAME = "paraphrase-multilingual-MiniLM-L12-v2"
 _model: SentenceTransformer | None = None
@@ -229,7 +235,12 @@ class EmbeddingModelManager:
 
         try:
             _repair_corrupted_model_cache(_resolve_cache_root(), primary)
-            loaded_model = SentenceTransformer(primary, cache_folder=cache_dir)
+            kwargs = {}
+            if _ONNX_AVAILABLE:
+                kwargs["backend"] = "onnx"
+                logger.info("[embedding_model] optimum[onnxruntime] detected. Enabling ONNX backend for 2x-3x CPU speedup.")
+            
+            loaded_model = SentenceTransformer(primary, cache_folder=cache_dir, **kwargs)
             device = _detect_device(loaded_model)
             logger.info(
                 "Initialized Embedding Model: %s | Dimensions: %d | Target Device: %s",
@@ -245,7 +256,10 @@ class EmbeddingModelManager:
                 fallback,
             )
             try:
-                loaded_model = SentenceTransformer(fallback, cache_folder=cache_dir)
+                kwargs_fallback = {}
+                if _ONNX_AVAILABLE:
+                    kwargs_fallback["backend"] = "onnx"
+                loaded_model = SentenceTransformer(fallback, cache_folder=cache_dir, **kwargs_fallback)
             except Exception as fallback_exc:
                 raise ModelInitializationError(
                     "Unable to initialize the embedding model. Both the configured "
