@@ -15,6 +15,10 @@ Recent Additions (Issue #1956):
 import logging
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
+from src.core.plagiarism_evidence import build_plagiarism_evidence
+from src.core.threshold_calibration import (compute_calibration_metrics,
+                                            find_optimal_threshold)
+
 logger = logging.getLogger(__name__)
 
 import faiss  # type: ignore
@@ -22,12 +26,11 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics.pairwise import cosine_similarity
 
-from src.core.config import (
-    DEFAULT_THRESHOLDS,
-    PLAGIARISM_THRESHOLD,
-    is_plagiarism,
-    severity_from_score,
-)
+from src.core.config import (CROSS_ENCODER_RERANKING_ENABLED,
+                             DEFAULT_CROSS_ENCODER_MODEL,
+                             DEFAULT_CROSS_ENCODER_TOP_K, DEFAULT_THRESHOLDS,
+                             PLAGIARISM_THRESHOLD, is_plagiarism,
+                             severity_from_score)
 from src.core.cross_lingual import detect_chunk_language
 
 # ── Distance / similarity conversion ──────────────────────────────────────────
@@ -227,6 +230,7 @@ def document_similarity_matrix(
         if use_hnsw:
             try:
                 import faiss
+
                 n = len(stacked)
                 d = stacked.shape[1]
                 norms = np.linalg.norm(stacked, axis=1, keepdims=True)
@@ -315,6 +319,7 @@ def document_similarity_matrix(
         if use_hnsw:
             try:
                 import faiss
+
                 d = stacked.shape[1]
                 norms = np.linalg.norm(stacked, axis=1, keepdims=True)
                 norms = np.where(norms == 0, 1.0, norms)
@@ -350,7 +355,9 @@ def document_similarity_matrix(
         # Pre-filtering with FAISS top_k or candidate_pairs
         active_candidates = candidate_pairs
         if active_candidates is None and top_k is not None and top_k > 0 and n > top_k:
-            active_candidates = find_candidate_pairs(doc_names, doc_vectors, top_k=top_k)
+            active_candidates = find_candidate_pairs(
+                doc_names, doc_vectors, top_k=top_k
+            )
 
         if active_candidates is not None:
             name_to_idx = {name: i for i, name in enumerate(doc_names)}
@@ -370,7 +377,6 @@ def document_similarity_matrix(
                 sim = cosine_similarity(stacked[start:end], stacked)
                 sim = np.clip(sim, 0.0, 1.0)
                 matrix[start:end] = np.where(sim < min_threshold, 0.0, sim)
-
 
     df = pd.DataFrame(matrix, index=doc_names, columns=doc_names)
     return _apply_min_percentile_filter(df, min_percentile)
@@ -400,7 +406,6 @@ def compute_similarity_matrix(
         pooling=pooling,
         use_hnsw=use_hnsw,
     )
-
 
 
 # ── Hybrid similarity (lexical + semantic) ─────────────────────────────────────
@@ -710,6 +715,9 @@ def flag_plagiarism(
     embeddings: dict = None,
     *,
     candidate_pairs: Optional[set[tuple[str, str]]] = None,
+    use_cross_encoder: bool = CROSS_ENCODER_RERANKING_ENABLED,
+    cross_encoder_model: str = DEFAULT_CROSS_ENCODER_MODEL,
+    cross_encoder_top_k: int = DEFAULT_CROSS_ENCODER_TOP_K,
 ) -> list[dict]:
     """Identify document pairs whose similarity reaches the threshold.
 
@@ -719,8 +727,16 @@ def flag_plagiarism(
     When *candidate_pairs* is provided (e.g. from :func:`find_candidate_pairs`),
     only those pairs are checked instead of the full upper triangle, which
     significantly reduces computation for large document sets.
+
+    When *use_cross_encoder* is True and both *chunked_docs* and *embeddings*
+    are supplied, the highest-scoring *cross_encoder_top_k* flags are
+    re-ranked with :func:`rerank_candidates_with_cross_encoder`. The original
+    FAISS/bi-encoder score is preserved as ``semantic_score`` and the refined
+    score is added as ``cross_encoder_score``; if the cross-encoder model is
+    unavailable, flags fall back to the original similarity score unchanged.
     """
     flags = []
+    _chunk_pair_texts: dict[tuple[str, str], tuple[str, str]] = {}
     doc_names = similarity_df.columns.tolist()
     name_to_idx = {name: i for i, name in enumerate(doc_names)}
 
@@ -742,29 +758,79 @@ def flag_plagiarism(
             doc_a = doc_names[i]
             doc_b = doc_names[j]
             matched_length = 0
+            chunk_pair_texts = None
 
             if chunked_docs is not None and embeddings is not None:
                 sim_matrix = cosine_similarity(embeddings[doc_a], embeddings[doc_b])
                 idx_a, idx_b = np.unravel_index(np.argmax(sim_matrix), sim_matrix.shape)
-                chunk = chunked_docs[doc_a][idx_a]
-                chunk_text = chunk.text if hasattr(chunk, "text") else chunk
+                chunk_a = chunked_docs[doc_a][idx_a]
+                chunk_b = chunked_docs[doc_b][idx_b]
+                chunk_text = chunk_a.text if hasattr(chunk_a, "text") else chunk_a
+                chunk_text_b = chunk_b.text if hasattr(chunk_b, "text") else chunk_b
                 matched_length = len(chunk_text.split())
+                chunk_pair_texts = (chunk_text, chunk_text_b)
+            flag_dict = {
+                "doc_a": doc_a,
+                "doc_b": doc_b,
+                "similarity": round(score, 4),
+                "threshold_at_time_of_flag": float(threshold),
+                "matched_length": matched_length,
+                "severity": severity_from_score(
+                    score,
+                    DEFAULT_THRESHOLDS,
+                ),
+            }
 
-            flags.append(
-                {
-                    "doc_a": doc_a,
-                    "doc_b": doc_b,
-                    "similarity": round(score, 4),
-                    "threshold_at_time_of_flag": float(threshold),
-                    "matched_length": matched_length,
-                    "severity": severity_from_score(
-                        score,
-                        DEFAULT_THRESHOLDS,
-                    ),
-                }
-            )
+            # Attach evidence if chunk data available
+            if chunk_pair_texts is not None:
+                evidence = build_plagiarism_evidence(
+                    doc_a=doc_a,
+                    doc_b=doc_b,
+                    semantic_score=score,
+                    lexical_score=None,
+                    hybrid_score=None,
+                    matched_chunks=(chunk_pair_texts[0], chunk_pair_texts[1]),
+                    threshold=threshold,
+                    severity=flag_dict["severity"],
+                    chunk_similarity_matrix=sim_matrix,
+                )
+                flag_dict["evidence"] = evidence.to_dict()
+
+            flags.append(flag_dict)
+            if chunk_pair_texts is not None:
+                _chunk_pair_texts[(doc_a, doc_b)] = chunk_pair_texts
 
     flags.sort(key=lambda item: item["similarity"], reverse=True)
+
+    if (
+        use_cross_encoder
+        and chunked_docs is not None
+        and embeddings is not None
+        and flags
+    ):
+        rerank_input = [
+            (
+                _chunk_pair_texts[(f["doc_a"], f["doc_b"])][0],
+                _chunk_pair_texts[(f["doc_a"], f["doc_b"])][1],
+                f["similarity"],
+                idx,
+            )
+            for idx, f in enumerate(flags)
+            if (f["doc_a"], f["doc_b"]) in _chunk_pair_texts
+        ]
+        reranked = rerank_candidates_with_cross_encoder(
+            rerank_input,
+            model_name=cross_encoder_model,
+            top_k=cross_encoder_top_k,
+        )
+        for _, _, cross_score, flag_idx in reranked:
+            flags[flag_idx]["semantic_score"] = flags[flag_idx]["similarity"]
+            flags[flag_idx]["cross_encoder_score"] = cross_score
+
+        flags.sort(
+            key=lambda item: item.get("cross_encoder_score", item["similarity"]),
+            reverse=True,
+        )
 
     return flags
 
@@ -839,8 +905,12 @@ def find_cross_lingual_matches(
         )
 
     # Determine which document needs translation
-    lang_a = detect_chunk_language(" ".join(chunks_a[:3])) if chunks_a else "en"  # noqa: F841
-    lang_b = detect_chunk_language(" ".join(chunks_b[:3])) if chunks_b else "en"  # noqa: F841
+    lang_a = (
+        detect_chunk_language(" ".join(chunks_a[:3])) if chunks_a else "en"
+    )  # noqa: F841
+    lang_b = (
+        detect_chunk_language(" ".join(chunks_b[:3])) if chunks_b else "en"
+    )  # noqa: F841
 
     # For this implementation, we assume emb_a and emb_b are already computed
     # on the back-translated text by the calling pipeline.
@@ -1158,7 +1228,7 @@ def detect_plagiarism_clusters(
             "suspicious_groups": [],
             "total_clusters": 0,
             "error": "networkx not installed",
-            "message": "Please install networkx: pip install networkx>=3.0"
+            "message": "Please install networkx: pip install networkx>=3.0",
         }
 
     doc_names = list(similarity_df.columns)
@@ -1212,6 +1282,7 @@ def detect_plagiarism_clusters(
         "total_clusters": len(clusters),
     }
 
+
 # ============================================================================
 # HYBRID SIMILARITY INTEGRATION - Issue #2676
 # ============================================================================
@@ -1253,11 +1324,11 @@ def flag_plagiarism_hybrid(
 ) -> list[dict]:
     """
     Flag plagiarism using hybrid similarity scores.
-    
+
     Args:
         hybrid_df: Hybrid similarity DataFrame
         threshold: Flagging threshold
-    
+
     Returns:
         List of flagged pairs
     """

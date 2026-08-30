@@ -5,7 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import html
 import json
-import refrom typing import Any, Callable, Iterable, Mapping, Sequence
+import re
+from typing import Any, Callable, Iterable, Mapping, Sequence
 
 import pandas as pd
 import streamlit as st
@@ -23,6 +24,8 @@ except ImportError:
         from fuzzywuzzy import fuzz  # type: ignore[import-untyped,reportMissingImports]
     except ImportError:
         fuzz = None
+
+
 FUZZY_THRESHOLD = 75
 MAX_SEARCH_QUERY_LENGTH = 200
 WARNING_SHORT_DOCUMENT = (
@@ -33,6 +36,7 @@ WARNING_BINARY_CHARACTERS = (
     "characters; the file may be binary or corrupted rather than text."
 )
 CONTROL_CHARACTER_RATIO_THRESHOLD = 0.01
+
 _SORT_KEYS = {
     "warn_sort_similarity": "similarity",
     "warn_sort_doc_a": "doc_a",
@@ -60,6 +64,7 @@ class DocumentWarning:
     warning_type: str = ""
     details: dict[str, Any] = field(default_factory=dict)
     occurrence_count: int = 1
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "doc_a": self.doc_a,
@@ -71,6 +76,7 @@ class DocumentWarning:
             "occurrence_count": self.occurrence_count,
             **self.details,
         }
+
 
 class WarningList:
     """Collection manager for document warnings supporting filtering by severity."""
@@ -108,6 +114,7 @@ class WarningList:
                 return
 
         self.warnings.append(dw)
+
     def filter_by_severity(self, severity: str) -> list[DocumentWarning]:
         """Filter warnings by severity level (e.g. 'High', 'Medium', 'Low')."""
         target = str(severity or "").strip().casefold()
@@ -184,7 +191,8 @@ def export_warnings_to_json(
     return json.dumps(records, indent=2)
 
 
-def _normalise_warning(    warning: Mapping[str, Any],
+def _normalise_warning(
+    warning: Mapping[str, Any],
 ) -> dict[str, Any]:
     try:
         similarity = float(warning.get("similarity", 0.0))
@@ -230,6 +238,7 @@ def _normalise_warning(    warning: Mapping[str, Any],
                     break
             except (TypeError, ValueError):
                 pass
+
     res = {
         **dict(warning),
         "doc_a": str(warning.get("doc_a", "")).strip(),

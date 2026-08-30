@@ -622,48 +622,49 @@ class AITextDetectionSystem:
     def _generate_sample_ai_texts(self) -> List[str]:
         """Generate sample AI-written texts for demonstration"""
         return [
-            "Artificial intelligence represents a paradigm shift in computational capabilities, 
-            offering unprecedented opportunities for automation and cognitive augmentation 
-            across multiple sectors of society.",
+            "Artificial intelligence represents a paradigm shift in computational "
+            "capabilities, offering unprecedented opportunities for automation and "
+            "cognitive augmentation across multiple sectors of society.",
             
-            "The integration of machine learning algorithms into healthcare systems has 
-            demonstrated substantial improvements in diagnostic accuracy and patient 
-            outcome prediction.",
+            "The integration of machine learning algorithms into healthcare systems has "
+            "demonstrated substantial improvements in diagnostic accuracy and patient "
+            "outcome prediction.",
             
-            "Sustainable energy technologies are rapidly evolving, with solar photovoltaic 
-            systems achieving record efficiency levels and wind turbines scaling to 
-            unprecedented capacities.",
+            "Sustainable energy technologies are rapidly evolving, with solar "
+            "photovoltaic systems achieving record efficiency levels and wind turbines "
+            "scaling to unprecedented capacities.",
             
-            "Climate change mitigation strategies require comprehensive policy frameworks 
-            that address both emissions reduction and adaptation measures for vulnerable 
-            communities.",
+            "Climate change mitigation strategies require comprehensive policy "
+            "frameworks that address both emissions reduction and adaptation measures "
+            "for vulnerable communities.",
             
-            "Quantum computing promises to revolutionize computational chemistry, enabling 
-            precise simulation of molecular interactions that were previously computationally 
-            intractable."
+            "Quantum computing promises to revolutionize computational chemistry, "
+            "enabling precise simulation of molecular interactions that were previously "
+            "computationally intractable."
         ]
     
     def _generate_sample_human_texts(self) -> List[str]:
         """Generate sample human-written texts for demonstration"""
         return [
-            "I think AI is really changing how we do things. It's pretty amazing what 
-            computers can do now, but I'm also a bit worried about what it means for jobs.",
+            "I think AI is really changing how we do things. It's pretty amazing what "
+            "computers can do now, but I'm also a bit worried about what it means for "
+            "jobs.",
             
-            "We've been trying to get solar panels installed at our school. It's been 
-            quite a process dealing with all the paperwork and approvals, but I think 
-            it'll be worth it in the end.",
+            "We've been trying to get solar panels installed at our school. It's been "
+            "quite a process dealing with all the paperwork and approvals, but I think "
+            "it'll be worth it in the end.",
             
-            "Healthcare is getting better with technology, but I still think there's 
-            something special about human doctors and nurses. They understand things 
-            that computers might miss.",
+            "Healthcare is getting better with technology, but I still think there's "
+            "something special about human doctors and nurses. They understand things "
+            "that computers might miss.",
             
-            "I've been trying to reduce my carbon footprint lately. It's not easy, but 
-            little things like using reusable bags and walking more actually make 
-            a difference.",
+            "I've been trying to reduce my carbon footprint lately. It's not easy, but "
+            "little things like using reusable bags and walking more actually make a "
+            "difference.",
             
-            "To be honest, I'm not sure about all this AI stuff. Some of it seems really 
-            cool, but other parts make me a bit uncomfortable. I guess we'll see how 
-            it all plays out."
+            "To be honest, I'm not sure about all this AI stuff. Some of it seems "
+            "really cool, but other parts make me a bit uncomfortable. I guess we'll "
+            "see how it all plays out."
         ]
     
     def detect_ai_text(self, text: str, user_id: str = None, 

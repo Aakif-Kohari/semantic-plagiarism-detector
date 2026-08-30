@@ -115,6 +115,21 @@ def normalize_sha256_hash(hash_str: str) -> str:
     return hash_str.lower()
 
 
+def is_windows_reserved_name(name: str) -> bool:
+    """Return True if the name or its base stem matches a Windows reserved device name.
+
+    Windows prohibits device names both standalone and with extensions (e.g.
+    'NUL', 'NUL.txt', 'CON.pdf', 'COM1.docx', 'aux.tar.gz').
+    """
+    if not name or not isinstance(name, str):
+        return False
+    normalized = name.strip(" ._-").upper()
+    if normalized in _WINDOWS_RESERVED_NAMES:
+        return True
+    base = normalized.split(".")[0]
+    return base in _WINDOWS_RESERVED_NAMES
+
+
 def sanitize_filename(
     filename: object,
     *,
@@ -156,7 +171,7 @@ def sanitize_filename(
     if not stem:
         stem = safe_fallback
 
-    if stem.upper() in _WINDOWS_RESERVED_NAMES:
+    if is_windows_reserved_name(stem):
         stem = f"_{stem}"
 
     maximum_stem_length = max_length - len(extension)
