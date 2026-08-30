@@ -1,27 +1,14 @@
 """
-faiss_index.py
---------------
-Builds and queries a FAISS index over all document chunk embeddings.
-
-Why FAISS?
-----------
-Pairwise cosine similarity is O(N²) — fine for 10 documents, painful for 1000+.
-FAISS offers multiple index types for different scale requirements:
-
-Index types available:
-  - IndexFlatIP  : Exact inner product (brute-force). O(N) per query.
-                   Best for < 10k vectors. No approximation error.
-  - IndexIVFFlat : Inverted-file index with Voronoi cells. O(N/nlist × nprobe)
-                   per query — significantly faster at scale. Requires training.
-                   Best for 10k–10M vectors.
-
-Since embeddings are L2-normalised in embedding_model.py,
-inner product == cosine similarity.
+src/core/faiss_index.py
+-----------------------
+Builds and queries FAISS vector indexes for document chunks.
+Supports incremental index updates (Issue #3913).
 """
 
 import logging
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
+from src.core.faiss_index_metadata import FAISSIndexMetadata
 from src.core.metrics import faiss_vectors_gauge
 from src.core.text_chunking import ChunkString
 
@@ -696,3 +683,156 @@ def format_faiss_memory_badge(index: Optional[Any] = None) -> str:
     if vector_count > 0:
         return f"FAISS Memory: {mb_val:.1f} MB ({vector_count:,} vectors)"
     return f"FAISS Memory: {mb_val:.1f} MB"
+
+def add_vectors_incremental(
+    index: Any,
+    embeddings: List[Any],
+    doc_name: str,
+    chunk_indices: List[int],
+    embedding_texts: List[str],
+    metadata_manager: Optional[FAISSIndexMetadata] = None,
+) -> Tuple[Any, List[int]]:
+    """
+    Incrementally add new vectors to an existing FAISS index.
+    
+    Args:
+        index: Existing FAISS index.
+        embeddings: List of embedding vectors (numpy arrays).
+        doc_name: Name of document being added.
+        chunk_indices: Chunk indices corresponding to embeddings.
+        embedding_texts: Text that was embedded (for diagnostics).
+        metadata_manager: Optional metadata manager to track mappings.
+    
+    Returns:
+        Tuple of (updated_index, vector_ids_added).
+    """
+    if not embeddings:
+        return index, []
+    
+    import numpy as np
+    
+    vectors = np.array(embeddings, dtype="float32")
+    start_id = index.ntotal
+    
+    index.add(vectors)
+    
+    vector_ids = list(range(start_id, start_id + len(embeddings)))
+    
+    if metadata_manager is not None:
+        for vid, chunk_idx, emb_text in zip(vector_ids, chunk_indices, embedding_texts):
+            metadata_manager.add_vector(vid, doc_name, chunk_idx, emb_text)
+        metadata_manager.save()
+    
+    logger.info(
+        "Added %d vectors for document '%s' (IDs %d-%d)",
+        len(vector_ids),
+        doc_name,
+        start_id,
+        start_id + len(vector_ids) - 1,
+    )
+    
+    return index, vector_ids
+
+
+def remove_vectors_incremental(
+    index: Any,
+    vector_ids: List[int],
+    metadata_manager: Optional[FAISSIndexMetadata] = None,
+) -> Any:
+    """
+    Remove vectors from FAISS index by ID.
+    
+    Note: FAISS does not support in-place deletion. This creates a new index
+    without the specified vectors. For large removals, consider full rebuild.
+    
+    Args:
+        index: FAISS index.
+        vector_ids: IDs of vectors to remove.
+        metadata_manager: Optional metadata manager to track removal.
+    
+    Returns:
+        Updated FAISS index.
+    """
+    if not vector_ids or index.ntotal == 0:
+        return index
+    
+    import numpy as np
+    
+    ids_to_remove = set(vector_ids)
+    mask = np.array(
+        [i not in ids_to_remove for i in range(index.ntotal)],
+        dtype=bool,
+    )
+    
+    if not np.any(mask):
+        logger.warning("Removing all vectors - creating empty index")
+        dim = index.d
+        new_index = faiss.IndexFlatIP(dim)
+        if metadata_manager:
+            metadata_manager.reset()
+            metadata_manager.save()
+        return new_index
+    
+    kept_indices = np.where(mask)[0]
+    vectors = index.reconstruct_n(0, index.ntotal)
+    kept_vectors = vectors[kept_indices].astype("float32")
+    
+    dim = index.d
+    new_index = faiss.IndexFlatIP(dim)
+    new_index.add(kept_vectors)
+    
+    if metadata_manager is not None:
+        old_mappings = dict(metadata_manager.metadata.vector_mappings)
+        metadata_manager.reset()
+        
+        new_id = 0
+        for old_id in kept_indices:
+            if old_id in old_mappings:
+                mapping = old_mappings[old_id]
+                metadata_manager.add_vector(
+                    new_id,
+                    mapping["doc_name"],
+                    mapping["chunk_index"],
+                    mapping["embedding_text"],
+                )
+            new_id += 1
+        
+        metadata_manager.save()
+    
+    logger.info("Removed %d vectors, new index size: %d", len(ids_to_remove), new_index.ntotal)
+    
+    return new_index
+
+
+def get_index_consistency_status(
+    index: Any,
+    metadata_manager: Optional[FAISSIndexMetadata] = None,
+) -> Dict[str, Any]:
+    """
+    Check if FAISS index and metadata are consistent.
+    
+    Args:
+        index: FAISS index.
+        metadata_manager: Metadata manager.
+    
+    Returns:
+        Dict with consistency status and any mismatches.
+    """
+    status = {
+        "index_size": index.ntotal if index else 0,
+        "metadata_size": 0,
+        "is_consistent": True,
+        "mismatches": [],
+    }
+    
+    if metadata_manager is not None and metadata_manager.metadata is not None:
+        status["metadata_size"] = metadata_manager.metadata.total_vectors
+        is_consistent = metadata_manager.validate_consistency(index.ntotal)
+        status["is_consistent"] = is_consistent
+        
+        if not is_consistent:
+            status["mismatches"].append(
+                f"Index size ({index.ntotal}) != metadata size ({status['metadata_size']})"
+            )
+    
+    return status
