@@ -193,7 +193,15 @@ def sanitize_filename(
         if not stem:
             stem = safe_fallback[:maximum_stem_length] or DEFAULT_FILENAME
 
-    return f"{stem}{extension}"
+    sanitized = f"{stem}{extension}"
+    if sanitized.startswith("."):
+        stem_fallback = fallback or DEFAULT_FILENAME
+        stem_fallback = stem_fallback.strip(" ._-")
+        if not stem_fallback:
+            stem_fallback = DEFAULT_FILENAME
+        sanitized = f"{stem_fallback}{sanitized}"
+
+    return sanitized
 
 
 def unique_filename(
