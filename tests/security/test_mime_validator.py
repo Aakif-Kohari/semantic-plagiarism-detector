@@ -496,3 +496,30 @@ def test_macro_enabled_documents_allowed_if_configured():
     assert validate_mime_type(spoofed_docx, "spoofed.docx", allow_macros=True) is True
 
 
+def test_ooxml_oversized_content_types_rejected():
+    """Verify that OOXML archives with [Content_Types].xml exceeding 2MB are rejected."""
+    # Create an oversized [Content_Types].xml (3MB) using comment padding
+    padding_size = 3 * 1024 * 1024
+    oversized_content = "<!-- " + ("A" * padding_size) + " -->\n" + CONTENT_TYPES_TEMPLATE.format(
+        part="/word/document.xml",
+        content_type=(
+            "application/vnd.openxmlformats-officedocument."
+            "wordprocessingml.document.main+xml"
+        ),
+    )
+
+    archive = build_zip(
+        {
+            "[Content_Types].xml": oversized_content,
+            "_rels/.rels": "<Relationships/>",
+            "word/document.xml": "<w:document/>",
+        }
+    )
+
+    from src.security.mime_validator import _validate_ooxml_archive
+
+    assert _validate_ooxml_archive(archive, "docx", "report.docx") is False
+    assert validate_mime_type(archive, "report.docx") is False
+
+
+
