@@ -347,3 +347,18 @@ def test_sanitize_filename_preserves_unicode():
     assert sanitize_filename(accented) == "résumé.txt"
     assert sanitize_filename(mix) == "Greek_α_Cyrillic_б_Accented_é.pdf"
 
+
+def test_sanitize_filename_prevents_hidden_dotfiles():
+    """Verify that sanitize_filename never returns a hidden dotfile starting with '.'."""
+    # Test standard dotfiles
+    assert sanitize_filename(".env") == "document.env"
+    assert sanitize_filename(".bashrc") == "document.bashrc"
+    
+    # Test fallback being a dotfile
+    assert sanitize_filename(".env", fallback=".env") == "env.env"
+
+    # Test short max_length forcing empty stem with long extension
+    # Extension has length 8 (.longext)
+    assert sanitize_filename(".longext", max_length=8) == "document.longext"
+
+
