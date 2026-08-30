@@ -835,7 +835,7 @@ def compute_char_ngram_similarity(text_a: str, text_b: str, n: int = 5) -> float
     """Compute character-level sliding n-gram Jaccard similarity between two texts.
 
     Word-level Jaccard similarity misses obfuscations where words are misspelled,
-    hyphenated, or slightly altered. Character-level n-gram overlap (shingling)
+    hyphenated, or slightly altered (e.g., OCR text typos). Character-level n-gram overlap (shingling)
     detects sub-word plagiarism by comparing sequences of `n` consecutive characters.
 
     Mathematical Formula
