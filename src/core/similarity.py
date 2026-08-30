@@ -26,11 +26,15 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics.pairwise import cosine_similarity
 
-from src.core.config import (CROSS_ENCODER_RERANKING_ENABLED,
-                             DEFAULT_CROSS_ENCODER_MODEL,
-                             DEFAULT_CROSS_ENCODER_TOP_K, DEFAULT_THRESHOLDS,
-                             PLAGIARISM_THRESHOLD, is_plagiarism,
-                             severity_from_score)
+from src.core.config import (
+    CROSS_ENCODER_RERANKING_ENABLED,
+    DEFAULT_CROSS_ENCODER_MODEL,
+    DEFAULT_CROSS_ENCODER_TOP_K,
+    DEFAULT_THRESHOLDS,
+    PLAGIARISM_THRESHOLD,
+    is_plagiarism,
+    severity_from_score,
+)
 from src.core.cross_lingual import detect_chunk_language
 
 # ── Distance / similarity conversion ──────────────────────────────────────────
