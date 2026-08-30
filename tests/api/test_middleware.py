@@ -295,6 +295,38 @@ class TestVerifyBearerToken:
 
         asyncio.run(_test())
 
+    def test_verify_bearer_token_rejects_revoked_token(self):
+        """Verify that verify_bearer_token raises HTTP 401 when the token is revoked."""
+        import asyncio
+        from unittest.mock import MagicMock
+
+        from fastapi import HTTPException
+        from fastapi.security import HTTPAuthorizationCredentials
+
+        from src.api.middleware import verify_bearer_token
+
+        async def _test():
+            request = MagicMock()
+            request.method = "GET"
+            request.url.path = "/api/v1/protected"
+            creds = HTTPAuthorizationCredentials(
+                scheme="Bearer", credentials="revoked_token_123"
+            )
+
+            with patch("src.db.auth.is_token_revoked", return_value=True) as mock_revoked_check:
+                with patch(
+                    "src.security.jwt_utils.verify_access_token",
+                    return_value={"sub": "user"},
+                ):
+                    with pytest.raises(HTTPException) as exc_info:
+                        await verify_bearer_token(request, creds)
+                    
+                    assert exc_info.value.status_code == 401
+                    assert exc_info.value.detail == "Token has been revoked."
+                    mock_revoked_check.assert_called_once_with("revoked_token_123")
+
+        asyncio.run(_test())
+
 
 class TestIsPublicPath:
     """Test public API path matching."""
