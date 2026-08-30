@@ -410,3 +410,30 @@ def test_remove_document_from_index_search_excludes_deleted(two_doc_data):
                 f"search returned a ChunkRecord from deleted document 'doc_a': {record!r}"
             )
 
+# ── FAISS k-overflow regression test (#4034) ──────────────────────────────────
+
+
+def test_search_similar_chunks_k_larger_than_index_size():
+    """Regression: search with top_k > ntotal must not return -1-padded results.
+
+    Issue #4034: When top_k exceeds the number of vectors in the index, FAISS
+    pads its raw output with -1 sentinel indices.  search_similar_chunks() must
+    filter those sentinels and return only the real matches — no more, no fewer.
+    """
+    np.random.seed(0)
+    embeddings = {"doc_a": _unit_vecs(3)}
+    chunked = {"doc_a": ["chunk 0", "chunk 1", "chunk 2"]}
+
+    index, registry = build_index(embeddings, chunked, index_type="flat")
+    assert index.ntotal == 3  # sanity-check: exactly 3 vectors in the index
+
+    query = _unit_vecs(1)[0]
+    results = search_similar_chunks(query, index, registry, top_k=10)
+
+    # Must return exactly 3 matches — the full index — not 10 or fewer
+    assert len(results) == 3, f"Expected 3 results (index size), got {len(results)}"
+    # Every result must be a valid (ChunkRecord, float) pair — no -1 artifacts
+    for record, score in results:
+        assert isinstance(record, ChunkRecord)
+        assert record.doc_name == "doc_a"
+        assert isinstance(score, float)

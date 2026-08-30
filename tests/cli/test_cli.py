@@ -137,7 +137,6 @@ def test_cli_scan_empty_folder(tmp_path, capsys):
     assert len(report["matches"]) == 0
 
 
-
 @patch(
     "src.core.embedding_model.get_embedding_model_info",
     return_value=("all-MiniLM-L6-v2", 384),
@@ -197,7 +196,6 @@ def test_cli_prewarm_no_documents(mock_docs, capsys):
     assert "No documents found. Exiting.\n" in captured.out
 
 
-
 @patch(
     "src.core.embedding_model.get_embedding_model_info",
     return_value=("all-MiniLM-L6-v2", 384),
@@ -242,7 +240,6 @@ def test_cli_scan_default_threshold(temp_assignments_dir):
             )
 
 
-
 def test_cli_main_invalid_command():
     """Test main function with an invalid subcommand/command."""
     with patch("sys.argv", ["cli.py", "invalid_cmd", "./assignments"]):
@@ -273,6 +270,21 @@ def test_cli_main_scan_format(
         captured = capsys.readouterr()
         report = json.loads(captured.out)
         assert report["documents_processed"] == 2
+
+
+def test_cli_main_invalid_output_format(temp_assignments_dir, capsys):
+    """Test main function with an invalid output format argument (xml)."""
+    with patch(
+        "sys.argv",
+        ["cli.py", "scan", str(temp_assignments_dir), "--output-format", "xml"],
+    ):
+        with pytest.raises(SystemExit) as excinfo:
+            main()
+        # argparse exits with code 2 for invalid choices
+        assert excinfo.value.code == 2
+        
+    captured = capsys.readouterr()
+    assert "invalid choice: 'xml'" in captured.err
 
 
 def _normalized_sql(sql: str | None) -> str:
@@ -580,6 +592,7 @@ def test_cli_main_verify_schema_success(tmp_path, capsys):
     captured = capsys.readouterr()
     assert "PASSED" in captured.out
 
+
 @patch(
     "src.core.embedding_model.get_embedding_model_info",
     return_value=("all-MiniLM-L6-v2", 384),
@@ -706,3 +719,4 @@ class TestNaturalSorting:
         """Verify behaviour matches lexicographical order for non-numeric names."""
         files = ["readme.md", "report.pdf", "notes.txt"]
         assert sorted(files, key=_natural_sort_key) == sorted(files)
+        
