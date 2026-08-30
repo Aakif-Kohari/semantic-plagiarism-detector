@@ -298,6 +298,59 @@ THRESHOLD_CONFIG_PATH: Final[str] = os.path.join(
     "thresholds.json",
 )
 
+# Calibrated thresholds storage (Issue #3912)
+CALIBRATED_THRESHOLDS_PATH: Final[str] = os.path.join(
+    os.path.dirname(__file__),
+    "..",
+    "..",
+    "config",
+    "calibrated_thresholds.json",
+)
+
+
+def load_calibrated_thresholds(
+    calibration_id: Optional[str] = None,
+) -> Optional[SimilarityThresholds]:
+    """Load calibrated thresholds from disk by calibration_id, or return None.
+    
+    Args:
+        calibration_id: Specific calibration version to load. If None, loads the latest.
+    
+    Returns:
+        SimilarityThresholds instance if calibration file exists, else None.
+    """
+    if not os.path.exists(CALIBRATED_THRESHOLDS_PATH):
+        return None
+    
+    try:
+        with open(CALIBRATED_THRESHOLDS_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        
+        if not isinstance(data, dict):
+            return None
+        
+        # If calibration_id specified, look for that version
+        if calibration_id and calibration_id in data.get("calibrations", {}):
+            cal_data = data["calibrations"][calibration_id]
+            return SimilarityThresholds(
+                plagiarism=float(cal_data.get("plagiarism", DEFAULT_THRESHOLDS.plagiarism)),
+                medium=float(cal_data.get("medium", DEFAULT_THRESHOLDS.medium)),
+                high=float(cal_data.get("high", DEFAULT_THRESHOLDS.high)),
+            )
+        
+        # Otherwise, load latest calibration
+        if data.get("latest_calibration_id"):
+            cal_data = data["calibrations"][data["latest_calibration_id"]]
+            return SimilarityThresholds(
+                plagiarism=float(cal_data.get("plagiarism", DEFAULT_THRESHOLDS.plagiarism)),
+                medium=float(cal_data.get("medium", DEFAULT_THRESHOLDS.medium)),
+                high=float(cal_data.get("high", DEFAULT_THRESHOLDS.high)),
+            )
+        
+        return None
+    except Exception as e:
+        logger.warning("Failed to load calibrated thresholds: %s", e)
+        return None
 
 def load_threshold_config(
     config_path: Optional[str] = None,
