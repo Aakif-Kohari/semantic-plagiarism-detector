@@ -340,7 +340,15 @@ def n_gram_overlap(
     -------
     float
         Overlap score bounded between 0.0 and 1.0.
+    
+    Raises
+    ------
+    ValueError
+        If n is not between 1 and 10 inclusive.
     """
+    if not (1 <= n <= 10):
+        raise ValueError(f"n must be between 1 and 10, got {n}")
+
     ngrams_a: set[tuple[str, ...]] = get_ngrams(text_a, n=n, stopwords=stopwords)
     ngrams_b: set[tuple[str, ...]] = get_ngrams(text_b, n=n, stopwords=stopwords)
 
