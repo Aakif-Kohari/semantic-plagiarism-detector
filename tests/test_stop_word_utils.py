@@ -4,7 +4,7 @@ Issue: #4017
 """
 
 import pytest
-from stop_word_utils import filter_stop_words, get_stop_words
+from src.utils.stop_word_utils import filter_stop_words, get_stop_words
 
 
 class TestDefaultStopWords:

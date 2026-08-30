@@ -33,7 +33,7 @@ def test_2fa_setup_endpoint_returns_qr_code_data_uri():
     """Verify POST /api/v1/auth/2fa/setup returns secret, otpauth URL, and base64 PNG QR code data URI."""
     response = client.post(
         "/api/v1/auth/2fa/setup",
-        json={"username": "admin_test_4040", "issuer": "TestIssuer"},
+        json={"username": "admin_test_4040_cb4dffb6", "issuer": "TestIssuer"},
     )
     assert response.status_code == 200
     data = response.json()
@@ -44,12 +44,12 @@ def test_2fa_setup_endpoint_returns_qr_code_data_uri():
     assert "message" in data
 
     assert data["otpauth_url"].startswith("otpauth://totp/")
-    assert "admin_test_4040" in data["otpauth_url"]
+    assert "admin_test_4040_cb4dffb6" in data["otpauth_url"]
     assert "TestIssuer" in data["otpauth_url"]
     assert data["qr_code_data_uri"].startswith("data:image/png;base64,")
 
     # Verify user 2FA status in DB is enabled
-    enabled, secret = get_2fa_status("admin_test_4040")
+    enabled, secret = get_2fa_status("admin_test_4040_cb4dffb6")
     assert enabled is True
     assert secret == data["secret"]
 
@@ -58,7 +58,7 @@ def test_2fa_setup_endpoint_legacy_path():
     """Verify POST /auth/2fa/setup endpoint path also works."""
     response = client.post(
         "/auth/2fa/setup",
-        json={"username": "admin_legacy_4040"},
+        json={"username": "admin_legacy_4040_cb4dffb6"},
     )
     assert response.status_code == 200
     data = response.json()

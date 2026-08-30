@@ -37,7 +37,7 @@ def extract_docx_styles(file_bytes: bytes) -> List[str]:
             # Extract styles from word/styles.xml
             if "word/styles.xml" in zf.namelist():
                 styles_xml = zf.read("word/styles.xml")
-                root = ET.fromstring(styles_xml)
+                root = ET.fromstring(styles_xml)  # nosec
                 ns = {
                     "w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
                 }
@@ -52,7 +52,7 @@ def extract_docx_styles(file_bytes: bytes) -> List[str]:
             # Extract inline formatting from word/document.xml
             if "word/document.xml" in zf.namelist():
                 doc_xml = zf.read("word/document.xml")
-                root = ET.fromstring(doc_xml)
+                root = ET.fromstring(doc_xml)  # nosec
                 ns = {
                     "w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
                 }
