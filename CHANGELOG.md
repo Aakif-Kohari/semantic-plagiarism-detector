@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Added comprehensive unit tests for executable magic byte detection (`MZ` PE headers and `#!/bin/sh` shebangs) in upload security validation (`tests/security/test_mime_validator.py`, `tests/security/test_executable_magic_detection_issue_3720.py`).
+- Added `search_index()` function with score threshold filtering support in `src/core/faiss_index.py` and comprehensive test coverage (`tests/core/test_faiss_threshold_filtering_issue_4036.py`).
 - Added `docker-compose.override.yml` mounting `./src` and `./app` into container for live hot-reloading during local development (`docker-compose.override.yml`).
 - Automated fault tolerance test for mid-session Redis connection drop and graceful in-memory failover (`tests/core/test_fault_tolerance.py`, `tests/utils/test_redis_fallback_failover.py`).
 - Added `--recursive` support to the CLI scan command for scanning documents in nested subdirectories.
@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Split the two `from` imports that had been welded onto one line in `src/core/processing.py`, un-interleaved `PipelineResult`'s docstring from `is_incremental_update()` and moved the method below the annotated fields where a `NamedTuple` requires it, and separated `run_full_pipeline`'s return annotation from its docstring; the module did not parse, so neither the synchronous upload path nor the background worker could import the pipeline (`src/core/processing.py`).
+- Defined the module-level `logger` that `translate_text_batch()` referenced but never imported; the batch error handler raised `NameError` instead of logging, which left the per-text fallback loop unreachable (`src/core/translator.py`).
+- Handled empty file validation cleanly in `is_executable_upload` by explicitly returning `False` on empty byte payloads (`src/security/mime_validator.py`).
 - Handled Windows reserved device names with extensions (e.g. `NUL.txt`, `CON.pdf`, `COM1.docx`) in `sanitize_filename` by checking base stems against `_WINDOWS_RESERVED_NAMES` (`src/utils/filename.py`).
 - Mobile viewports (<768px): tighter main padding and shorter plotly chart heights (`app/css_constants.py`).
 - Add `role="button"` and `aria-label` on custom HTML tag chips and notification badges (`app/components/`).
