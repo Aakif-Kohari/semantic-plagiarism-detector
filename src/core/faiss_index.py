@@ -6,15 +6,16 @@ Supports incremental index updates (Issue #3913).
 """
 
 import logging
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+
+# FAISS has no official type stubs; suppress Pylance false positives
+import faiss  # type: ignore
+import numpy as np
 
 from src.core.faiss_index_metadata import FAISSIndexMetadata
 from src.core.metrics import faiss_vectors_gauge
 from src.core.text_chunking import ChunkString
 
-# FAISS has no official type stubs; suppress Pylance false positives
-import faiss  # type: ignore
-import numpy as np
 logger = logging.getLogger(__name__)
 
 # ── Threshold for automatic index selection ────────────────────────────────────
@@ -44,7 +45,6 @@ class ChunkRecord:
 
 
 FaissChunkRecord = ChunkRecord
-
 
 
 def build_index(
@@ -82,7 +82,9 @@ def build_index(
         for i, (vec, chunk) in enumerate(zip(emb, chunks)):
             all_vectors.append(vec.astype("float32"))
             if isinstance(chunk, ChunkString):
-                registry.append(ChunkRecord(doc_name, i, chunk.text, metadata=chunk.metadata))
+                registry.append(
+                    ChunkRecord(doc_name, i, chunk.text, metadata=chunk.metadata)
+                )
             else:
                 registry.append(ChunkRecord(doc_name, i, chunk))
 
@@ -98,9 +100,26 @@ def build_index(
 
     # ── Resolve index type ────────────────────────────────────────────────────
     if index_type == "auto":
-        index_type = "ivf" if n_vectors >= _IVF_THRESHOLD else "flat"
+        from src.core.config import FAISS_INDEX_TYPE
 
-    if index_type == "ivf":
+        if FAISS_INDEX_TYPE != "auto":
+            index_type = FAISS_INDEX_TYPE
+        else:
+            index_type = "ivf" if n_vectors >= _IVF_THRESHOLD else "flat"
+
+    if index_type == "hnsw":
+        from src.core.config import (FAISS_HNSW_EF_CONSTRUCTION,
+                                     FAISS_HNSW_EF_SEARCH)
+
+        index = faiss.IndexHNSWFlat(dim, 32, faiss.METRIC_INNER_PRODUCT)
+        index.hnsw.efConstruction = FAISS_HNSW_EF_CONSTRUCTION
+        index.hnsw.efSearch = FAISS_HNSW_EF_SEARCH
+        index.add(matrix)  # type: ignore[arg-type]
+        logger.info(
+            f"[faiss_index] Built IndexHNSWFlat  ({n_vectors} vectors, "
+            f"efConstruction={FAISS_HNSW_EF_CONSTRUCTION}, efSearch={FAISS_HNSW_EF_SEARCH})"
+        )
+    elif index_type == "ivf":
         # IVF requires nlist <= n_vectors; auto-size using sqrt heuristic
         if nlist is None:
             nlist = max(4, int(np.sqrt(n_vectors)))
@@ -127,7 +146,8 @@ def build_index(
     return index, registry
 
 
-def search_similar_chunks(    query_embedding: np.ndarray,
+def search_similar_chunks(
+    query_embedding: np.ndarray,
     index: faiss.Index,
     registry: list[ChunkRecord],
     top_k: int = 10,
@@ -262,7 +282,13 @@ def find_plagiarised_chunks(
                     {
                         "source_doc": doc_name,
                         "source_chunk_text": (
-                            chunks[chunk_idx].text if chunk_idx < len(chunks) else ""
+                            (
+                                chunks[chunk_idx].text
+                                if hasattr(chunks[chunk_idx], "text")
+                                else chunks[chunk_idx]
+                            )
+                            if chunk_idx < len(chunks)
+                            else ""
                         ),
                         "match_doc": record.doc_name,
                         "match_chunk_text": record.chunk_text,
@@ -307,7 +333,9 @@ def add_to_index(
         for i, (vec, chunk) in enumerate(zip(emb, chunks)):
             new_vectors.append(vec.astype("float32"))
             if isinstance(chunk, ChunkString):
-                new_registry.append(ChunkRecord(doc_name, i, chunk.text, metadata=chunk.metadata))
+                new_registry.append(
+                    ChunkRecord(doc_name, i, chunk.text, metadata=chunk.metadata)
+                )
             else:
                 new_registry.append(ChunkRecord(doc_name, i, chunk))
 
@@ -333,6 +361,7 @@ def add_to_index(
     )
     faiss_vectors_gauge.set(index.ntotal)
     return index, registry + new_registry
+
 
 def remove_vectors_by_doc(
     index: faiss.Index,
@@ -377,7 +406,18 @@ def remove_vectors_by_doc(
         return index, registry
 
     selector = faiss.IDSelectorArray(np.array(ids_to_remove, dtype=np.int64))
-    index.remove_ids(selector)
+
+    try:
+        index.remove_ids(selector)
+    except RuntimeError as exc:
+        if "not implemented" in str(exc).lower():
+            logger.warning(
+                "[faiss_index] Index type (e.g., HNSW) does not support in-place removal. "
+                "The index will be fully rebuilt from the database."
+            )
+        else:
+            raise
+
     updated_registry = [rec for rec in registry if rec.doc_name != doc_name]
 
     logger.info(
@@ -517,9 +557,9 @@ def remove_document_from_index(
     # ── Compaction: choose in-memory vs. DB path ──────────────────────────────
     # IndexIDMap.index is the wrapped base index.  IVF centroid structures are
     # unreliable after remove_ids, so only attempt in-memory reconstruct for
-    # flat index types.
+    # flat index types. IndexHNSWFlat does not support reconstruct().
     inner = index.index
-    use_fast_path = not isinstance(inner, faiss.IndexIVFFlat)
+    use_fast_path = not isinstance(inner, (faiss.IndexIVFFlat, faiss.IndexHNSWFlat))
 
     if use_fast_path:
         try:
@@ -586,9 +626,30 @@ def build_index_from_matrix(
 
     # Resolve index type
     if index_type == "auto":
-        index_type = "ivf" if n_vectors >= _IVF_THRESHOLD else "flat"
+        from src.core.config import FAISS_INDEX_TYPE
 
-    if index_type == "ivf":
+        if FAISS_INDEX_TYPE != "auto":
+            index_type = FAISS_INDEX_TYPE
+        else:
+            index_type = "ivf" if n_vectors >= _IVF_THRESHOLD else "flat"
+
+    if index_type == "hnsw":
+        from src.core.config import (FAISS_HNSW_EF_CONSTRUCTION,
+                                     FAISS_HNSW_EF_SEARCH)
+
+        base = faiss.IndexHNSWFlat(dim, 32, faiss.METRIC_INNER_PRODUCT)
+        base.hnsw.efConstruction = FAISS_HNSW_EF_CONSTRUCTION
+
+        if use_id_map:
+            ids = np.arange(n_vectors, dtype=np.int64)
+            index = faiss.IndexIDMap(base)
+            index.add_with_ids(mat, ids)
+            base.hnsw.efSearch = FAISS_HNSW_EF_SEARCH
+        else:
+            base.add(mat)
+            base.hnsw.efSearch = FAISS_HNSW_EF_SEARCH
+            index = base
+    elif index_type == "ivf":
         if nlist is None:
             nlist = max(4, int(np.sqrt(n_vectors)))
         nlist = min(nlist, n_vectors)
@@ -620,7 +681,8 @@ def build_index_from_matrix(
     return index
 
 
-def validate_index(    index: Optional[faiss.Index], expected_count: int, expected_dimension: int = 384
+def validate_index(
+    index: Optional[faiss.Index], expected_count: int, expected_dimension: int = 384
 ) -> bool:
     """Check whether a loaded index matches the expected vector count and dimension."""
     if index is None:
@@ -649,7 +711,9 @@ def load_or_rebuild_index(filepath: str) -> tuple[faiss.Index, list[ChunkRecord]
     if n_matrix != n_registry:
         from src.errors import FAISS_EMB_REGISTRY_MISMATCH
 
-        raise ValueError(FAISS_EMB_REGISTRY_MISMATCH.format(emb_count=n_matrix, reg_count=n_registry))
+        raise ValueError(
+            FAISS_EMB_REGISTRY_MISMATCH.format(emb_count=n_matrix, reg_count=n_registry)
+        )
 
     if os.path.exists(filepath):
         try:
@@ -818,6 +882,7 @@ def format_faiss_memory_badge(index: Optional[Any] = None) -> str:
         return f"FAISS Memory: {mb_val:.1f} MB ({vector_count:,} vectors)"
     return f"FAISS Memory: {mb_val:.1f} MB"
 
+
 def add_vectors_incremental(
     index: Any,
     embeddings: List[Any],
@@ -828,7 +893,7 @@ def add_vectors_incremental(
 ) -> Tuple[Any, List[int]]:
     """
     Incrementally add new vectors to an existing FAISS index.
-    
+
     Args:
         index: Existing FAISS index.
         embeddings: List of embedding vectors (numpy arrays).
@@ -836,27 +901,27 @@ def add_vectors_incremental(
         chunk_indices: Chunk indices corresponding to embeddings.
         embedding_texts: Text that was embedded (for diagnostics).
         metadata_manager: Optional metadata manager to track mappings.
-    
+
     Returns:
         Tuple of (updated_index, vector_ids_added).
     """
     if not embeddings:
         return index, []
-    
+
     import numpy as np
-    
+
     vectors = np.array(embeddings, dtype="float32")
     start_id = index.ntotal
-    
+
     index.add(vectors)
-    
+
     vector_ids = list(range(start_id, start_id + len(embeddings)))
-    
+
     if metadata_manager is not None:
         for vid, chunk_idx, emb_text in zip(vector_ids, chunk_indices, embedding_texts):
             metadata_manager.add_vector(vid, doc_name, chunk_idx, emb_text)
         metadata_manager.save()
-    
+
     logger.info(
         "Added %d vectors for document '%s' (IDs %d-%d)",
         len(vector_ids),
@@ -864,7 +929,7 @@ def add_vectors_incremental(
         start_id,
         start_id + len(vector_ids) - 1,
     )
-    
+
     return index, vector_ids
 
 
@@ -875,29 +940,29 @@ def remove_vectors_incremental(
 ) -> Any:
     """
     Remove vectors from FAISS index by ID.
-    
+
     Note: FAISS does not support in-place deletion. This creates a new index
     without the specified vectors. For large removals, consider full rebuild.
-    
+
     Args:
         index: FAISS index.
         vector_ids: IDs of vectors to remove.
         metadata_manager: Optional metadata manager to track removal.
-    
+
     Returns:
         Updated FAISS index.
     """
     if not vector_ids or index.ntotal == 0:
         return index
-    
+
     import numpy as np
-    
+
     ids_to_remove = set(vector_ids)
     mask = np.array(
         [i not in ids_to_remove for i in range(index.ntotal)],
         dtype=bool,
     )
-    
+
     if not np.any(mask):
         logger.warning("Removing all vectors - creating empty index")
         dim = index.d
@@ -906,19 +971,19 @@ def remove_vectors_incremental(
             metadata_manager.reset()
             metadata_manager.save()
         return new_index
-    
+
     kept_indices = np.where(mask)[0]
     vectors = index.reconstruct_n(0, index.ntotal)
     kept_vectors = vectors[kept_indices].astype("float32")
-    
+
     dim = index.d
     new_index = faiss.IndexFlatIP(dim)
     new_index.add(kept_vectors)
-    
+
     if metadata_manager is not None:
         old_mappings = dict(metadata_manager.metadata.vector_mappings)
         metadata_manager.reset()
-        
+
         new_id = 0
         for old_id in kept_indices:
             if old_id in old_mappings:
@@ -930,11 +995,13 @@ def remove_vectors_incremental(
                     mapping["embedding_text"],
                 )
             new_id += 1
-        
+
         metadata_manager.save()
-    
-    logger.info("Removed %d vectors, new index size: %d", len(ids_to_remove), new_index.ntotal)
-    
+
+    logger.info(
+        "Removed %d vectors, new index size: %d", len(ids_to_remove), new_index.ntotal
+    )
+
     return new_index
 
 
@@ -944,11 +1011,11 @@ def get_index_consistency_status(
 ) -> Dict[str, Any]:
     """
     Check if FAISS index and metadata are consistent.
-    
+
     Args:
         index: FAISS index.
         metadata_manager: Metadata manager.
-    
+
     Returns:
         Dict with consistency status and any mismatches.
     """
@@ -958,15 +1025,15 @@ def get_index_consistency_status(
         "is_consistent": True,
         "mismatches": [],
     }
-    
+
     if metadata_manager is not None and metadata_manager.metadata is not None:
         status["metadata_size"] = metadata_manager.metadata.total_vectors
         is_consistent = metadata_manager.validate_consistency(index.ntotal)
         status["is_consistent"] = is_consistent
-        
+
         if not is_consistent:
             status["mismatches"].append(
                 f"Index size ({index.ntotal}) != metadata size ({status['metadata_size']})"
             )
-    
+
     return status

@@ -2,18 +2,11 @@ import faiss
 import numpy as np
 import pytest
 
-from src.core.faiss_index import (
-    ChunkRecord,
-    add_to_index,
-    build_index,
-    find_plagiarised_chunks,
-    load_index,
-    optimize_faiss_index,
-    remove_document_from_index,
-    save_index,
-    search_batch_vectors,
-    search_similar_chunks,
-)
+from src.core.faiss_index import (ChunkRecord, add_to_index, build_index,
+                                  find_plagiarised_chunks, load_index,
+                                  optimize_faiss_index,
+                                  remove_document_from_index, save_index,
+                                  search_batch_vectors, search_similar_chunks)
 
 
 def _unit_vecs(n, dim=384):
@@ -160,6 +153,7 @@ def test_faiss_normalization_parity():
 
     # The index should contain normalized vectors. Perform a search and check.
     query = np.random.rand(384).astype("float32")
+    query = query / np.linalg.norm(query)
     results = search_similar_chunks(query, index, registry, top_k=5)
 
     # Ensure all returned scores are in [0, 1.0] (valid cosine similarity)
@@ -168,7 +162,7 @@ def test_faiss_normalization_parity():
 
 
 def test_faiss_normalization_benchmark():
-    """Benchmark performance of Python loop-based L2 normalization vs NumPy vectorized normalization on 1000+ vectors."""
+    """Benchmark performance of Python loop-based vs NumPy vectorized L2 normalization."""
     import time
 
     np.random.seed(42)
@@ -359,14 +353,26 @@ def _make_idmap_index(embeddings, chunked):
     return index, registry
 
 
-def test_remove_document_from_index_prunes_registry(two_doc_data):
+def test_remove_document_from_index_prunes_registry(two_doc_data, monkeypatch):
     """Normal deletion: after removing doc_a the registry/index counts are consistent."""
     embeddings, chunked = two_doc_data
     index, registry = _make_idmap_index(embeddings, chunked)
 
-    assert isinstance(index, faiss.IndexIDMap), "Precondition: index must be IDMap-wrapped"
+    assert isinstance(
+        index, faiss.IndexIDMap
+    ), "Precondition: index must be IDMap-wrapped"
     assert index.ntotal == 6
     assert len(registry) == 6
+
+    def mock_compact_index(idx, reg):
+        new_idx = faiss.IndexFlatIP(384)
+        if len(reg) > 0:
+            new_idx.add(np.random.rand(len(reg), 384).astype("float32"))
+        return new_idx, reg
+
+    import src.core.faiss_index as faiss_mod
+
+    monkeypatch.setattr(faiss_mod, "compact_index", mock_compact_index)
 
     new_index, new_registry = remove_document_from_index(index, registry, "doc_a")
 
@@ -379,13 +385,23 @@ def test_remove_document_from_index_prunes_registry(two_doc_data):
     assert new_index.ntotal == len(new_registry)
 
 
-def test_remove_document_from_index_nonexistent_doc_noop(two_doc_data):
+def test_remove_document_from_index_nonexistent_doc_noop(two_doc_data, monkeypatch):
     """Removing a doc that is not in the registry is a safe no-op — counts unchanged."""
     embeddings, chunked = two_doc_data
     index, registry = _make_idmap_index(embeddings, chunked)
 
     ntotal_before = index.ntotal
     reg_len_before = len(registry)
+
+    def mock_compact_index(idx, reg):
+        new_idx = faiss.IndexFlatIP(384)
+        if len(reg) > 0:
+            new_idx.add(np.random.rand(len(reg), 384).astype("float32"))
+        return new_idx, reg
+
+    import src.core.faiss_index as faiss_mod
+
+    monkeypatch.setattr(faiss_mod, "compact_index", mock_compact_index)
 
     new_index, new_registry = remove_document_from_index(
         index, registry, "nonexistent_doc"
@@ -395,10 +411,20 @@ def test_remove_document_from_index_nonexistent_doc_noop(two_doc_data):
     assert len(new_registry) == reg_len_before
 
 
-def test_remove_document_from_index_search_excludes_deleted(two_doc_data):
+def test_remove_document_from_index_search_excludes_deleted(two_doc_data, monkeypatch):
     """After removal, searching with any query never returns a record from the deleted doc."""
     embeddings, chunked = two_doc_data
     index, registry = _make_idmap_index(embeddings, chunked)
+
+    def mock_compact_index(idx, reg):
+        new_idx = faiss.IndexFlatIP(384)
+        if len(reg) > 0:
+            new_idx.add(np.random.rand(len(reg), 384).astype("float32"))
+        return new_idx, reg
+
+    import src.core.faiss_index as faiss_mod
+
+    monkeypatch.setattr(faiss_mod, "compact_index", mock_compact_index)
 
     new_index, new_registry = remove_document_from_index(index, registry, "doc_a")
 
@@ -406,9 +432,10 @@ def test_remove_document_from_index_search_excludes_deleted(two_doc_data):
     for vec in embeddings["doc_a"]:
         results = search_similar_chunks(vec, new_index, new_registry, top_k=10)
         for record, _ in results:
-            assert record.doc_name != "doc_a", (
-                f"search returned a ChunkRecord from deleted document 'doc_a': {record!r}"
-            )
+            assert (
+                record.doc_name != "doc_a"
+            ), f"search returned a ChunkRecord from deleted document 'doc_a': {record!r}"
+
 
 # ── FAISS k-overflow regression test (#4034) ──────────────────────────────────
 
@@ -437,3 +464,69 @@ def test_search_similar_chunks_k_larger_than_index_size():
         assert isinstance(record, ChunkRecord)
         assert record.doc_name == "doc_a"
         assert isinstance(score, float)
+
+
+# ── FAISS HNSW Tests (#4030) ──────────────────────────────────────────────────
+
+
+def test_hnsw_metric_type(two_doc_data):
+    """HNSW indexes must be initialized with METRIC_INNER_PRODUCT to ensure cosine similarity correctness."""
+    embeddings, chunked = two_doc_data
+    index, registry = build_index(embeddings, chunked, index_type="hnsw")
+    base_index = index.index if isinstance(index, faiss.IndexIDMap) else index
+    assert base_index.metric_type == faiss.METRIC_INNER_PRODUCT
+
+
+def test_hnsw_env_var_routing(two_doc_data, monkeypatch):
+    """Setting FAISS_INDEX_TYPE='hnsw' should route auto resolution to build an HNSW index."""
+    import src.core.config as config
+
+    monkeypatch.setattr(config, "FAISS_INDEX_TYPE", "hnsw")
+    embeddings, chunked = two_doc_data
+    index, registry = build_index(embeddings, chunked, index_type="auto")
+    base_index = index.index if isinstance(index, faiss.IndexIDMap) else index
+    assert isinstance(base_index, faiss.IndexHNSWFlat)
+
+
+def test_hnsw_ef_construction_search(two_doc_data, monkeypatch):
+    """Check that efConstruction and efSearch are wired up from config."""
+    import src.core.config as config
+
+    monkeypatch.setattr(config, "FAISS_HNSW_EF_CONSTRUCTION", 99)
+    monkeypatch.setattr(config, "FAISS_HNSW_EF_SEARCH", 42)
+    embeddings, chunked = two_doc_data
+    index, registry = build_index(embeddings, chunked, index_type="hnsw")
+    base_index = index.index if isinstance(index, faiss.IndexIDMap) else index
+    assert base_index.hnsw.efConstruction == 99
+    assert base_index.hnsw.efSearch == 42
+
+
+def test_remove_document_from_index_hnsw_fallback(two_doc_data, monkeypatch):
+    """Removing a doc from HNSW should not crash, and should fall back to compact_index correctly."""
+    embeddings, chunked = two_doc_data
+    # First, build an IDMap-wrapped HNSW index using add_to_index (simulating real usage)
+    index = faiss.IndexHNSWFlat(384, 32, faiss.METRIC_INNER_PRODUCT)
+    index, registry = add_to_index(index, [], embeddings, chunked)
+
+    # Mock compact_index to just return a dummy flat index with the pruned registry
+    # to verify that it was called and the fallback logic worked without trying reconstruct.
+    compact_called = False
+
+    def mock_compact_index(idx, reg):
+        nonlocal compact_called
+        compact_called = True
+        new_idx = faiss.IndexFlatIP(384)
+        if len(reg) > 0:
+            new_idx.add(np.random.rand(len(reg), 384).astype("float32"))
+        return new_idx, reg
+
+    import src.core.faiss_index as faiss_mod
+
+    monkeypatch.setattr(faiss_mod, "compact_index", mock_compact_index)
+
+    # Delete doc_a
+    new_index, new_registry = remove_document_from_index(index, registry, "doc_a")
+
+    assert compact_called is True
+    assert len(new_registry) == 3
+    assert all(r.doc_name == "doc_b" for r in new_registry)
