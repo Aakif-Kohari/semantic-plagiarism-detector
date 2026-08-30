@@ -436,9 +436,22 @@ def release_large_batch_memory(batch_size: int) -> None:
         torch.cuda.empty_cache()
 
 
+_DEFAULT_BATCH_SIZE = 32
+
+
+def _get_embedding_batch_size() -> int:
+    """Return the configured batch size for chunk embeddings from environment."""
+    raw = os.getenv("EMBEDDING_BATCH_SIZE", str(_DEFAULT_BATCH_SIZE))
+    try:
+        val = int(raw)
+        return val if val > 0 else _DEFAULT_BATCH_SIZE
+    except (ValueError, TypeError):
+        return _DEFAULT_BATCH_SIZE
+
+
 def embed_chunks(
     chunks: list[str],
-    batch_size: int = 32,
+    batch_size: int | None = None,
     cancel_callback: Optional[Callable[[], bool]] = None,
 ) -> np.ndarray:
     """
@@ -452,7 +465,8 @@ def embed_chunks(
 
     Args:
         chunks: List of text strings to embed.
-        batch_size: Number of texts encoded per forward pass. Defaults to 32
+        batch_size: Number of texts encoded per forward pass. Defaults to None,
+                    which resolves to EMBEDDING_BATCH_SIZE from environment (default: 32)
                     to balance throughput and memory consumption.
         cancel_callback: Optional callback returning True if processing should be cancelled.
 
@@ -462,6 +476,9 @@ def embed_chunks(
     """
     if not chunks:
         return np.empty((0, 384), dtype=np.float32)
+
+    if batch_size is None:
+        batch_size = _get_embedding_batch_size()
 
     model = _get_model()
     all_embeddings: list[np.ndarray] = []
@@ -489,6 +506,7 @@ def embed_chunks(
         # normalize_embeddings=True ensures L2-normalisation (cosine sim = dot product)
         batch_embeddings = model.encode(
             batch,
+            batch_size=batch_size,
             show_progress_bar=False,
             normalize_embeddings=True,
         )
@@ -508,7 +526,7 @@ def embed_chunks(
 
 
 def embed_documents(
-    chunked_docs: dict[str, list[str]], batch_size: int = 32
+    chunked_docs: dict[str, list[str]], batch_size: int | None = None
 ) -> dict[str, np.ndarray]:
     """
     Embed all chunks across multiple documents using optimized mini-batching.
@@ -520,7 +538,8 @@ def embed_documents(
 
     Args:
         chunked_docs: Dict mapping document name → list of chunk strings.
-        batch_size: Batch size forwarded to embed_chunks(). Defaults to 32.
+        batch_size: Batch size forwarded to embed_chunks(). Defaults to None,
+                    which resolves to EMBEDDING_BATCH_SIZE from environment (default: 32).
 
     Returns:
         Dict mapping document name → numpy array of embeddings (shape: N×384).
@@ -550,11 +569,15 @@ def embed_documents(
         logger.info("[embedding_model] No chunks to embed across all documents.")
         return embeddings
 
+    effective_batch_size = (
+        batch_size if batch_size is not None else _get_embedding_batch_size()
+    )
+
     logger.info(
         "[embedding_model] Embedding %d total chunks across %d documents with batch_size=%d",
         len(all_chunks),
         len(doc_names),
-        batch_size,
+        effective_batch_size,
     )
 
     # Call embed_chunks once for the entire flattened batch of chunks
