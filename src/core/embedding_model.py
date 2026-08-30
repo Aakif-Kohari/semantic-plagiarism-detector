@@ -232,8 +232,9 @@ class EmbeddingModelManager:
             loaded_model = SentenceTransformer(primary, cache_folder=cache_dir)
             device = _detect_device(loaded_model)
             logger.info(
-                "SentenceTransformer model [%s] running on device [%s]",
+                "Initialized Embedding Model: %s | Dimensions: %d | Target Device: %s",
                 primary,
+                loaded_model.get_sentence_embedding_dimension(),
                 device,
             )
             logger.info("[embedding_model] Model loaded successfully.")
@@ -264,8 +265,9 @@ class EmbeddingModelManager:
                 ) from fallback_exc
             device = _detect_device(loaded_model)
             logger.info(
-                "SentenceTransformer model [%s] running on device [%s]",
+                "Initialized Fallback Embedding Model: %s | Dimensions: %d | Target Device: %s",
                 fallback,
+                loaded_model.get_sentence_embedding_dimension(),
                 device,
             )
 
