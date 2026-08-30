@@ -75,9 +75,9 @@ def _process_scan_job(
         extracted_text = extract_text(file_input, filename)
         if not extracted_text.strip():
             scan_jobs[job_id]["status"] = "failed"
-            scan_jobs[job_id][
-                "error"
-            ] = "Failed to extract readable text from the uploaded file."
+            scan_jobs[job_id]["error"] = (
+                "Failed to extract readable text from the uploaded file."
+            )
             return
 
         words = extracted_text.split()
@@ -120,7 +120,7 @@ def _process_scan_job(
             sim_chunk = float(np.max(sim_matrix))
 
             chunk_maxes = np.max(sim_matrix, axis=1)
-            uploaded_chunks_flagged |= (chunk_maxes >= threshold)
+            uploaded_chunks_flagged |= chunk_maxes >= threshold
 
             combined_score = max(sim_doc, sim_chunk)
             max_overall_score = max(max_overall_score, sim_doc)
@@ -161,9 +161,11 @@ def _process_scan_job(
             key=lambda x: x["max_chunk_similarity_score"], reverse=True
         )
         is_flagged = len(matched_documents) > 0 or max_chunk_overall_score >= threshold
-        
+
         total_flagged = int(np.sum(uploaded_chunks_flagged))
-        plagiarism_density = int(round((total_flagged / len(chunks)) * 100)) if len(chunks) > 0 else 0
+        plagiarism_density = (
+            int(round((total_flagged / len(chunks)) * 100)) if len(chunks) > 0 else 0
+        )
 
         scan_jobs[job_id]["status"] = "completed"
         scan_jobs[job_id]["completed_at"] = datetime.now(timezone.utc).isoformat()
@@ -352,7 +354,7 @@ async def scan_document(
             sim_chunk = float(np.max(sim_matrix))
 
             chunk_maxes = np.max(sim_matrix, axis=1)
-            uploaded_chunks_flagged |= (chunk_maxes >= threshold)
+            uploaded_chunks_flagged |= chunk_maxes >= threshold
 
             combined_score = max(sim_doc, sim_chunk)
             max_overall_score = max(max_overall_score, sim_doc)
@@ -393,9 +395,11 @@ async def scan_document(
             key=lambda x: x["max_chunk_similarity_score"], reverse=True
         )
         is_flagged = len(matched_documents) > 0 or max_chunk_overall_score >= threshold
-        
+
         total_flagged = int(np.sum(uploaded_chunks_flagged))
-        plagiarism_density = int(round((total_flagged / len(chunks)) * 100)) if len(chunks) > 0 else 0
+        plagiarism_density = (
+            int(round((total_flagged / len(chunks)) * 100)) if len(chunks) > 0 else 0
+        )
 
         return {
             "filename": filename,

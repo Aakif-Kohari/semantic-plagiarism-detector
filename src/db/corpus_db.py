@@ -29,11 +29,13 @@ logger = logging.getLogger(__name__)
 # Seed the corpus DB path from the centralized app_config.
 import atexit
 import weakref
+
 _DB_PATH = os.path.abspath(str(CORPUS_DB_PATH))
 
 _connection_pool = threading.local()
 _all_connections = weakref.WeakSet()
 _pool_lock = threading.Lock()
+
 
 def _cleanup_all_connections():
     with _pool_lock:
@@ -43,6 +45,7 @@ def _cleanup_all_connections():
             except Exception:
                 pass
         _all_connections.clear()
+
 
 atexit.register(_cleanup_all_connections)
 
@@ -95,7 +98,7 @@ def _connect():
 
     pool = _pool()
     conn = pool.get(path)
-    
+
     # Check if the connection is closed. If so, discard it.
     if conn is not None:
         try:
@@ -808,7 +811,10 @@ def get_chunks_for_documents(
 
     result: dict[str, tuple[list[str], np.ndarray]] = {}
     for filename, (texts, vectors) in grouped.items():
-        result[filename] = (texts, np.vstack(vectors) if vectors else np.empty((0, 384), dtype=np.float32))
+        result[filename] = (
+            texts,
+            np.vstack(vectors) if vectors else np.empty((0, 384), dtype=np.float32),
+        )
     return result
 
 

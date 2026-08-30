@@ -26,39 +26,41 @@ def _get_redirect_uri() -> str:
     return os.getenv("APP_BASE_URL", "http://localhost:8501")
 
 
-def verify_sso_state(state: str, stored_state: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
+def verify_sso_state(
+    state: str, stored_state: Dict[str, Any]
+) -> Tuple[bool, Optional[str]]:
     """
     Verify that the state token is valid and not expired.
-    
+
     Args:
         state: The state parameter received from the OAuth callback
         stored_state: The stored state data containing token and timestamp
-    
+
     Returns:
         tuple[bool, Optional[str]]: (is_valid, error_message)
     """
     if not stored_state:
         return False, "Invalid state parameter"
-    
+
     # Check if stored_state has the expected structure
     if not isinstance(stored_state, dict):
         return False, "Invalid state data format"
-    
+
     # Get the state token and timestamp
     stored_token = stored_state.get("token")
     if not stored_token:
         return False, "Invalid state data: missing token"
-    
+
     # Verify the state token matches
     if state != stored_token:
         return False, "Invalid state token"
-    
+
     # Check expiration
     created_at = stored_state.get("created_at")
     if not created_at:
         # If no timestamp, treat as invalid for security
         return False, "Invalid state data: missing timestamp"
-    
+
     # Handle both string and integer timestamps
     if isinstance(created_at, str):
         try:
@@ -67,21 +69,24 @@ def verify_sso_state(state: str, stored_state: Dict[str, Any]) -> Tuple[bool, Op
             return False, "Invalid state timestamp format"
     elif not isinstance(created_at, (int, float)):
         return False, "Invalid state timestamp type"
-    
+
     # Check if state has expired
     current_time = time.time()
     elapsed_seconds = current_time - created_at
-    
+
     if elapsed_seconds > STATE_EXPIRATION_SECONDS:
-        return False, f"State token expired (elapsed: {elapsed_seconds:.0f}s, max: {STATE_EXPIRATION_SECONDS}s)"
-    
+        return (
+            False,
+            f"State token expired (elapsed: {elapsed_seconds:.0f}s, max: {STATE_EXPIRATION_SECONDS}s)",
+        )
+
     return True, None
 
 
 def get_google_auth_url() -> Tuple[str, str, Dict[str, Any]]:
     """
     Return the Google OAuth authorization URL, state, and state data.
-    
+
     Returns:
         tuple[str, str, dict]: (authorization_url, state_token, state_data)
     """
@@ -89,16 +94,12 @@ def get_google_auth_url() -> Tuple[str, str, Dict[str, Any]]:
     client_id = os.getenv("GOOGLE_CLIENT_ID")
     if not client_id:
         raise ValueError("GOOGLE_CLIENT_ID environment variable is not configured")
-    
+
     redirect_uri = _get_redirect_uri()
     state = f"google_{secrets.token_urlsafe(16)}"
-    
+
     # Create state data with timestamp for expiration checking
-    state_data = {
-        "token": state,
-        "created_at": time.time(),
-        "provider": "google"
-    }
+    state_data = {"token": state, "created_at": time.time(), "provider": "google"}
 
     query_params = {
         "response_type": "code",
@@ -178,7 +179,7 @@ def exchange_google_code(code: str) -> Tuple[Optional[Dict[str, Any]], Optional[
 def get_github_auth_url() -> Tuple[str, str, Dict[str, Any]]:
     """
     Return the GitHub OAuth authorization URL, state, and state data.
-    
+
     Returns:
         tuple[str, str, dict]: (authorization_url, state_token, state_data)
     """
@@ -186,16 +187,12 @@ def get_github_auth_url() -> Tuple[str, str, Dict[str, Any]]:
     client_id = os.getenv("GITHUB_CLIENT_ID")
     if not client_id:
         raise ValueError("GITHUB_CLIENT_ID environment variable is not configured")
-    
+
     redirect_uri = _get_redirect_uri()
     state = f"github_{secrets.token_urlsafe(16)}"
-    
+
     # Create state data with timestamp for expiration checking
-    state_data = {
-        "token": state,
-        "created_at": time.time(),
-        "provider": "github"
-    }
+    state_data = {"token": state, "created_at": time.time(), "provider": "github"}
 
     query_params = {
         "client_id": client_id,
@@ -247,7 +244,9 @@ def exchange_github_code(code: str) -> Tuple[Optional[Dict[str, Any]], Optional[
 
     token_json = token_resp.json()
     if token_json.get("error"):
-        logger.error(f"GitHub OAuth error response: {token_json.get('error_description') or token_json.get('error')}")
+        logger.error(
+            f"GitHub OAuth error response: {token_json.get('error_description') or token_json.get('error')}"
+        )
         return None, "Invalid or expired SSO authorization code"
 
     access_token = token_json.get("access_token")
@@ -275,7 +274,9 @@ def exchange_github_code(code: str) -> Tuple[Optional[Dict[str, Any]], Optional[
     user_data = user_info_resp.json()
 
     # Filter out users.noreply.github.com email in user profile info
-    if user_data.get("email") and user_data["email"].endswith("@users.noreply.github.com"):
+    if user_data.get("email") and user_data["email"].endswith(
+        "@users.noreply.github.com"
+    ):
         user_data["email"] = None
 
     # GitHub might not return email in /user if it's private, fetch explicitly
@@ -300,11 +301,15 @@ def exchange_github_code(code: str) -> Tuple[Optional[Dict[str, Any]], Optional[
             emails = emails_resp.json()
             # Filter emails: must be verified and not a noreply address
             valid_emails = [
-                e for e in emails 
-                if e.get("verified") and not e["email"].endswith("@users.noreply.github.com")
+                e
+                for e in emails
+                if e.get("verified")
+                and not e["email"].endswith("@users.noreply.github.com")
             ]
             # Try primary first, then fallback to first available valid email
-            primary_email = next((e["email"] for e in valid_emails if e.get("primary")), None)
+            primary_email = next(
+                (e["email"] for e in valid_emails if e.get("primary")), None
+            )
             if primary_email:
                 user_data["email"] = primary_email
             elif valid_emails:
@@ -314,7 +319,9 @@ def exchange_github_code(code: str) -> Tuple[Optional[Dict[str, Any]], Optional[
 
     if not user_data.get("email"):
         # We raise a ValueError to reject login with message requesting a public email.
-        raise ValueError("GitHub login failed: A verified public email is required. Please update your GitHub settings.")
+        raise ValueError(
+            "GitHub login failed: A verified public email is required. Please update your GitHub settings."
+        )
 
     return user_data, None
 
@@ -322,43 +329,42 @@ def exchange_github_code(code: str) -> Tuple[Optional[Dict[str, Any]], Optional[
 def create_state_token(provider: str) -> Tuple[str, Dict[str, Any]]:
     """
     Create a new state token with timestamp.
-    
+
     Args:
         provider: The OAuth provider ("google" or "github")
-    
+
     Returns:
         tuple[str, dict]: (state_token, state_data)
     """
     token = f"{provider}_{secrets.token_urlsafe(16)}"
-    state_data = {
-        "token": token,
-        "created_at": time.time(),
-        "provider": provider
-    }
+    state_data = {"token": token, "created_at": time.time(), "provider": provider}
     return token, state_data
 
 
-def cleanup_expired_states(states: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+def cleanup_expired_states(
+    states: Dict[str, Dict[str, Any]],
+) -> Dict[str, Dict[str, Any]]:
     """
     Clean up expired state tokens from the database or in-memory store.
-    
+
     Args:
         states: Dictionary of stored states {state_token: state_data}
-    
+
     Returns:
         dict: Filtered dictionary with expired states removed
     """
     current_time = time.time()
     expiration_threshold = current_time - STATE_EXPIRATION_SECONDS
-    
+
     # Filter out expired states
     valid_states = {
-        token: data for token, data in states.items()
+        token: data
+        for token, data in states.items()
         if data.get("created_at", 0) > expiration_threshold
     }
-    
+
     expired_count = len(states) - len(valid_states)
     if expired_count > 0:
         logger.info(f"Cleaned up {expired_count} expired OAuth state tokens")
-    
+
     return valid_states

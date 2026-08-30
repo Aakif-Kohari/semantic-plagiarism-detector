@@ -644,12 +644,12 @@ def test_css_variables_injected():
     # Verify values are valid hex colors
     import re
 
-    assert re.search(
-        r"--primary-bg:\s*#[0-9a-fA-F]+", css
-    ), "--primary-bg does not have a valid hex value"
-    assert re.search(
-        r"--text-color:\s*#[0-9a-fA-F]+", css
-    ), "--text-color does not have a valid hex value"
+    assert re.search(r"--primary-bg:\s*#[0-9a-fA-F]+", css), (
+        "--primary-bg does not have a valid hex value"
+    )
+    assert re.search(r"--text-color:\s*#[0-9a-fA-F]+", css), (
+        "--text-color does not have a valid hex value"
+    )
 
     # Verify component CSS uses var() instead of hardcoded
     assert "background-color: var(--primary-bg)" in css
@@ -667,9 +667,10 @@ def test_render_session_status_banner():
 
     mock_state = {}
 
-    with patch("app.theme.st.session_state", mock_state), patch(
-        "app.theme.st.caption"
-    ) as mock_caption:
+    with (
+        patch("app.theme.st.session_state", mock_state),
+        patch("app.theme.st.caption") as mock_caption,
+    ):
         # First call: should initialize session_start_time and render 0 mins
         render_session_status_banner()
         assert "session_start_time" in mock_state
@@ -677,11 +678,13 @@ def test_render_session_status_banner():
 
     # Second test: with established session start time in the past
     mock_state_past = {"session_start_time": time.time() - 45.2 * 60}
-    with patch("app.theme.st.session_state", mock_state_past), patch(
-        "app.theme.st.caption"
-    ) as mock_caption_past:
+    with (
+        patch("app.theme.st.session_state", mock_state_past),
+        patch("app.theme.st.caption") as mock_caption_past,
+    ):
         render_session_status_banner()
         mock_caption_past.assert_called_once_with("Active Session: 45 mins")
+
 
 # ==============================================================================
 # Issue #2353: severity_tier threshold boundary tests
@@ -706,6 +709,8 @@ def test_severity_tier_boundary_just_below_high():
 def test_severity_tier_boundary_at_high():
     """A score of 0.80 is classified as high."""
     assert severity_tier(0.80, 0.50) == "high"
+
+
 # sanitize_hex_color edge-case tests (Issue #2352)
 # ==============================================================================
 
@@ -727,19 +732,19 @@ def test_sanitize_hex_color_invalid():
 
 def get_luminance(hex_color: str) -> float:
     """Calculate the relative luminance of a hex color."""
-    hex_color = hex_color.lstrip('#')
+    hex_color = hex_color.lstrip("#")
     if len(hex_color) == 3:
-        hex_color = ''.join(c + c for c in hex_color)
-    
-    rgb = tuple(int(hex_color[i:i+2], 16) / 255.0 for i in (0, 2, 4))
-    
+        hex_color = "".join(c + c for c in hex_color)
+
+    rgb = tuple(int(hex_color[i : i + 2], 16) / 255.0 for i in (0, 2, 4))
+
     linear_rgb = []
     for c in rgb:
         if c <= 0.03928:
             linear_rgb.append(c / 12.92)
         else:
             linear_rgb.append(((c + 0.055) / 1.055) ** 2.4)
-            
+
     return 0.2126 * linear_rgb[0] + 0.7152 * linear_rgb[1] + 0.0722 * linear_rgb[2]
 
 
@@ -747,10 +752,10 @@ def get_contrast_ratio(hex1: str, hex2: str) -> float:
     """Calculate the WCAG contrast ratio between two hex colors."""
     l1 = get_luminance(hex1)
     l2 = get_luminance(hex2)
-    
+
     lighter = max(l1, l2)
     darker = min(l1, l2)
-    
+
     return (lighter + 0.05) / (darker + 0.05)
 
 
@@ -759,9 +764,9 @@ def test_theme_wcag_contrast():
     for theme_name, theme in THEMES.items():
         bg = theme.get("background")
         ink = theme.get("ink")
-        
+
         if bg and ink:
             contrast = get_contrast_ratio(bg, ink)
-            assert contrast >= 4.5, f"{theme_name} theme contrast ratio {contrast:.2f} is below 4.5:1 (bg: {bg}, ink: {ink})"
-
-
+            assert contrast >= 4.5, (
+                f"{theme_name} theme contrast ratio {contrast:.2f} is below 4.5:1 (bg: {bg}, ink: {ink})"
+            )

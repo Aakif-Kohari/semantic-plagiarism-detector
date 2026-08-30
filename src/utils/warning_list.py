@@ -11,10 +11,10 @@ import streamlit as st
 
 from app.theme import badge_html, tier_from_severity_label
 from src.core.config import normalize_severity_label, severity_from_score, severity_rank
+from src.core.stopwords import get_stopwords
 from src.db.incidents import _normalise_pair, add_false_positive, get_false_positives
 from src.i18n.translator import get_text
 from src.utils.pagination import PaginationPage, paginate_items
-from src.core.stopwords import get_stopwords
 
 try:
     from thefuzz import fuzz
@@ -54,6 +54,7 @@ def _normalise_warning(
         severity = normalize_severity_label(raw_severity)
     except ValueError:
         severity = severity_from_score(similarity)
+
     # Compute document-level stop-word percentages using chunked docs
     def _doc_stopword_pct(doc_id: str) -> float:
         try:
@@ -947,7 +948,7 @@ def render_warning_controls(
                             density = 0.0
                         if density >= STOPWORD_DENSITY_WARNING_THRESHOLD:
                             st.warning(
-                                f"High stop-word density in matching text ({density*100:.0f}%). "
+                                f"High stop-word density in matching text ({density * 100:.0f}%). "
                                 "Similarity may be inflated by common function words."
                             )
                     with c2:

@@ -86,9 +86,7 @@ def get_active_sessions_count() -> int:
         if cache.is_available():
             try:
                 raw_keys = list(
-                    cache._client.scan_iter(
-                        match="spd:v1:session:*:last_interaction"
-                    )
+                    cache._client.scan_iter(match="spd:v1:session:*:last_interaction")
                 )
                 keys = [
                     k.decode("utf-8") if isinstance(k, bytes) else k for k in raw_keys
@@ -103,7 +101,8 @@ def get_active_sessions_count() -> int:
                 fallback_keys = [
                     k
                     for k in list(fallback_dict.keys())
-                    if k.startswith("spd:v1:session:") and k.endswith(":last_interaction")
+                    if k.startswith("spd:v1:session:")
+                    and k.endswith(":last_interaction")
                 ]
                 for k in fallback_keys:
                     if k not in keys:
@@ -275,6 +274,7 @@ def init_backup_daemon():
 def init_session_state():
     """Initialize session state keys and global background services."""
     import app.session_manager as sm
+
     st.session_state[SessionKeys.SESSION_ID] = sm.initialize_and_verify_session()
 
     if SessionKeys.AUTHENTICATED not in st.session_state:

@@ -188,9 +188,7 @@ def record_migration_applied(
     )
 
 
-def record_migration_rolled_back(
-    connection: sqlite3.Connection, version: int
-) -> None:
+def record_migration_rolled_back(connection: sqlite3.Connection, version: int) -> None:
     """Remove a rolled-back migration from migration_history table."""
     ensure_migration_history_table(connection)
     connection.execute(

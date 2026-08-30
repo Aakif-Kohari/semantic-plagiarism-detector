@@ -14,12 +14,14 @@ from src.security import jwt_utils
 _JWT_EXCEPTIONS = [ValueError]
 try:
     import jwt
+
     _JWT_EXCEPTIONS.append(jwt.PyJWTError)
 except ImportError:
     pass
 
 try:
     from jose import JWTError
+
     _JWT_EXCEPTIONS.append(JWTError)
 except ImportError:
     pass
@@ -53,8 +55,7 @@ def _is_public_path(path: str) -> bool:
     normalized_path = path.rstrip("/") or "/"
 
     return any(
-        normalized_path == prefix
-        or normalized_path.startswith(f"{prefix}/")
+        normalized_path == prefix or normalized_path.startswith(f"{prefix}/")
         for prefix in PUBLIC_PATH_PREFIXES
     )
 

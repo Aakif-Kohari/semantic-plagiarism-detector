@@ -396,9 +396,10 @@ def test_translation_cache_uses_provided_connection():
     mock_cursor.fetchone.return_value = {"translated_text": "cached_val"}
     mock_conn.execute.return_value = mock_cursor
 
-    with patch("src.db.translation_cache._connect") as mock_connect, \
-         patch("src.db.translation_cache._get_connection") as mock_get_conn:
-
+    with (
+        patch("src.db.translation_cache._connect") as mock_connect,
+        patch("src.db.translation_cache._get_connection") as mock_get_conn,
+    ):
         # Call get_cached_translation with provided connection
         result = get_cached_translation("source", "fr", "en", conn=mock_conn)
         assert result == "cached_val"
@@ -413,5 +414,3 @@ def test_translation_cache_uses_provided_connection():
 
         # Assert that the provided connection was used
         assert mock_conn.execute.call_count >= 2
-
-

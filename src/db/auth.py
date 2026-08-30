@@ -97,36 +97,35 @@ LOCKOUT_WINDOW_MINUTES = 15
 
 
 def is_account_locked(
-    username: str, 
+    username: str,
     max_attempts: int = MAX_FAILED_ATTEMPTS,
-    window_minutes: int = LOCKOUT_WINDOW_MINUTES
+    window_minutes: int = LOCKOUT_WINDOW_MINUTES,
 ) -> bool:
     """Check if an account is temporarily locked due to too many failed login attempts.
-    
+
     Args:
         username: The username to check.
         max_attempts: Maximum allowed failed attempts before lockout.
         window_minutes: Time window in minutes for counting attempts.
-        
+
     Returns:
         True if the account is locked, False otherwise.
     """
     if not username:
         return False
-        
-    failed_count = count_recent_failed_logins(
-        username, 
-        window_minutes=window_minutes
-    )
-    
+
+    failed_count = count_recent_failed_logins(username, window_minutes=window_minutes)
+
     is_locked = failed_count >= max_attempts
-    
+
     if is_locked:
         logger.warning(
             "Account lockout triggered for %s: %d failed attempts in last %d minutes.",
-            username, failed_count, window_minutes
+            username,
+            failed_count,
+            window_minutes,
         )
-        
+
     return is_locked
 
 
@@ -561,7 +560,7 @@ def verify_user(
     If return_details is True, returns a dict
     ``{"authenticated": bool, "must_change_password": bool, "password_expired": bool}``.
     Otherwise returns a boolean (True on success, False on failure).
-    
+
     Implements account lockout protection (Issue #2704) by checking for
     recent failed login attempts before verifying the password hash.
     """
@@ -572,7 +571,7 @@ def verify_user(
         if return_details:
             return {"authenticated": False, "must_change_password": False}
         return False
-    
+
     try:
         with _connect() as conn:
             row = conn.execute(
@@ -596,7 +595,7 @@ def verify_user(
             log_security_event(
                 event_type="login_blocked_lockout",
                 username=username,
-                details=f"Login attempt blocked due to lockout ({MAX_FAILED_ATTEMPTS} failures in {LOCKOUT_WINDOW_MINUTES}m)"
+                details=f"Login attempt blocked due to lockout ({MAX_FAILED_ATTEMPTS} failures in {LOCKOUT_WINDOW_MINUTES}m)",
             )
             if return_details:
                 return {"authenticated": False, "must_change_password": False}
@@ -644,15 +643,15 @@ def verify_user(
                 log_security_event(
                     event_type="login_success_password_expired",
                     username=username,
-                    details="Successful login but password requires rotation"
+                    details="Successful login but password requires rotation",
                 )
             else:
                 log_security_event(
                     event_type="login_success",
                     username=username,
-                    details="Successful authentication"
+                    details="Successful authentication",
                 )
-        
+
         if return_details:
             return {
                 "authenticated": authenticated,
@@ -970,10 +969,11 @@ def _get_fernet_key() -> bytes:
     """Load or derive a valid 32-byte Fernet key from environment variables."""
     import base64
     import hashlib
+
     key_str = os.getenv("OTP_ENCRYPTION_KEY") or os.getenv("ENCRYPTION_KEY")
     if not key_str:
         key_str = "default-fallback-otp-encryption-key-do-not-use-in-production"
-    
+
     hashed = hashlib.sha256(key_str.encode("utf-8")).digest()
     return base64.urlsafe_b64encode(hashed)
 
@@ -983,6 +983,7 @@ def _encrypt_otp_secret(secret: str) -> str:
     if not secret:
         return secret
     from cryptography.fernet import Fernet
+
     key = _get_fernet_key()
     f = Fernet(key)
     return f.encrypt(secret.encode("utf-8")).decode("utf-8")
@@ -993,6 +994,7 @@ def _decrypt_otp_secret(encrypted_secret: str) -> str:
     if not encrypted_secret:
         return encrypted_secret
     from cryptography.fernet import Fernet, InvalidToken
+
     key = _get_fernet_key()
     f = Fernet(key)
     try:
@@ -1568,7 +1570,9 @@ def _cleanup_revoked_tokens() -> int:
                             exp_int = int(exp)
                             if now_ts >= exp_int:
                                 expired_signatures.append(token_sig)
-                                token_hash = hashlib.sha256(token_sig.encode("utf-8")).hexdigest()
+                                token_hash = hashlib.sha256(
+                                    token_sig.encode("utf-8")
+                                ).hexdigest()
                                 expired_signatures.append(token_hash)
                     except Exception:
                         pass
@@ -1577,12 +1581,14 @@ def _cleanup_revoked_tokens() -> int:
                 placeholders = ",".join("?" for _ in expired_signatures)
                 cur = conn.execute(
                     f"DELETE FROM revoked_tokens WHERE token_signature IN ({placeholders})",
-                    expired_signatures
+                    expired_signatures,
                 )
                 deleted_count = cur.rowcount
                 conn.commit()
                 if deleted_count > 0:
-                    logger.info(f"Cleaned up {deleted_count} expired entries from revoked_tokens table.")
+                    logger.info(
+                        f"Cleaned up {deleted_count} expired entries from revoked_tokens table."
+                    )
     except Exception as e:
         logger.error(f"Failed to cleanup revoked tokens: {e}")
     return deleted_count

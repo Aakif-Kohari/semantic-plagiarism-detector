@@ -53,7 +53,9 @@ def cosine_distance_to_similarity(distance: float) -> float:
 # ── Validation helpers ─────────────────────────────────────────────────────────
 
 
-def _validated_batch_size(batch_size: Optional[Union[int, float, str]]) -> Optional[int]:
+def _validated_batch_size(
+    batch_size: Optional[Union[int, float, str]],
+) -> Optional[int]:
     """Return a safe integer batch size or None for unbatched execution."""
     from src.errors import SIM_BATCH_SIZE_INVALID
 
@@ -264,7 +266,9 @@ def document_similarity_matrix(
         # Pre-filtering with FAISS top_k or candidate_pairs
         active_candidates = candidate_pairs
         if active_candidates is None and top_k is not None and top_k > 0 and n > top_k:
-            active_candidates = find_candidate_pairs(doc_names, doc_vectors, top_k=top_k)
+            active_candidates = find_candidate_pairs(
+                doc_names, doc_vectors, top_k=top_k
+            )
 
         if active_candidates is not None:
             name_to_idx = {name: i for i, name in enumerate(doc_names)}
@@ -1073,7 +1077,7 @@ def detect_plagiarism_clusters(
             "suspicious_groups": [],
             "total_clusters": 0,
             "error": "networkx not installed",
-            "message": "Please install networkx: pip install networkx>=3.0"
+            "message": "Please install networkx: pip install networkx>=3.0",
         }
 
     doc_names = list(similarity_df.columns)
@@ -1127,6 +1131,7 @@ def detect_plagiarism_clusters(
         "total_clusters": len(clusters),
     }
 
+
 # ============================================================================
 # HYBRID SIMILARITY INTEGRATION - Issue #2676
 # ============================================================================
@@ -1168,11 +1173,11 @@ def flag_plagiarism_hybrid(
 ) -> List[Dict]:
     """
     Flag plagiarism using hybrid similarity scores.
-    
+
     Args:
         hybrid_df: Hybrid similarity DataFrame
         threshold: Flagging threshold
-    
+
     Returns:
         List of flagged pairs
     """
