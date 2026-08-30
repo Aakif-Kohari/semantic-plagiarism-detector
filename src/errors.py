@@ -93,12 +93,7 @@ __all__ = [
     "CLI_INVALID_COMMAND",
     "EXPORT_WRITE_FAILED",
     "EXPORT_GENERATION_IO_FAILED",
-    "EVENT_MALFORMED_PAYLOAD",
-    "EVENT_MISSING_FIELD",
-    "EVENT_UNKNOWN_TYPE",
-    "EventSchemaError",
-]
-# Authentication Errors
+]  # Authentication Errors
 AUTH_USERNAME_EMPTY = "Username cannot be empty."
 AUTH_PASSWORD_TOO_SHORT = "Password must be at least 6 characters long."
 AUTH_INVALID_ROLE = "Role must be one of: {roles}"
@@ -287,3 +282,15 @@ class EventSchemaError(ValueError):
     """Raised when a webhook event payload violates the schema definition."""
 
     pass
+
+
+class SSOConfigurationError(ValueError):
+    """Raised when required SSO provider environment configuration (e.g. client ID or secret) is missing.
+
+    Acceptance Criteria (Issue #2583):
+    Subclasses ValueError so existing exception handlers and tests work seamlessly while providing
+    a dedicated exception type for UI layers to catch and display as a graceful Streamlit error.
+    """
+
+    pass
+

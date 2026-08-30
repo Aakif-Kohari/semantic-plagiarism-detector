@@ -28,7 +28,7 @@ To report a vulnerability:
 5. Include step-by-step instructions to reproduce the issue (including sample input files or payload snippets).
 6. Provide any proposed mitigations or code patches if you have them.
 
-The maintainers will investigate, validate, and coordinate disclosure.
+The maintainers will investigate, validate, and coordinate disclosure. Alternatively, if GitHub Private Vulnerability Reporting is unavailable, you can report vulnerabilities directly via email to [security@domain.com](mailto:security@domain.com).
 
 ### Response Timeline
 
