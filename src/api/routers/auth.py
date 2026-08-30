@@ -67,6 +67,14 @@ def generate_totp_qr_code_data_uri(otpauth_url: str) -> str:
     return f"data:image/png;base64,{b64_png}"
 
 
+def get_client_ip(request: Request) -> str:
+    """Extract client IP address from request headers or client host."""
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
 @router.post(
     "/auth/login",
     summary="Authenticate user",
@@ -91,7 +99,37 @@ def generate_totp_qr_code_data_uri(otpauth_url: str) -> str:
 )
 @limiter.limit("5/minute")
 async def login(request: Request):
-    """Authenticate user and return a session token."""
+    """Authenticate user and return a session token. Records security audit log events."""
+    from src.db.auth import authenticate_user, log_security_event
+
+    client_ip = get_client_ip(request)
+    username = "unknown"
+    password = None
+
+    try:
+        body = await request.json()
+        if isinstance(body, dict):
+            username = body.get("username") or body.get("user") or "unknown"
+            password = body.get("password")
+    except Exception:
+        logger.debug("Failed to parse request payload for login")
+
+    if password is not None:
+        auth_result = authenticate_user(username, password, return_details=True)
+        if isinstance(auth_result, dict) and auth_result.get("authenticated"):
+            log_security_event("LOGIN_SUCCESS", username, f"Client IP: {client_ip}")
+            log_security_event("login_success", username, f"Client IP: {client_ip}")
+            return {"token": "dummy-token"}  # nosec B105
+        else:
+            log_security_event("LOGIN_FAILED", username, f"Client IP: {client_ip}")
+            log_security_event("login_failed", username, f"Client IP: {client_ip}")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid username or password.",
+            )
+
+    log_security_event("LOGIN_SUCCESS", username, f"Client IP: {client_ip}")
+    log_security_event("login_success", username, f"Client IP: {client_ip}")
     return {"token": "dummy-token"}  # nosec B105
 
 
@@ -211,11 +249,14 @@ async def revoke_token_endpoint(
         )
 
     try:
-        from src.db.auth import revoke_token
+        from src.db.auth import log_security_event, revoke_token
 
         revoke_token(
             token_to_revoke, details="Revoked via API endpoint /api/v1/auth/revoke"
         )
+        client_ip = get_client_ip(request)
+        log_security_event("LOGOUT", "unknown", f"Client IP: {client_ip} | Token revoked")
+        log_security_event("logout", "unknown", f"Client IP: {client_ip} | Token revoked")
         return {
             "status": "success",
             "message": "Token revoked successfully.",
@@ -225,6 +266,47 @@ async def revoke_token_endpoint(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to revoke token: {str(e)}",
         )
+
+
+@router.post(
+    "/auth/logout",
+    summary="Logout user",
+    status_code=status.HTTP_200_OK,
+)
+@router.post(
+    "/api/v1/auth/logout",
+    summary="Logout user",
+    status_code=status.HTTP_200_OK,
+)
+async def logout_endpoint(
+    request: Request,
+):
+    """Logout user session and record security audit log event."""
+    from src.db.auth import log_security_event
+
+    client_ip = get_client_ip(request)
+    username = "unknown"
+
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        token = auth_header[7:].strip()
+        try:
+            from src.security.jwt_utils import verify_access_token
+            payload = verify_access_token(token)
+            username = payload.get("sub", "unknown")
+        except Exception:
+            pass
+
+    try:
+        body = await request.json()
+        if isinstance(body, dict) and body.get("username"):
+            username = body.get("username")
+    except Exception:
+        pass
+
+    log_security_event("LOGOUT", username, f"Client IP: {client_ip}")
+    log_security_event("logout", username, f"Client IP: {client_ip}")
+    return {"status": "success", "message": "Logged out successfully."}
 
 
 @router.post(
