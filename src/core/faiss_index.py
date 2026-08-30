@@ -344,6 +344,12 @@ def remove_vectors_by_doc(
 
     .. note::
 
+       This is an **internal primitive**.  External callers should use
+       :func:`remove_document_from_index` instead, which wraps this function
+       together with compaction so the registry/index alignment invariant is
+       never left broken.  Calling this function directly leaves alignment
+       broken until :func:`compact_index` is also called.
+
        After removal the ID-to-registry alignment is broken.  Call
        :func:`compact_index` to restore alignment, or call
        :func:`load_or_rebuild_index` for a full rebuild.
@@ -411,6 +417,134 @@ def compact_index(
     nprobe = getattr(index, "nprobe", 10)
     new_index = build_index_from_matrix(matrix, nprobe=nprobe)
     return new_index, registry
+
+
+def remove_document_from_index(
+    index: faiss.Index,
+    registry: list[ChunkRecord],
+    doc_name: str,
+) -> tuple[faiss.Index, list[ChunkRecord]]:
+    """
+    Atomically remove all vectors for *doc_name* and restore ID-to-registry alignment.
+
+    This is the **sole safe public entry point** for document deletion from the
+    FAISS index.  It combines :func:`remove_vectors_by_doc` and compaction into
+    one operation so that the registry/index alignment invariant is *never* left
+    broken after this function returns.
+
+    Why this function exists
+    ------------------------
+    :func:`remove_vectors_by_doc` removes vectors from the FAISS index but
+    deliberately leaves the ID-to-registry alignment broken (see its docstring).
+    Callers that forget to call :func:`compact_index` afterward will get silent
+    mismatches between FAISS internal IDs and registry positions on the next
+    search, producing ``IndexError`` exceptions or stale/wrong results.  This
+    function makes the correct two-step dance automatic and atomic.
+
+    Compaction strategy
+    -------------------
+    * **In-memory path** (default for ``IndexIDMap``-wrapped flat indexes):
+      surviving vectors are reconstructed directly from the in-memory index
+      via ``index.reconstruct(id_)`` without touching the database.  This is
+      the fast path for the common small-to-medium corpus case.
+    * **Database fallback** (IVF indexes, or if in-memory reconstruction
+      raises): delegates to :func:`compact_index`, which reloads embeddings
+      from ``src.db.corpus_db.get_all_embeddings()``.
+
+    .. warning::
+
+       This function assumes that registry positions are **always** kept in
+       sync with FAISS external IDs — i.e. that position *i* in the registry
+       corresponds exactly to external ID *i* in the index.  This invariant
+       holds only when all document deletions are performed exclusively through
+       this function.  **Mixing direct calls to** :func:`remove_vectors_by_doc`
+       **with subsequent calls to this function will silently break the ID
+       alignment invariant**: :func:`remove_vectors_by_doc` removes IDs without
+       recompacting, leaving gaps that this function's reconstruct step cannot
+       bridge correctly.
+
+    Args:
+        index:    FAISS index (should be ``IndexIDMap``-wrapped; see
+                  :func:`add_to_index`).
+        registry: Current chunk registry where position *i* corresponds to
+                  external ID *i* in *index*.
+        doc_name: Name of the document whose vectors should be removed.
+
+    Returns:
+        ``(new_index, new_registry)`` — both fully consistent: registry
+        positions 0 … N-1 correspond exactly to external IDs 0 … N-1 in
+        *new_index*.  If *doc_name* is not present in the registry the
+        original objects are returned unchanged (no-op).  If the index is
+        not ``IndexIDMap``-wrapped the original objects are returned and a
+        warning is logged (mirrors :func:`remove_vectors_by_doc` behaviour).
+    """
+    # ── No-op guard: doc not in registry ──────────────────────────────────────
+    if not any(rec.doc_name == doc_name for rec in registry):
+        logger.debug(
+            "[faiss_index] remove_document_from_index: '%s' not found in "
+            "registry — returning unchanged (no-op).",
+            doc_name,
+        )
+        return index, registry
+
+    # ── Non-IDMap guard ───────────────────────────────────────────────────────
+    if not isinstance(index, faiss.IndexIDMap):
+        logger.warning(
+            "[faiss_index] remove_document_from_index: index is not "
+            "IDMap-wrapped; cannot perform atomic removal.  "
+            "Call load_or_rebuild_index() to rebuild from scratch."
+        )
+        return index, registry
+
+    # Collect surviving external IDs *before* the registry is pruned so they
+    # can be used to reconstruct vectors from the index in the fast path.
+    surviving_ids: List[int] = [
+        i for i, rec in enumerate(registry) if rec.doc_name != doc_name
+    ]
+
+    # ── Remove from FAISS + filter registry ───────────────────────────────────
+    index, pruned_registry = remove_vectors_by_doc(index, registry, doc_name)
+
+    if not pruned_registry:
+        logger.info(
+            "[faiss_index] remove_document_from_index: index is now empty "
+            "after removing '%s'.",
+            doc_name,
+        )
+        faiss_vectors_gauge.set(0)
+        return faiss.IndexFlatIP(384), pruned_registry
+
+    # ── Compaction: choose in-memory vs. DB path ──────────────────────────────
+    # IndexIDMap.index is the wrapped base index.  IVF centroid structures are
+    # unreliable after remove_ids, so only attempt in-memory reconstruct for
+    # flat index types.
+    inner = index.index
+    use_fast_path = not isinstance(inner, faiss.IndexIVFFlat)
+
+    if use_fast_path:
+        try:
+            vectors = np.vstack(
+                [index.reconstruct(int(sid)) for sid in surviving_ids]
+            ).astype("float32")
+            new_index = build_index_from_matrix(vectors, use_id_map=True)
+            logger.info(
+                "[faiss_index] remove_document_from_index: compacted in-memory "
+                "(%d vectors remaining).",
+                len(pruned_registry),
+            )
+            faiss_vectors_gauge.set(new_index.ntotal)
+            return new_index, pruned_registry
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "[faiss_index] remove_document_from_index: in-memory reconstruct "
+                "failed (%r); falling back to DB compaction.",
+                exc,
+            )
+
+    # Fallback: DB-backed compaction for IVF indexes or reconstruct failures.
+    new_index, pruned_registry = compact_index(index, pruned_registry)
+    faiss_vectors_gauge.set(new_index.ntotal)
+    return new_index, pruned_registry
 
 
 def save_index(index: faiss.Index, path: str) -> None:
