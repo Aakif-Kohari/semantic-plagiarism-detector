@@ -126,7 +126,7 @@ class ContentFingerprint:
 class ScoringConfig:
     """Configuration for the scoring engine."""
 
-    weights: dict[str, float] = field(
+    weights: Dict[str, float] = field(
         default_factory=lambda: {
             "semantic": 0.35,
             "lexical": 0.25,
@@ -135,7 +135,7 @@ class ScoringConfig:
             "fingerprint": 0.10,
         }
     )
-    severity_thresholds: dict[str, float] = field(
+    severity_thresholds: Dict[str, float] = field(
         default_factory=lambda: {
             "clean": 0.20,
             "low": 0.40,
@@ -184,7 +184,7 @@ class ContentFingerprinter:
         shingles = set()
         for i in range(len(words) - self.config.shingle_size + 1):
             shingle = " ".join(words[i : i + self.config.shingle_size])
-            shingles.add(hashlib.md5(shingle.encode()).hexdigest()[:12])  # nosec
+            shingles.add(hashlib.md5(shingle.encode()).hexdigest()[:12])
         return shingles
 
     def _compute_minhash(self, shingles: set[str]) -> list[int]:
@@ -229,8 +229,8 @@ class ContentFingerprinter:
         return len(intersection) / len(union) if union else 0.0
 
     def detect_near_duplicates(
-        self, fingerprints: list[ContentFingerprint], threshold: float = 0.85
-    ) -> list[tuple[str, str, float]]:
+        self, fingerprints: List[ContentFingerprint], threshold: float = 0.85
+    ) -> List[Tuple[str, str, float]]:
         """Detect near-duplicate document pairs."""
         duplicates = []
         for i in range(len(fingerprints)):
@@ -396,7 +396,7 @@ class AIScoringEngine:
         )
 
     def compute_ensemble_score(
-        self, components: list[ScoreComponent]
+        self, components: List[ScoreComponent]
     ) -> ScoreComponent:
         """Compute weighted ensemble score from all components."""
         total_weight = 0
@@ -470,6 +470,20 @@ class AIScoringEngine:
             and c.details.get("shingle_similarity", 0)
             >= self.config.fingerprint_threshold
             for c in components
+        )
+
+        return PlagiarismScore(
+            doc_a=doc_a,
+            doc_b=doc_b,
+            overall_score=overall,
+            severity=severity,
+            components=components,
+            fingerprint_match=fp_match,
+            metadata={
+                "text_a_length": len(text_a),
+                "text_b_length": len(text_b),
+                "timestamp": datetime.now().isoformat(),
+            },
         )
 
         return PlagiarismScore(

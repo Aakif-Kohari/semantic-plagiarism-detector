@@ -49,6 +49,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Diff highlighter default match length is configurable via `DEFAULT_DIFF_MIN_MATCH_LENGTH` (`src/core/config.py`, `src/utils/diff_highlighter.py`).
 - Build originality badge SVGs with `xml.etree.ElementTree` instead of f-string interpolation (`src/utils/badge_generator.py`).
 
+### Added
+- Detection and UI warning for high stop-word density in documents. Flags `WARNING_HIGH_STOPWORD_DENSITY` when stop-words exceed 70% of a document's token count and displays a warning in the warning list (`src/utils/warning_list.py`).
+
 ## [1.0.0] - 2026-07-21
 
 ### Added

@@ -250,7 +250,7 @@ class SimilarityThresholds:
 
         if not plagiarism <= medium <= high:
             raise ValueError(
-                "Thresholds must satisfy " "0.0 <= plagiarism <= medium <= high <= 1.0."
+                "Thresholds must satisfy 0.0 <= plagiarism <= medium <= high <= 1.0."
             )
 
         object.__setattr__(self, "plagiarism", plagiarism)
@@ -279,7 +279,7 @@ def validate_thresholds(
 
     if not thresholds.plagiarism <= thresholds.medium <= thresholds.high:
         raise ValueError(
-            "Thresholds must satisfy " "0.0 <= plagiarism <= medium <= high <= 1.0."
+            "Thresholds must satisfy 0.0 <= plagiarism <= medium <= high <= 1.0."
         )
 
     return thresholds
