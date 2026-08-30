@@ -6,6 +6,7 @@ Supports incremental index updates (Issue #3913).
 """
 
 import logging
+import os
 from typing import Any, Dict, List, Optional, Tuple
 
 # FAISS has no official type stubs; suppress Pylance false positives
@@ -682,8 +683,12 @@ def remove_document_from_index(
 
 
 def save_index(index: faiss.Index, path: str) -> None:
-    """Persist a FAISS index to disk."""
+    """Persist a FAISS index to disk with restrictive file permissions (0o600)."""
     faiss.write_index(index, path)
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
     logger.info(f"[faiss_index] Index saved → {path}  ({index.ntotal} vectors)")
 
 
