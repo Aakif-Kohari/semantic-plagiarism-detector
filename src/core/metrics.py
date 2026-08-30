@@ -177,11 +177,13 @@ def generate_metrics_json() -> dict[str, Any]:
         for sample in family.samples:
             samples.append(
                 {
+                    "name": sample.name,
                     "labels": sample.labels,
                     "value": sample.value,
                 }
             )
         metrics[family.name] = {
+            "name": family.name,
             "type": family.type,
             "help": family.documentation,
             "metrics": samples,

@@ -593,6 +593,8 @@ class AsyncScanStatusResponse(BaseModel):
     )
 
 
+class MetricSample(BaseModel):
+    " \Schema for an individual Prometheus metric sample.\\n
 # ============================================================================
 # Example Paginated Response for Documents
 # ============================================================================
