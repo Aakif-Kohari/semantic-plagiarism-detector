@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Optimized `clear_session` and `clear_pattern` with Redis pipelining to batch deletions into a single network round-trip (`src/utils/redis_cache.py`).
 - Warning list pagination no longer writes `st.session_state` directly; page updates are applied via a view-layer callback (`src/utils/warning_list.py`).
 
+### Added
+- Detection and UI warning for high stop-word density in documents. Flags `WARNING_HIGH_STOPWORD_DENSITY` when stop-words exceed 70% of a document's token count and displays a warning in the warning list (`src/utils/warning_list.py`).
+
 ## [1.0.0] - 2026-07-21
 
 ### Added
