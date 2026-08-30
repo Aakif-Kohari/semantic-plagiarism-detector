@@ -23,19 +23,15 @@ from src.core.document_parser import extract_text
 from src.core.embedding_model import embed_documents
 from src.core.faiss_index import ChunkRecord, build_index, add_vectors_incremental
 from src.core.faiss_index_metadata import FAISSIndexMetadata
-from src.core.similarity import document_similarity_matrix, flag_plagiarismfrom src.core.text_chunking import chunk_documents
+from src.core.similarity import document_similarity_matrix, flag_plagiarism
+from src.core.text_chunking import chunk_documents
 from src.utils.tracing import get_tracer
 
-logger = logging.getLogger(__name__)
 logger = logging.getLogger(__name__)
 
 
 class PipelineResult(NamedTuple):
-       """
-
-    def is_incremental_update(self) -> bool:
-        """Check if this result is from incremental index update vs full rebuild."""
-        return hasattr(self, "_is_incremental") and self._is_incrementalNamed outputs from ``run_full_pipeline`` (still unpackable as a tuple)."""
+    """Named outputs from ``run_full_pipeline`` (still unpackable as a tuple)."""
 
     raw_texts: dict[str, str]
     chunked_docs: dict[str, list[str]]
@@ -46,6 +42,10 @@ class PipelineResult(NamedTuple):
     registry: list[ChunkRecord]
     ai_probabilities: dict[str, dict[str, Any]]
     flags: list[dict[str, Any]]
+
+    def is_incremental_update(self) -> bool:
+        """Check if this result is from incremental index update vs full rebuild."""
+        return hasattr(self, "_is_incremental") and self._is_incremental
 
 
 def run_full_pipeline(
@@ -62,7 +62,8 @@ def run_full_pipeline(
     existing_index: Any = None,
     existing_registry: Dict[str, ChunkRecord] = None,
     use_incremental: bool = INCREMENTAL_INDEX_ENABLED,
-) -> PipelineResult:    """Execute the full document upload pipeline outside of Streamlit.
+) -> PipelineResult:
+    """Execute the full document upload pipeline outside of Streamlit.
 
     This is the same logic as ``streamlit_app.run_pipeline()`` but without
     the ``@st.cache_data`` decorator and ``st.warning`` calls, making it
@@ -228,7 +229,8 @@ def run_full_pipeline(
             chunked_docs=chunked_docs,
             embeddings=embeddings,
             sim_df=sim_df,
-            chunk_sim_df=chunk_sim_df,            faiss_index=faiss_index,
+            chunk_sim_df=chunk_sim_df,
+            faiss_index=faiss_index,
             registry=registry,
             ai_probabilities=ai_probabilities,
             flags=flags,

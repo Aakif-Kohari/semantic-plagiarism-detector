@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `show_notification()` toast helper with success/warning/error/info icons (`app/components/notifications.py`).
 
 ### Fixed
+- Split the two `from` imports that had been welded onto one line in `src/core/processing.py`, un-interleaved `PipelineResult`'s docstring from `is_incremental_update()` and moved the method below the annotated fields where a `NamedTuple` requires it, and separated `run_full_pipeline`'s return annotation from its docstring; the module did not parse, so neither the synchronous upload path nor the background worker could import the pipeline (`src/core/processing.py`).
 - Handled Windows reserved device names with extensions (e.g. `NUL.txt`, `CON.pdf`, `COM1.docx`) in `sanitize_filename` by checking base stems against `_WINDOWS_RESERVED_NAMES` (`src/utils/filename.py`).
 - Mobile viewports (<768px): tighter main padding and shorter plotly chart heights (`app/css_constants.py`).
 - Add `role="button"` and `aria-label` on custom HTML tag chips and notification badges (`app/components/`).
