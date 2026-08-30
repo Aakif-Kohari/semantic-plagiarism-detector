@@ -110,6 +110,14 @@ spd_scan_duration_seconds = Histogram(
     ["stage"],
 )
 
+spd_doc_parse_seconds = Histogram(
+    "spd_doc_parse_seconds",
+    "Document parsing time in seconds",
+    ["extension"],
+)
+
+doc_parse_seconds = spd_doc_parse_seconds
+
 query_response_time_seconds = Histogram(
     "spd_query_response_time_seconds",
     "Duration of similarity search queries in seconds",
