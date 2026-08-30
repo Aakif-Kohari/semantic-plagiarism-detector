@@ -197,3 +197,7 @@ class AsyncScanStatusResponse(BaseModel):
     error: str | None = Field(
         default=None, description="Error message if scan job failed"
     )
+
+
+class MetricSample(BaseModel):
+    " \Schema for an individual Prometheus metric sample.\\n

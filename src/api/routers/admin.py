@@ -13,6 +13,7 @@ from src.api.middleware import get_current_user
 from src.api.schemas import (
     HealthCheckResponse,
     HealthzResponse,
+    MetricFamily,
     StatusResponse,
 )
 from src.core.app_config import HEALTHZ_DB_PATHS
@@ -84,9 +85,19 @@ def metrics_prometheus():
     return PlainTextResponse(_gen().decode("utf-8"))
 
 
-@router.get("/metrics/json", tags=["Monitoring"])
+@router.get(
+    "/metrics/json",
+    tags=["Monitoring"],
+    response_model=dict[str, MetricFamily],
+    summary="JSON format metrics export",
+)
 def metrics_json():
-    """JSON-format metrics export for non-Prometheus monitoring setups."""
+    """JSON-format metrics export for non-Prometheus monitoring setups.
+    
+    Converts all Prometheus metric types (Gauges, Counters, Histograms) into a clean
+    JSON format suitable for web dashboards. Includes metric name, metric type,
+    metric value, and label dictionaries for each sample.
+    """
     from src.core.metrics import generate_metrics_json
 
     return JSONResponse(generate_metrics_json())
