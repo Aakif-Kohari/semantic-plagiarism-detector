@@ -563,6 +563,13 @@ def validate_mime_type(file_bytes: bytes, filename: str) -> bool:
         )
         return False
 
+    if is_executable_upload(file_bytes, filename):
+        logger.warning(
+            "[mime_validator] Executable file signature or extension detected: '%s'.",
+            filename,
+        )
+        return False
+
     extension = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
     if not extension or extension not in ALLOWED_MIME_TYPES:
         logger.warning(
