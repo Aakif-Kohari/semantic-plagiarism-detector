@@ -21,8 +21,20 @@ ALLOWED_MIME_TYPES: dict[str, list[str]] = {
         "application/x-zip-compressed",
         "application/octet-stream",
     ],
+    "docm": [
+        "application/vnd.ms-word.document.macroEnabled.12",
+        "application/zip",
+        "application/x-zip-compressed",
+        "application/octet-stream",
+    ],
     "xlsx": [
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/zip",
+        "application/x-zip-compressed",
+        "application/octet-stream",
+    ],
+    "xlsm": [
+        "application/vnd.ms-excel.sheet.macroEnabled.12",
         "application/zip",
         "application/x-zip-compressed",
         "application/octet-stream",
@@ -75,6 +87,8 @@ ALLOWED_MAGIC_HEADERS: dict[str, list[bytes]] = {
     "zip": [b"PK\x03\x04"],
     "epub": [b"PK\x03\x04"],
     "odt": [b"PK\x03\x04"],
+    "docm": [b"PK\x03\x04"],
+    "xlsm": [b"PK\x03\x04"],
     "doc": [b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"],
     "rtf": [b"{\\rtf"],
     "png": [b"\x89PNG\r\n\x1a\n"],
@@ -82,10 +96,12 @@ ALLOWED_MAGIC_HEADERS: dict[str, list[bytes]] = {
     "jpeg": [b"\xff\xd8\xff"],
 }
 
-OOXML_EXTENSIONS: set[str] = {"docx", "xlsx"}
+OOXML_EXTENSIONS: set[str] = {"docx", "xlsx", "docm", "xlsm"}
 OOXML_REQUIRED_PARTS: dict[str, set[str]] = {
     "docx": {"[Content_Types].xml", "word/document.xml"},
     "xlsx": {"[Content_Types].xml", "xl/workbook.xml"},
+    "docm": {"[Content_Types].xml", "word/document.xml"},
+    "xlsm": {"[Content_Types].xml", "xl/workbook.xml"},
 }
 OOXML_MAIN_CONTENT_TYPES: dict[str, set[str]] = {
     "docx": {
@@ -97,12 +113,27 @@ OOXML_MAIN_CONTENT_TYPES: dict[str, set[str]] = {
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml",
         "application/vnd.ms-excel.sheet.macroEnabled.main+xml",
     },
+    "docm": {
+        "application/vnd.ms-word.document.macroEnabled.main+xml",
+    },
+    "xlsm": {
+        "application/vnd.ms-excel.sheet.macroEnabled.main+xml",
+    },
 }
 
 # Conservative limits for metadata-only archive inspection.
 MAX_OOXML_ARCHIVE_ENTRIES: int = 10_000
 MAX_OOXML_TOTAL_UNCOMPRESSED_SIZE: int = 250 * 1024 * 1024
 MAX_CONTENT_TYPES_XML_SIZE: int = 2 * 1024 * 1024
+
+# Configuration for macro validation (default False/disabled)
+ALLOW_MACROS: bool = False
+allow_macros: bool = ALLOW_MACROS
+
+MACRO_ENABLED_CONTENT_TYPES: set[str] = {
+    "application/vnd.ms-word.document.macroEnabled.main+xml",
+    "application/vnd.ms-excel.sheet.macroEnabled.main+xml",
+}
 
 BLOCKED_EXECUTABLE_EXTENSIONS: set[str] = {
     "exe",
@@ -111,6 +142,8 @@ BLOCKED_EXECUTABLE_EXTENSIONS: set[str] = {
     "js",
     "vbs",
     "dll",
+    "docm",
+    "xlsm",
 }
 
 # Magic-byte signatures that identify executable/script content regardless
@@ -121,7 +154,11 @@ EXECUTABLE_MAGIC_SIGNATURES: tuple[bytes, ...] = (
 )
 
 
-def is_executable_upload(file_bytes: bytes, filename: str) -> bool:
+def is_executable_upload(
+    file_bytes: bytes,
+    filename: str,
+    allow_macros: bool = ALLOW_MACROS,
+) -> bool:
     """Return True if the upload looks like an executable or shell script.
 
     Issue #3718: Ensure empty files (b"") return False immediately without
@@ -130,6 +167,7 @@ def is_executable_upload(file_bytes: bytes, filename: str) -> bool:
     Args:
         file_bytes: Raw binary content of the uploaded file.
         filename: Declared file name with extension.
+        allow_macros: Whether macro-enabled Office files are allowed.
 
     Returns:
         bool: True if the file matches executable extensions or magic bytes; False otherwise.
@@ -138,7 +176,11 @@ def is_executable_upload(file_bytes: bytes, filename: str) -> bool:
         return False
 
     extension = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-    if extension in BLOCKED_EXECUTABLE_EXTENSIONS:
+    blocked_extensions = BLOCKED_EXECUTABLE_EXTENSIONS
+    if allow_macros:
+        blocked_extensions = blocked_extensions - {"docm", "xlsm"}
+
+    if extension in blocked_extensions:
         return True
 
     return file_bytes.startswith(EXECUTABLE_MAGIC_SIGNATURES)
@@ -159,7 +201,7 @@ def is_empty_or_whitespace_upload(file_bytes: bytes) -> bool:
 
 
 def inspect_upload_safety(
-    file_bytes: bytes, filename: str
+    file_bytes: bytes, filename: str, allow_macros: bool = ALLOW_MACROS
 ) -> dict[str, Any]:
     """Perform a comprehensive pre-ingestion security scan on an uploaded file payload.
 
@@ -173,17 +215,18 @@ def inspect_upload_safety(
     Args:
         file_bytes: Raw byte buffer of the upload.
         filename: Declared file name.
+        allow_macros: Whether macro-enabled files are allowed.
 
     Returns:
         dict[str, Any]: Security assessment report for the upload.
     """
     is_empty = not bool(file_bytes)
-    is_exec = is_executable_upload(file_bytes, filename)
+    is_exec = is_executable_upload(file_bytes, filename, allow_macros=allow_macros)
     extension = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
 
     valid_mime = False
     if not is_empty and not is_exec:
-        valid_mime = validate_mime_type(file_bytes, filename)
+        valid_mime = validate_mime_type(file_bytes, filename, allow_macros=allow_macros)
 
     return {
         "filename": filename,
@@ -198,20 +241,25 @@ def inspect_upload_safety(
 
 def batch_validate_upload_payloads(
     uploads: list[tuple[bytes, str]],
+    allow_macros: bool = ALLOW_MACROS,
 ) -> list[dict[str, Any]]:
     """Perform batch security and MIME validation across multiple uploaded documents.
 
     Args:
         uploads: List of tuples containing (file_bytes, filename).
+        allow_macros: Whether macro-enabled files are allowed.
 
     Returns:
         list[dict[str, Any]]: List of per-file safety reports.
     """
-    return [inspect_upload_safety(b, name) for b, name in uploads]
+    return [inspect_upload_safety(b, name, allow_macros=allow_macros) for b, name in uploads]
 
 
 def validate_upload_payload_safety(
-    file_bytes: bytes, filename: str, max_size_bytes: int = 100_000_000
+    file_bytes: bytes,
+    filename: str,
+    max_size_bytes: int = 100_000_000,
+    allow_macros: bool = ALLOW_MACROS,
 ) -> tuple[bool, str]:
     """Validate uploaded payload safety returning a pass/fail flag with actionable reason string.
 
@@ -219,6 +267,7 @@ def validate_upload_payload_safety(
         file_bytes: Raw binary upload data.
         filename: Declared file name.
         max_size_bytes: Optional upper file size constraint in bytes (default 100MB).
+        allow_macros: Whether macro-enabled files are allowed.
 
     Returns:
         tuple[bool, str]: (is_safe, reason_message)
@@ -229,19 +278,21 @@ def validate_upload_payload_safety(
     if len(file_bytes) > max_size_bytes:
         return False, f"File size ({len(file_bytes):,} bytes) exceeds maximum allowance ({max_size_bytes:,} bytes)."
 
-    if is_executable_upload(file_bytes, filename):
+    if is_executable_upload(file_bytes, filename, allow_macros=allow_macros):
         return False, f"File '{filename}' rejected as executable or dangerous script payload."
 
     if not validate_single_extension(filename):
         return False, f"File '{filename}' blocked due to executable double extension."
 
-    if not validate_mime_type(file_bytes, filename):
+    if not validate_mime_type(file_bytes, filename, allow_macros=allow_macros):
         return False, f"File '{filename}' content does not match declared MIME signature."
 
     return True, "File payload passed all security and MIME validation checks."
 
 
-def classify_upload_threat_vector(file_bytes: bytes, filename: str) -> dict[str, Any]:
+def classify_upload_threat_vector(
+    file_bytes: bytes, filename: str, allow_macros: bool = ALLOW_MACROS
+) -> dict[str, Any]:
     """Classify the risk category of an upload based on header analysis.
 
     Risk Levels:
@@ -254,6 +305,7 @@ def classify_upload_threat_vector(file_bytes: bytes, filename: str) -> dict[str,
     Args:
         file_bytes: Binary content.
         filename: Declared name.
+        allow_macros: Whether macro-enabled files are allowed.
 
     Returns:
         dict[str, Any]: Risk level, description, and recommendation.
@@ -268,7 +320,11 @@ def classify_upload_threat_vector(file_bytes: bytes, filename: str) -> dict[str,
         }
 
     extension = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-    if extension in BLOCKED_EXECUTABLE_EXTENSIONS:
+    blocked_extensions = BLOCKED_EXECUTABLE_EXTENSIONS
+    if allow_macros:
+        blocked_extensions = blocked_extensions - {"docm", "xlsm"}
+
+    if extension in blocked_extensions:
         return {
             "threat_level": "HIGH",
             "threat_category": "EXECUTABLE_EXTENSION",
@@ -295,12 +351,15 @@ def classify_upload_threat_vector(file_bytes: bytes, filename: str) -> dict[str,
     }
 
 
-def audit_file_stream_safety(stream_chunks: list[bytes], filename: str) -> dict[str, Any]:
+def audit_file_stream_safety(
+    stream_chunks: list[bytes], filename: str, allow_macros: bool = ALLOW_MACROS
+) -> dict[str, Any]:
     """Audit safety for streamed file chunks before merging into storage.
 
     Args:
         stream_chunks: List of byte chunks received from network stream.
         filename: Target filename.
+        allow_macros: Whether macro-enabled files are allowed.
 
     Returns:
         dict[str, Any]: Assessment of total stream bytes and early rejection result.
@@ -315,7 +374,7 @@ def audit_file_stream_safety(stream_chunks: list[bytes], filename: str) -> dict[
         }
 
     first_chunk = stream_chunks[0] if stream_chunks else b""
-    if is_executable_upload(first_chunk, filename):
+    if is_executable_upload(first_chunk, filename, allow_macros=allow_macros):
         return {
             "is_safe": False,
             "total_bytes": total_bytes,
@@ -340,6 +399,7 @@ def _validate_ooxml_archive(
     file_bytes: bytes,
     extension: str,
     filename: str,
+    allow_macros: bool = ALLOW_MACROS,
 ) -> bool:
     """Verify that a ZIP payload is the requested OOXML package type."""
     if extension not in OOXML_EXTENSIONS:
@@ -417,7 +477,12 @@ def _validate_ooxml_archive(
                 if element.tag.rsplit("}", 1)[-1] == "Override"
             }
 
-            if not (declared_content_types & OOXML_MAIN_CONTENT_TYPES[extension]):
+            # Filter the allowed content types based on allow_macros
+            allowed_types = OOXML_MAIN_CONTENT_TYPES[extension]
+            if not allow_macros:
+                allowed_types = allowed_types - MACRO_ENABLED_CONTENT_TYPES
+
+            if not (declared_content_types & allowed_types):
                 logger.warning(
                     "[mime_validator] '%s' does not declare a valid %s main content type.",
                     filename,
@@ -553,7 +618,11 @@ def validate_single_extension(filename: str) -> bool:
     return parts[-1] not in BLOCKED_EXECUTABLE_EXTENSIONS
 
 
-def validate_mime_type(file_bytes: bytes, filename: str) -> bool:
+def validate_mime_type(
+    file_bytes: bytes,
+    filename: str,
+    allow_macros: bool = ALLOW_MACROS,
+) -> bool:
     """Validate uploaded bytes against the declared file extension."""
     if not file_bytes:
         return False
@@ -565,7 +634,7 @@ def validate_mime_type(file_bytes: bytes, filename: str) -> bool:
         )
         return False
 
-    if is_executable_upload(file_bytes, filename):
+    if is_executable_upload(file_bytes, filename, allow_macros=allow_macros):
         logger.warning(
             "[mime_validator] Executable file signature or extension detected: '%s'.",
             filename,
@@ -586,6 +655,7 @@ def validate_mime_type(file_bytes: bytes, filename: str) -> bool:
             file_bytes,
             extension,
             filename,
+            allow_macros=allow_macros,
         )
 
     if extension == "doc":

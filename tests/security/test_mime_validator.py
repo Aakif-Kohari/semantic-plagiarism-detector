@@ -438,3 +438,61 @@ def test_ooxml_xml_entities_forbidden():
 
     assert validate_mime_type(archive_with_dtd, "report.docx") is False
 
+
+def build_docm() -> bytes:
+    return build_zip(
+        {
+            "[Content_Types].xml": CONTENT_TYPES_TEMPLATE.format(
+                part="/word/document.xml",
+                content_type="application/vnd.ms-word.document.macroEnabled.main+xml",
+            ),
+            "_rels/.rels": "<Relationships/>",
+            "word/document.xml": "<w:document/>",
+        }
+    )
+
+
+def build_xlsm() -> bytes:
+    return build_zip(
+        {
+            "[Content_Types].xml": CONTENT_TYPES_TEMPLATE.format(
+                part="/xl/workbook.xml",
+                content_type="application/vnd.ms-excel.sheet.macroEnabled.main+xml",
+            ),
+            "_rels/.rels": "<Relationships/>",
+            "xl/workbook.xml": "<workbook/>",
+        }
+    )
+
+
+def test_macro_enabled_documents_rejected_by_default():
+    # 1. Blocked extension checks
+    assert is_executable_upload(b"PK\x03\x04", "report.docm") is True
+    assert is_executable_upload(b"PK\x03\x04", "report.xlsm") is True
+
+    # 2. validate_mime_type checks
+    assert validate_mime_type(build_docm(), "report.docm") is False
+    assert validate_mime_type(build_xlsm(), "report.xlsm") is False
+
+    # 3. Spoofed docx/xlsx carrying macros inside
+    spoofed_docx = build_docm()  # built as docm but named as docx
+    assert validate_mime_type(spoofed_docx, "spoofed.docx") is False
+
+    spoofed_xlsx = build_xlsm()  # built as xlsm but named as xlsx
+    assert validate_mime_type(spoofed_xlsx, "spoofed.xlsx") is False
+
+
+def test_macro_enabled_documents_allowed_if_configured():
+    # 1. Extension check when macros allowed
+    assert is_executable_upload(b"PK\x03\x04", "report.docm", allow_macros=True) is False
+    assert is_executable_upload(b"PK\x03\x04", "report.xlsm", allow_macros=True) is False
+
+    # 2. validate_mime_type checks
+    assert validate_mime_type(build_docm(), "report.docm", allow_macros=True) is True
+    assert validate_mime_type(build_xlsm(), "report.xlsm", allow_macros=True) is True
+
+    # 3. Spoofed docx/xlsx carrying macros accepted if macros allowed
+    spoofed_docx = build_docm()
+    assert validate_mime_type(spoofed_docx, "spoofed.docx", allow_macros=True) is True
+
+
