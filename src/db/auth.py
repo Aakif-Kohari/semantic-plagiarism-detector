@@ -508,35 +508,12 @@ def _validate_password(password: str) -> str:
     return password
 
 
+# Imported from src.security.password_validator
+from src.security.password_validator import validate_password_complexity
+
 def _validate_password_complexity(password: str) -> str:
-    """Enforce strong password policy for user creation and password updates."""
-    password = str(password)
-    if len(password) < 8:
-        raise ValueError("Password must be at least 8 characters long.")
-    if len(password) > 128:
-        raise ValueError("Password cannot exceed 128 characters.")
-    if not re.search(r"[A-Z]", password):
-        raise ValueError("Password must contain at least one uppercase letter.")
-    if not re.search(r"\d", password):
-        raise ValueError("Password must contain at least one number.")
-    if not re.search(r"[@$!%*?&_\-#^()+=\[\]{}|:<>,./~\\]", password):
-        raise ValueError(
-            "Password must contain at least one special character (e.g. @$!%*?&)."
-        )
-    if zxcvbn is not None:
-        result = zxcvbn.zxcvbn(password)
-        if result.get("score", 0) < 3:
-            feedback = result.get("feedback", {})
-            warning = feedback.get("warning")
-            if warning:
-                raise ValueError(f"Password is too weak or common: {warning}")
-            raise ValueError(
-                "Password is too weak or commonly used. Please choose a stronger password."
-            )
+    validate_password_complexity(password)
     return password
-
-
-validate_password_complexity = _validate_password_complexity
 
 
 def _validate_role(role: str) -> str:
@@ -816,6 +793,7 @@ def add_user(username: str, password: str, role: str = "teacher") -> None:
     try:
         username = _validate_username(username)
         password = _validate_password(password)
+        validate_password_complexity(password)
         role = _validate_role(role)
         hashed = _hash_password(password)
         now_str = dt.now(timezone.utc).isoformat()
@@ -910,6 +888,7 @@ def update_password(
     try:
         username = _validate_username(username)
         new_password = _validate_password(new_password)
+        validate_password_complexity(new_password)
 
         with _connect() as conn:
             cursor = conn.execute(
