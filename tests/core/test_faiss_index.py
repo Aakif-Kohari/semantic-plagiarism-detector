@@ -2,18 +2,11 @@ import faiss
 import numpy as np
 import pytest
 
-from src.core.faiss_index import (
-    ChunkRecord,
-    add_to_index,
-    build_index,
-    find_plagiarised_chunks,
-    load_index,
-    optimize_faiss_index,
-    remove_document_from_index,
-    save_index,
-    search_batch_vectors,
-    search_similar_chunks,
-)
+from src.core.faiss_index import (ChunkRecord, add_to_index, build_index,
+                                  find_plagiarised_chunks, load_index,
+                                  optimize_faiss_index,
+                                  remove_document_from_index, save_index,
+                                  search_batch_vectors, search_similar_chunks)
 
 
 def _unit_vecs(n, dim=384):
@@ -150,7 +143,8 @@ def test_chunk_record_repr():
 
 
 def test_faiss_normalization_parity():
-    """Verify that FAISS vector search results are mathematically identical between raw and normalized embeddings."""
+    """Verify that FAISS vector search results are mathematically identical between raw and
+    normalized embeddings."""
     np.random.seed(42)
     # Generate 10 random vectors
     embeddings = {"doc_a": np.random.rand(10, 384).astype("float32")}
@@ -364,7 +358,9 @@ def test_remove_document_from_index_prunes_registry(two_doc_data):
     embeddings, chunked = two_doc_data
     index, registry = _make_idmap_index(embeddings, chunked)
 
-    assert isinstance(index, faiss.IndexIDMap), "Precondition: index must be IDMap-wrapped"
+    assert isinstance(
+        index, faiss.IndexIDMap
+    ), "Precondition: index must be IDMap-wrapped"
     assert index.ntotal == 6
     assert len(registry) == 6
 
@@ -406,9 +402,10 @@ def test_remove_document_from_index_search_excludes_deleted(two_doc_data):
     for vec in embeddings["doc_a"]:
         results = search_similar_chunks(vec, new_index, new_registry, top_k=10)
         for record, _ in results:
-            assert record.doc_name != "doc_a", (
-                f"search returned a ChunkRecord from deleted document 'doc_a': {record!r}"
-            )
+            assert (
+                record.doc_name != "doc_a"
+            ), f"search returned a ChunkRecord from deleted document 'doc_a': {record!r}"
+
 
 # ── FAISS k-overflow regression test (#4034) ──────────────────────────────────
 
@@ -437,3 +434,35 @@ def test_search_similar_chunks_k_larger_than_index_size():
         assert isinstance(record, ChunkRecord)
         assert record.doc_name == "doc_a"
         assert isinstance(score, float)
+
+
+# ── Dimension mismatch validation tests (#4029) ──────────────────────────────
+
+
+def test_build_index_dimension_mismatch():
+    embeddings = {"doc1": np.random.rand(2, 100).astype("float32")}
+    chunked = {"doc1": ["c1", "c2"]}
+    with pytest.raises(ValueError, match=r"Embedding dimension mismatch: 100 != 384"):
+        build_index(embeddings, chunked)
+
+
+def test_build_index_from_matrix_dimension_mismatch():
+    from src.core.faiss_index import build_index_from_matrix
+
+    matrix = np.random.rand(2, 100).astype("float32")
+    with pytest.raises(ValueError, match=r"Embedding dimension mismatch: 100 != 384"):
+        build_index_from_matrix(matrix)
+
+
+def test_add_to_index_dimension_mismatch(two_doc_data):
+    embeddings, chunked = two_doc_data
+    index, registry = build_index(embeddings, chunked)
+
+    # Try adding vectors with wrong dimension
+    bad_embeddings = {"doc2": np.random.rand(2, 100).astype("float32")}
+    bad_chunked = {"doc2": ["c1", "c2"]}
+
+    with pytest.raises(
+        ValueError, match=rf"Embedding dimension mismatch: 100 != {index.d}"
+    ):
+        add_to_index(index, registry, bad_embeddings, bad_chunked)

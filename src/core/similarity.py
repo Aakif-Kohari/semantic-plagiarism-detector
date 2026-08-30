@@ -34,7 +34,8 @@ from src.core.config import (
     PLAGIARISM_THRESHOLD,
     is_plagiarism,
     severity_from_score,
-)from src.core.cross_lingual import detect_chunk_language
+)
+from src.core.cross_lingual import detect_chunk_language
 
 # ── Distance / similarity conversion ──────────────────────────────────────────
 
@@ -735,7 +736,8 @@ def flag_plagiarism(
     FAISS/bi-encoder score is preserved as ``semantic_score`` and the refined
     score is added as ``cross_encoder_score``; if the cross-encoder model is
     unavailable, flags fall back to the original similarity score unchanged.
-    """       flags = []
+    """
+    flags = []
     _chunk_pair_texts: dict[tuple[str, str], tuple[str, str]] = {}
     doc_names = similarity_df.columns.tolist()
     name_to_idx = {name: i for i, name in enumerate(doc_names)}
@@ -796,7 +798,8 @@ def flag_plagiarism(
                 )
                 flag_dict["evidence"] = evidence.to_dict()
             
-            flags.append(flag_dict)            if chunk_pair_texts is not None:
+            flags.append(flag_dict)
+            if chunk_pair_texts is not None:
                 _chunk_pair_texts[(doc_a, doc_b)] = chunk_pair_texts
 
     flags.sort(key=lambda item: item["similarity"], reverse=True)
