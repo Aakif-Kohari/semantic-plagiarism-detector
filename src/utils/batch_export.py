@@ -13,6 +13,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from src.utils.export_sanitizer import sanitize_spreadsheet_value
+
 logger = logging.getLogger(__name__)
 
 
@@ -39,7 +41,7 @@ class BatchExporter:
 
     def export_json(
         self,
-        results: Dict[str, Any],
+        results: dict[str, Any],
         filename: str = "batch_results.json"
     ) -> str:
         """
@@ -64,7 +66,7 @@ class BatchExporter:
 
     def export_csv(
         self,
-        data: List[Dict[str, Any]],
+        data: list[dict[str, Any]],
         filename: str = "batch_results.csv"
     ) -> str:
         """
@@ -87,14 +89,26 @@ class BatchExporter:
         with open(output_path, "w", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=headers)
             writer.writeheader()
-            writer.writerows(data[:self.config.max_results])
+            for row in data[: self.config.max_results]:
+                writer.writerow(
+                    {
+                        key: (
+                            ""
+                            if value is None
+                            else sanitize_spreadsheet_value(value)
+                            if isinstance(value, str)
+                            else value
+                        )
+                        for key, value in row.items()
+                    }
+                )
         logger.info(f"Exported CSV to {output_path}")
         return output_path
 
     def export_plagiarism_report(
         self,
-        flagged_pairs: List[Dict[str, Any]],
-        summary: Dict[str, Any],
+        flagged_pairs: list[dict[str, Any]],
+        summary: dict[str, Any],
         filename: str = "plagiarism_report.json"
     ) -> str:
         """
@@ -130,7 +144,7 @@ class BatchExporter:
 
     def export_batch_summary(
         self,
-        jobs: List[Dict[str, Any]],
+        jobs: list[dict[str, Any]],
         filename: str = "batch_summary.csv"
     ) -> str:
         """
@@ -163,7 +177,7 @@ class BatchExporter:
 
     def generate_text_summary(
         self,
-        results: Dict[str, Any]
+        results: dict[str, Any]
     ) -> str:
         """
         Generate a human-readable text summary.
@@ -195,11 +209,11 @@ class BatchExporter:
 
     def export_all(
         self,
-        results: Dict[str, Any],
-        flagged_pairs: List[Dict[str, Any]],
-        jobs: List[Dict[str, Any]],
+        results: dict[str, Any],
+        flagged_pairs: list[dict[str, Any]],
+        jobs: list[dict[str, Any]],
         base_name: str = "batch_export"
-    ) -> Dict[str, str]:
+    ) -> dict[str, str]:
         """
         Export all results in multiple formats.
 

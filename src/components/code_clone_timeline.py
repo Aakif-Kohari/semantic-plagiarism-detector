@@ -3,7 +3,7 @@
 from typing import Any, List
 
 
-def render_code_clone_timeline(matches: List[Any]) -> str:
+def render_code_clone_timeline(matches: list[Any]) -> str:
     """Renders HTML telemetry timeline list for code clone detections."""
     if not matches:
         return """

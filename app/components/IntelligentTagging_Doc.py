@@ -25,13 +25,13 @@ class DocumentTag:
     created_at: datetime
     created_by: str
     is_auto_generated: bool = False
-    metadata: Dict = None
+    metadata: dict = None
     
     def __post_init__(self):
         if self.metadata is None:
             self.metadata = {}
     
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         return {
             **asdict(self),
             'created_at': self.created_at.isoformat()
@@ -45,9 +45,9 @@ class DocumentCategory:
     description: str
     parent_id: Optional[str] = None
     color: str = '#808080'
-    tags: List[str] = None
+    tags: list[str] = None
     created_at: datetime = None
-    metadata: Dict = None
+    metadata: dict = None
     
     def __post_init__(self):
         if self.tags is None:
@@ -57,7 +57,7 @@ class DocumentCategory:
         if self.created_at is None:
             self.created_at = datetime.now()
     
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         return {
             **asdict(self),
             'created_at': self.created_at.isoformat()
@@ -73,7 +73,7 @@ class TagAssignment:
     assigned_by: str
     is_auto: bool = False
     
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         return {
             **asdict(self),
             'assigned_at': self.assigned_at.isoformat()
@@ -102,7 +102,7 @@ class IntelligentTagGenerator:
         
         self.tag_cache = {}
     
-    def generate_tags(self, content: str, max_tags: int = 10) -> List[Tuple[str, float]]:
+    def generate_tags(self, content: str, max_tags: int = 10) -> list[tuple[str, float]]:
         """Generate tags from document content"""
         if not content:
             return []
@@ -126,7 +126,7 @@ class IntelligentTagGenerator:
         
         return tags
     
-    def _extract_keywords(self, content: str) -> Dict[str, float]:
+    def _extract_keywords(self, content: str) -> dict[str, float]:
         """Extract keywords from content with TF-IDF scoring"""
         # Simple keyword extraction
         words = re.findall(r'\b[a-zA-Z]{3,}\b', content.lower())
@@ -149,7 +149,7 @@ class IntelligentTagGenerator:
         
         return scores
     
-    def _score_tags(self, keywords: Dict[str, float], content: str) -> List[Tuple[str, float]]:
+    def _score_tags(self, keywords: dict[str, float], content: str) -> list[tuple[str, float]]:
         """Score potential tags"""
         tags = []
         
@@ -171,7 +171,7 @@ class IntelligentTagGenerator:
         
         return list(unique_tags.items())
     
-    def _detect_topics(self, content: str) -> List[Tuple[str, float]]:
+    def _detect_topics(self, content: str) -> list[tuple[str, float]]:
         """Detect topics in content using keyword matching"""
         content_lower = content.lower()
         topic_scores = []
@@ -190,7 +190,7 @@ class IntelligentTagGenerator:
         
         return topic_scores
     
-    def generate_categories(self, content: str) -> Tuple[str, float]:
+    def generate_categories(self, content: str) -> tuple[str, float]:
         """Generate category prediction for document"""
         if not content:
             return 'Uncategorized', 0.0
@@ -216,9 +216,9 @@ class TagManager:
     """Manages document tags and categories"""
     
     def __init__(self):
-        self.tags: Dict[str, DocumentTag] = {}
-        self.categories: Dict[str, DocumentCategory] = {}
-        self.assignments: List[TagAssignment] = []
+        self.tags: dict[str, DocumentTag] = {}
+        self.categories: dict[str, DocumentCategory] = {}
+        self.assignments: list[TagAssignment] = []
         self.tag_counter = Counter()
         self.tag_usage = defaultdict(int)
         
@@ -278,7 +278,7 @@ class TagManager:
                 return tag
         return None
     
-    def get_all_tags(self) -> List[DocumentTag]:
+    def get_all_tags(self) -> list[DocumentTag]:
         """Get all tags"""
         return list(self.tags.values())
     
@@ -317,12 +317,12 @@ class TagManager:
             self.tag_counter[tag_name] -= 1
         return True
     
-    def get_document_tags(self, document_name: str) -> List[DocumentTag]:
+    def get_document_tags(self, document_name: str) -> list[DocumentTag]:
         """Get all tags for a document"""
         doc_assignments = [a for a in self.assignments if a.document_name == document_name]
         return [self.tags[a.tag_id] for a in doc_assignments if a.tag_id in self.tags]
     
-    def get_documents_by_tag(self, tag_name: str) -> List[str]:
+    def get_documents_by_tag(self, tag_name: str) -> list[str]:
         """Get all documents with a specific tag"""
         tag = self.get_tag_by_name(tag_name)
         if not tag:
@@ -347,11 +347,11 @@ class TagManager:
         """Get a category by ID"""
         return self.categories.get(category_id)
     
-    def get_all_categories(self) -> List[DocumentCategory]:
+    def get_all_categories(self) -> list[DocumentCategory]:
         """Get all categories"""
         return list(self.categories.values())
     
-    def get_tag_stats(self) -> Dict:
+    def get_tag_stats(self) -> dict:
         """Get tag statistics"""
         return {
             'total_tags': len(self.tags),
@@ -380,7 +380,7 @@ class TagManager:
 # ── Auto-Categorizer ──────────────────────────────────────────────────────
 
 @st.cache_data(show_spinner=False)
-def _categorize_content(content: str) -> Tuple[List[Tuple[str, float]], str, float]:
+def _categorize_content(content: str) -> tuple[list[tuple[str, float]], str, float]:
     """Cache the CPU-heavy tagging/category analysis for immutable document content."""
     generator = IntelligentTagGenerator()
     tags = generator.generate_tags(content)
@@ -397,7 +397,7 @@ class AutoCategorizer:
         self.categorization_history = []
     
     def categorize_document(self, document_name: str, content: str, 
-                           user_id: str = 'system') -> Dict:
+                           user_id: str = 'system') -> dict:
         """Automatically categorize a document"""
         if not content:
             return {'status': 'failed', 'reason': 'No content'}
@@ -436,8 +436,8 @@ class AutoCategorizer:
                 return cat.id
         return None
     
-    def batch_categorize(self, documents: Dict[str, str], 
-                         user_id: str = 'system') -> List[Dict]:
+    def batch_categorize(self, documents: dict[str, str], 
+                         user_id: str = 'system') -> list[dict]:
         """Categorize multiple documents"""
         results = []
         for doc_name, content in documents.items():
@@ -445,7 +445,7 @@ class AutoCategorizer:
             results.append(result)
         return results
     
-    def get_categorization_stats(self) -> Dict:
+    def get_categorization_stats(self) -> dict:
         """Get categorization statistics"""
         if not self.categorization_history:
             return {'total': 0}
@@ -469,8 +469,8 @@ class TagSuggestionEngine:
         self.tag_generator = tag_generator
         self.suggestion_history = []
     
-    def suggest_tags(self, content: str, existing_tags: List[str] = None, 
-                     max_suggestions: int = 5) -> List[Tuple[str, float]]:
+    def suggest_tags(self, content: str, existing_tags: list[str] = None, 
+                     max_suggestions: int = 5) -> list[tuple[str, float]]:
         """Suggest tags for a document"""
         suggestions = []
         
@@ -502,7 +502,7 @@ class TagSuggestionEngine:
         
         return suggestions[:max_suggestions]
     
-    def get_suggestion_stats(self) -> Dict:
+    def get_suggestion_stats(self) -> dict:
         """Get suggestion statistics"""
         return {
             'total_suggestions': len(self.suggestion_history),

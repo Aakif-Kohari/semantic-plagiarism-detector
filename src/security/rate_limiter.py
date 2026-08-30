@@ -71,7 +71,7 @@ class RateLimiter:
         """Generate the Redis key for a blocked client."""
         return f"{self.prefix}:blocked:{identifier}"
 
-    def _build_headers(self, remaining: int, retry_after: int) -> Dict[str, str]:
+    def _build_headers(self, remaining: int, retry_after: int) -> dict[str, str]:
         """Assemble the standard rate-limit response headers.
 
         Args:
@@ -90,7 +90,7 @@ class RateLimiter:
             "Retry-After": str(retry_after),
         }
 
-    def check_rate_limit(self, identifier: str) -> Tuple[bool, Dict[str, str]]:
+    def check_rate_limit(self, identifier: str) -> tuple[bool, dict[str, str]]:
         """
         Check if a request is allowed under the rate limit and return headers.
 
@@ -180,7 +180,7 @@ def get_rate_limit_headers(
     identifier: str,
     limit: int = DEFAULT_LIMIT,
     window: int = DEFAULT_WINDOW,
-) -> Tuple[bool, Dict[str, str]]:
+) -> tuple[bool, dict[str, str]]:
     """
     Convenience function to check rate limits and get headers.
 
@@ -222,7 +222,7 @@ class TokenBucketRateLimiter:
         """
         self.capacity = float(capacity)
         self.refill_rate = float(refill_rate)
-        self._buckets: Dict[str, Dict[str, float]] = {}
+        self._buckets: dict[str, dict[str, float]] = {}
         self._lock = threading.Lock()
 
     def consume(self, identifier: str, tokens: float = 1.0) -> bool:

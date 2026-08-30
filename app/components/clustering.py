@@ -3,6 +3,19 @@
 # ───────────────────────────────────────────────────────────────────────────────
 
 # ── Imports for Clustering and Topic Analysis ─────────────────────────────
+import logging
+import os
+from datetime import datetime, timedelta
+from typing import Any, Dict, List, Optional, Tuple
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import streamlit as st
+
+# Defined before the optional-dependency block below, which logs through it.
+logger = logging.getLogger(__name__)
+
 try:
     import scipy.cluster.hierarchy as sch
     from scipy.cluster.hierarchy import fcluster
@@ -737,22 +750,67 @@ def render_clustering_tab(similarity_matrix: np.ndarray,
     
     # Run clustering
     if st.button("🔬 Run Clustering Analysis", type="primary"):
-        with st.spinner("Performing hierarchical clustering..."):
-            # Fit clustering
-            labels = clusterer.fit_hierarchical(
-                similarity_matrix,
-                n_clusters=n_clusters
-            )
-            
+        with st.spinner("Submitting document clustering task to background service..."):
+            labels = None
+            metrics = None
+
+            # Attempt background task execution via FastAPI endpoint (Issue #3122)
+            try:
+                import requests
+                import time
+                api_base = os.getenv("API_BASE_URL", "http://localhost:8000")
+                init_resp = requests.post(
+                    f"{api_base}/api/v1/analysis/cluster",
+                    json={
+                        "algorithm": "hierarchical",
+                        "n_clusters": n_clusters,
+                        "linkage": linkage_method,
+                        "similarity_matrix": similarity_matrix.tolist() if hasattr(similarity_matrix, "tolist") else similarity_matrix,
+                    },
+                    timeout=5,
+                )
+                if init_resp.status_code in (200, 202):
+                    task_id = init_resp.json().get("task_id")
+                    if task_id:
+                        st.info(f"Task #{task_id} initiated. Polling background task...")
+                        max_polls = 60
+                        for _ in range(max_polls):
+                            time.sleep(0.5)
+                            status_resp = requests.get(f"{api_base}/api/v1/analysis/cluster/task/{task_id}", timeout=5)
+                            if status_resp.ok:
+                                task_data = status_resp.json()
+                                task_status = task_data.get("status")
+                                if task_status == "completed":
+                                    res = task_data.get("result", {})
+                                    labels = np.array(res.get("labels", []))
+                                    metrics = res.get("cluster_metrics", {})
+                                    break
+                                elif task_status == "failed":
+                                    st.warning(f"Background task failed: {task_data.get('error')}. Falling back to local execution.")
+                                    break
+            except Exception as e:
+                logger.debug(f"Background clustering endpoint polling fallback: {e}")
+
+            # Fall back to in-process execution if background service is unavailable
+            if labels is None:
+                labels = clusterer.fit_hierarchical(
+                    similarity_matrix,
+                    n_clusters=n_clusters
+                )
+                metrics = clusterer.cluster_metrics
+            else:
+                clusterer.labels = labels
+                clusterer.cluster_metrics = metrics
+                clusterer.is_fitted = True
+
             # Store in session state
             st.session_state['cluster_labels'] = labels
             st.session_state['clusterer'] = clusterer
-            
+
             # Display metrics
             st.success("✅ Clustering completed!")
-            
+
             # Metrics dashboard
-            metrics = clusterer.cluster_metrics
             col1, col2, col3, col4 = st.columns(4)
             col1.metric("Number of Clusters", metrics['n_clusters'])
             col2.metric("Silhouette Score", f"{metrics['silhouette_score']:.3f}")

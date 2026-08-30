@@ -5,7 +5,7 @@ from __future__ import annotations
 import io
 import logging
 import zipfile
-from typing import Optional
+from typing import Dict, List, Optional, Set, Tuple
 
 import defusedxml.ElementTree as ElementTree
 from defusedxml.common import DefusedXmlException
@@ -72,7 +72,7 @@ ALLOWED_MIME_TYPES: dict[str, list[str]] = {
     "jpeg": ["image/jpeg"],
 }
 
-ALLOWED_MAGIC_HEADERS = {
+ALLOWED_MAGIC_HEADERS: dict[str, list[bytes]] = {
     "pdf": [b"%PDF-"],
     "zip": [b"PK\x03\x04"],
     "epub": [b"PK\x03\x04"],
@@ -84,29 +84,29 @@ ALLOWED_MAGIC_HEADERS = {
     "jpeg": [b"\xff\xd8\xff"],
 }
 
-OOXML_EXTENSIONS = {"docx", "xlsx"}
-OOXML_REQUIRED_PARTS = {
+OOXML_EXTENSIONS: set[str] = {"docx", "xlsx"}
+OOXML_REQUIRED_PARTS: dict[str, set[str]] = {
     "docx": {"[Content_Types].xml", "word/document.xml"},
     "xlsx": {"[Content_Types].xml", "xl/workbook.xml"},
 }
-OOXML_MAIN_CONTENT_TYPES = {
+OOXML_MAIN_CONTENT_TYPES: dict[str, set[str]] = {
     "docx": {
         "application/vnd.openxmlformats-officedocument."
         "wordprocessingml.document.main+xml",
         "application/vnd.ms-word.document.macroEnabled.main+xml",
     },
     "xlsx": {
-        "application/vnd.openxmlformats-officedocument." "spreadsheetml.sheet.main+xml",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml",
         "application/vnd.ms-excel.sheet.macroEnabled.main+xml",
     },
 }
 
 # Conservative limits for metadata-only archive inspection.
-MAX_OOXML_ARCHIVE_ENTRIES = 10_000
-MAX_OOXML_TOTAL_UNCOMPRESSED_SIZE = 250 * 1024 * 1024
-MAX_CONTENT_TYPES_XML_SIZE = 2 * 1024 * 1024
+MAX_OOXML_ARCHIVE_ENTRIES: int = 10_000
+MAX_OOXML_TOTAL_UNCOMPRESSED_SIZE: int = 250 * 1024 * 1024
+MAX_CONTENT_TYPES_XML_SIZE: int = 2 * 1024 * 1024
 
-BLOCKED_EXECUTABLE_EXTENSIONS = {
+BLOCKED_EXECUTABLE_EXTENSIONS: set[str] = {
     "exe",
     "sh",
     "bat",
@@ -117,9 +117,7 @@ BLOCKED_EXECUTABLE_EXTENSIONS = {
 
 # Magic-byte signatures that identify executable/script content regardless
 # of the declared file extension.
-#   b"MZ"        - Windows DOS/PE executable header (.exe, .dll)
-#   b"#!/bin/sh" - POSIX shell script shebang
-EXECUTABLE_MAGIC_SIGNATURES = (
+EXECUTABLE_MAGIC_SIGNATURES: tuple[bytes, ...] = (
     b"MZ",
     b"#!/bin/sh",
 )
@@ -128,15 +126,211 @@ EXECUTABLE_MAGIC_SIGNATURES = (
 def is_executable_upload(file_bytes: bytes, filename: str) -> bool:
     """Return True if the upload looks like an executable or shell script.
 
-    Checks both the declared file extension (.exe, .sh, .bat, .dll, ...)
-    and the leading magic bytes (PE header "MZ", shell shebang
-    "#!/bin/sh") so a renamed executable is still caught.
+    Issue #3718: Ensure empty files (b"") return False immediately without
+    running extension or magic byte checks.
+
+    Args:
+        file_bytes: Raw binary content of the uploaded file.
+        filename: Declared file name with extension.
+
+    Returns:
+        bool: True if the file matches executable extensions or magic bytes; False otherwise.
     """
+    if not file_bytes:
+        return False
+
     extension = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
     if extension in BLOCKED_EXECUTABLE_EXTENSIONS:
         return True
 
     return file_bytes.startswith(EXECUTABLE_MAGIC_SIGNATURES)
+
+
+def is_empty_or_whitespace_upload(file_bytes: bytes) -> bool:
+    """Check whether an uploaded byte sequence is empty or composed exclusively of whitespace.
+
+    Args:
+        file_bytes: Raw binary payload.
+
+    Returns:
+        bool: True if payload is zero-length or only whitespace.
+    """
+    if not file_bytes:
+        return True
+    return bool(file_bytes.strip() == b"")
+
+
+def inspect_upload_safety(
+    file_bytes: bytes, filename: str
+) -> dict[str, Any]:
+    """Perform a comprehensive pre-ingestion security scan on an uploaded file payload.
+
+    Evaluates:
+        - is_empty: Whether payload has 0 bytes.
+        - is_executable: Whether payload exhibits executable extensions or magic bytes.
+        - is_valid_mime: Whether payload matches declared document MIME structure.
+        - detected_size: Byte length of upload.
+        - extension: Normalized lowercase extension.
+
+    Args:
+        file_bytes: Raw byte buffer of the upload.
+        filename: Declared file name.
+
+    Returns:
+        dict[str, Any]: Security assessment report for the upload.
+    """
+    is_empty = not bool(file_bytes)
+    is_exec = is_executable_upload(file_bytes, filename)
+    extension = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+
+    valid_mime = False
+    if not is_empty and not is_exec:
+        valid_mime = validate_mime_type(file_bytes, filename)
+
+    return {
+        "filename": filename,
+        "extension": extension,
+        "size_bytes": len(file_bytes) if file_bytes else 0,
+        "is_empty": is_empty,
+        "is_executable": is_exec,
+        "is_valid_mime": valid_mime,
+        "status": "rejected_empty" if is_empty else ("rejected_executable" if is_exec else ("accepted" if valid_mime else "rejected_invalid_mime")),
+    }
+
+
+def batch_validate_upload_payloads(
+    uploads: list[tuple[bytes, str]],
+) -> list[dict[str, Any]]:
+    """Perform batch security and MIME validation across multiple uploaded documents.
+
+    Args:
+        uploads: List of tuples containing (file_bytes, filename).
+
+    Returns:
+        list[dict[str, Any]]: List of per-file safety reports.
+    """
+    return [inspect_upload_safety(b, name) for b, name in uploads]
+
+
+def validate_upload_payload_safety(
+    file_bytes: bytes, filename: str, max_size_bytes: int = 100_000_000
+) -> tuple[bool, str]:
+    """Validate uploaded payload safety returning a pass/fail flag with actionable reason string.
+
+    Args:
+        file_bytes: Raw binary upload data.
+        filename: Declared file name.
+        max_size_bytes: Optional upper file size constraint in bytes (default 100MB).
+
+    Returns:
+        tuple[bool, str]: (is_safe, reason_message)
+    """
+    if not file_bytes:
+        return False, "Uploaded file is empty (0 bytes)."
+
+    if len(file_bytes) > max_size_bytes:
+        return False, f"File size ({len(file_bytes):,} bytes) exceeds maximum allowance ({max_size_bytes:,} bytes)."
+
+    if is_executable_upload(file_bytes, filename):
+        return False, f"File '{filename}' rejected as executable or dangerous script payload."
+
+    if not validate_single_extension(filename):
+        return False, f"File '{filename}' blocked due to executable double extension."
+
+    if not validate_mime_type(file_bytes, filename):
+        return False, f"File '{filename}' content does not match declared MIME signature."
+
+    return True, "File payload passed all security and MIME validation checks."
+
+
+def classify_upload_threat_vector(file_bytes: bytes, filename: str) -> dict[str, Any]:
+    """Classify the risk category of an upload based on header analysis.
+
+    Risk Levels:
+        - "NONE": Safe document matching expected format.
+        - "EMPTY": Zero byte payload (invalid but benign).
+        - "EXECUTABLE_EXTENSION": Blocked dangerous extension.
+        - "MAGIC_BYTE_MISMATCH": Dangerous binary disguised as document.
+        - "CORRUPT_ARCHIVE": Damaged or tampered container.
+
+    Args:
+        file_bytes: Binary content.
+        filename: Declared name.
+
+    Returns:
+        dict[str, Any]: Risk level, description, and recommendation.
+    """
+    if not file_bytes:
+        return {
+            "threat_level": "LOW",
+            "threat_category": "EMPTY_PAYLOAD",
+            "is_dangerous": False,
+            "description": "Zero byte file upload.",
+            "recommendation": "Prompt user to select a non-empty document.",
+        }
+
+    extension = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    if extension in BLOCKED_EXECUTABLE_EXTENSIONS:
+        return {
+            "threat_level": "HIGH",
+            "threat_category": "EXECUTABLE_EXTENSION",
+            "is_dangerous": True,
+            "description": f"Dangerous file extension '{extension}' is blocked.",
+            "recommendation": "Reject immediately and log security event.",
+        }
+
+    if file_bytes.startswith(EXECUTABLE_MAGIC_SIGNATURES):
+        return {
+            "threat_level": "CRITICAL",
+            "threat_category": "MAGIC_BYTE_MISMATCH",
+            "is_dangerous": True,
+            "description": "Executable or shell script magic bytes found inside declared document.",
+            "recommendation": "Block file and flag incident for administrator review.",
+        }
+
+    return {
+        "threat_level": "NONE",
+        "threat_category": "SAFE_DOCUMENT",
+        "is_dangerous": False,
+        "description": "Standard document upload structure.",
+        "recommendation": "Proceed with ingestion pipeline.",
+    }
+
+
+def audit_file_stream_safety(stream_chunks: list[bytes], filename: str) -> dict[str, Any]:
+    """Audit safety for streamed file chunks before merging into storage.
+
+    Args:
+        stream_chunks: List of byte chunks received from network stream.
+        filename: Target filename.
+
+    Returns:
+        dict[str, Any]: Assessment of total stream bytes and early rejection result.
+    """
+    total_bytes = sum(len(c) for c in stream_chunks) if stream_chunks else 0
+    if total_bytes == 0:
+        return {
+            "is_safe": False,
+            "total_bytes": 0,
+            "reason": "Stream is completely empty.",
+            "early_rejected": True,
+        }
+
+    first_chunk = stream_chunks[0] if stream_chunks else b""
+    if is_executable_upload(first_chunk, filename):
+        return {
+            "is_safe": False,
+            "total_bytes": total_bytes,
+            "reason": "Executable signature detected in leading chunk.",
+            "early_rejected": True,
+        }
+
+    return {
+        "is_safe": True,
+        "total_bytes": total_bytes,
+        "reason": "Stream header appears safe.",
+        "early_rejected": False,
+    }
 
 
 def _normalized_zip_name(name: str) -> str:
@@ -155,7 +349,7 @@ def _validate_ooxml_archive(
 
     if not file_bytes.startswith(b"PK"):
         logger.warning(
-            "[mime_validator] Invalid ZIP signature for OOXML file " "'%s'.",
+            "[mime_validator] Invalid ZIP signature for OOXML file '%s'.",
             filename,
         )
         return False
@@ -165,7 +359,7 @@ def _validate_ooxml_archive(
             members = archive.infolist()
             if len(members) > MAX_OOXML_ARCHIVE_ENTRIES:
                 logger.warning(
-                    "[mime_validator] OOXML archive '%s' contains " "too many entries.",
+                    "[mime_validator] OOXML archive '%s' contains too many entries.",
                     filename,
                 )
                 return False
@@ -173,8 +367,7 @@ def _validate_ooxml_archive(
             total_uncompressed_size = sum(member.file_size for member in members)
             if total_uncompressed_size > MAX_OOXML_TOTAL_UNCOMPRESSED_SIZE:
                 logger.warning(
-                    "[mime_validator] OOXML archive '%s' exceeds "
-                    "the uncompressed-size safety limit.",
+                    "[mime_validator] OOXML archive '%s' exceeds the uncompressed-size safety limit.",
                     filename,
                 )
                 return False
@@ -186,8 +379,7 @@ def _validate_ooxml_archive(
 
             if not required.issubset(normalized_names):
                 logger.warning(
-                    "[mime_validator] '%s' is missing required %s "
-                    "OOXML package parts.",
+                    "[mime_validator] '%s' is missing required %s OOXML package parts.",
                     filename,
                     extension.upper(),
                 )
@@ -196,8 +388,7 @@ def _validate_ooxml_archive(
             content_types_member = normalized_names["[content_types].xml".casefold()]
             if content_types_member.file_size > MAX_CONTENT_TYPES_XML_SIZE:
                 logger.warning(
-                    "[mime_validator] [Content_Types].xml in '%s' "
-                    "exceeds the safety limit.",
+                    "[mime_validator] [Content_Types].xml in '%s' exceeds the safety limit.",
                     filename,
                 )
                 return False
@@ -212,7 +403,7 @@ def _validate_ooxml_archive(
 
             if len(content_types_xml) > MAX_CONTENT_TYPES_XML_SIZE:
                 logger.warning(
-                    "[mime_validator] [Content_Types].xml in '%s' " "is too large.",
+                    "[mime_validator] [Content_Types].xml in '%s' is too large.",
                     filename,
                 )
                 return False
@@ -226,8 +417,7 @@ def _validate_ooxml_archive(
 
             if not (declared_content_types & OOXML_MAIN_CONTENT_TYPES[extension]):
                 logger.warning(
-                    "[mime_validator] '%s' does not declare a valid "
-                    "%s main content type.",
+                    "[mime_validator] '%s' does not declare a valid %s main content type.",
                     filename,
                     extension.upper(),
                 )
@@ -236,7 +426,7 @@ def _validate_ooxml_archive(
             bad_member = archive.testzip()
             if bad_member is not None:
                 logger.warning(
-                    "[mime_validator] Corrupt OOXML member '%s' in " "'%s'.",
+                    "[mime_validator] Corrupt OOXML member '%s' in '%s'.",
                     bad_member,
                     filename,
                 )
@@ -266,13 +456,7 @@ def _check_magic_bytes(
     extension: str,
     filename: str,
 ) -> Optional[bool]:
-    """Attempt MIME validation using python-magic.
-
-    Returns:
-        True when detected MIME is allowed.
-        False when a definite mismatch is detected.
-        None when python-magic is unavailable or fails.
-    """
+    """Attempt MIME validation using python-magic."""
     try:
         import magic
 
@@ -293,8 +477,7 @@ def _check_magic_bytes(
                 return True
 
             logger.warning(
-                "[mime_validator] MIME type mismatch for '%s'. "
-                "Expected one of %s, got '%s'.",
+                "[mime_validator] MIME type mismatch for '%s'. Expected one of %s, got '%s'.",
                 filename,
                 allowed,
                 detected,
@@ -303,13 +486,12 @@ def _check_magic_bytes(
 
     except (ImportError, ModuleNotFoundError) as exception:
         logger.debug(
-            "[mime_validator] python-magic unavailable; using "
-            "fallback validation: %s",
+            "[mime_validator] python-magic unavailable; using fallback validation: %s",
             exception,
         )
     except Exception as exception:
         logger.debug(
-            "[mime_validator] python-magic failed; using fallback " "validation: %s",
+            "[mime_validator] python-magic failed; using fallback validation: %s",
             exception,
         )
 
@@ -330,7 +512,7 @@ def _check_extension_fallback(
             return True
 
         logger.warning(
-            "[mime_validator] Fallback magic-byte check failed for " "'%s'.",
+            "[mime_validator] Fallback magic-byte check failed for '%s'.",
             filename,
         )
         return False
@@ -338,8 +520,7 @@ def _check_extension_fallback(
     if extension in {"txt", "csv", "md"}:
         if b"\x00" in file_bytes:
             logger.warning(
-                "[mime_validator] Text validation failed for '%s': "
-                "binary null byte detected.",
+                "[mime_validator] Text validation failed for '%s': binary null byte detected.",
                 filename,
             )
             return False
@@ -352,8 +533,7 @@ def _check_extension_fallback(
                 continue
 
         logger.warning(
-            "[mime_validator] Text validation failed for '%s': "
-            "not valid UTF-8 or UTF-16.",
+            "[mime_validator] Text validation failed for '%s': not valid UTF-8 or UTF-16.",
             filename,
         )
         return False
@@ -372,18 +552,20 @@ def validate_single_extension(filename: str) -> bool:
 
 
 def validate_mime_type(file_bytes: bytes, filename: str) -> bool:
-    """Validate uploaded bytes against the declared file extension.
-
-    OOXML documents are always inspected internally before MIME-library
-    results are trusted because DOCX, XLSX, and ordinary ZIP files
-    share the same leading magic bytes.
-    """
+    """Validate uploaded bytes against the declared file extension."""
     if not file_bytes:
         return False
 
     if not validate_single_extension(filename):
         logger.warning(
             "[mime_validator] Blocked executable double extension: '%s'.",
+            filename,
+        )
+        return False
+
+    if is_executable_upload(file_bytes, filename):
+        logger.warning(
+            "[mime_validator] Executable file signature or extension detected: '%s'.",
             filename,
         )
         return False
@@ -404,8 +586,6 @@ def validate_mime_type(file_bytes: bytes, filename: str) -> bool:
             filename,
         )
 
-    # Legacy Microsoft Word .doc files use the OLE Compound File signature.
-    # Validate the complete eight-byte header before trusting MIME detection.
     if extension == "doc":
         ole_header = ALLOWED_MAGIC_HEADERS["doc"][0]
         if not file_bytes.startswith(ole_header):
@@ -415,8 +595,6 @@ def validate_mime_type(file_bytes: bytes, filename: str) -> bool:
             )
             return False
 
-    # PDF validation is intentionally strict even when libmagic is
-    # permissive or unavailable.
     if extension == "pdf" and not file_bytes.startswith(b"%PDF-"):
         logger.warning(
             "[mime_validator] Invalid PDF magic header for '%s'.",

@@ -68,7 +68,7 @@ class SearchResult:
     chunk_text: str
     similarity_score: float
     chunk_index: int
-    matched_terms: List[str] = field(default_factory=list)
+    matched_terms: list[str] = field(default_factory=list)
     context: str = ""
     snippet: str = ""
     relevance_score: float = 0.0
@@ -84,17 +84,17 @@ class SearchQuery:
     user: str
     results_count: int
     execution_time: float
-    filters: Dict[str, Any] = field(default_factory=dict)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    filters: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class SearchPattern:
     """Discovered search pattern."""
     pattern_type: str  # plagiarism, similarity, keyword
-    keywords: List[str]
-    documents_affected: List[str]
-    similarity_range: Tuple[float, float]
+    keywords: list[str]
+    documents_affected: list[str]
+    similarity_range: tuple[float, float]
     frequency: int
     last_detected: float
 
@@ -110,12 +110,12 @@ class SmartSearchEngine:
     
     def __init__(self, embedding_model: Optional[Any] = None):
         self.embedding_model = embedding_model
-        self.search_index: Dict[str, np.ndarray] = {}
-        self.chunk_registry: Dict[str, Dict] = {}
-        self.search_history: List[SearchQuery] = []
-        self.result_cache: Dict[str, List[SearchResult]] = {}
-        self.pattern_cache: Dict[str, SearchPattern] = {}
-        self.query_suggestions: List[str] = []
+        self.search_index: dict[str, np.ndarray] = {}
+        self.chunk_registry: dict[str, dict] = {}
+        self.search_history: list[SearchQuery] = []
+        self.result_cache: dict[str, list[SearchResult]] = {}
+        self.pattern_cache: dict[str, SearchPattern] = {}
+        self.query_suggestions: list[str] = []
         self._initialize_model()
         
     def _initialize_model(self):
@@ -126,7 +126,7 @@ class SmartSearchEngine:
             except Exception as e:
                 print(f"Failed to load embedding model: {e}")
     
-    def index_documents(self, documents: Dict[str, str], chunks: Dict[str, List[str]]):
+    def index_documents(self, documents: dict[str, str], chunks: dict[str, list[str]]):
         """
         Index documents for search.
         
@@ -150,16 +150,17 @@ class SmartSearchEngine:
             # Generate embeddings for chunks
             doc_chunks = chunks.get(doc_name, [])
             for idx, chunk in enumerate(doc_chunks):
-                chunk_embedding = self.embedding_model.encode([chunk])[0]
+                chunk_text = chunk.text if hasattr(chunk, "text") else chunk
+                chunk_embedding = self.embedding_model.encode([chunk_text])[0]
                 key = f"{doc_name}_chunk_{idx}"
                 self.search_index[key] = chunk_embedding
                 self.chunk_registry[key] = {
                     "document": doc_name,
                     "chunk_index": idx,
-                    "text": chunk
+                    "text": chunk_text
                 }
     
-    def _index_fallback(self, documents: Dict[str, str], chunks: Dict[str, List[str]]):
+    def _index_fallback(self, documents: dict[str, str], chunks: dict[str, list[str]]):
         """Fallback indexing when transformers not available."""
         # Simple tf-idf like indexing using word frequency
         self.search_index.clear()
@@ -177,7 +178,8 @@ class SmartSearchEngine:
             # Index chunks
             doc_chunks = chunks.get(doc_name, [])
             for idx, chunk in enumerate(doc_chunks):
-                words = re.findall(r'\w+', chunk.lower())
+                chunk_text = chunk.text if hasattr(chunk, "text") else chunk
+                words = re.findall(r'\w+', chunk_text.lower())
                 word_freq = Counter(words)
                 vector = [word for word, freq in word_freq.most_common(20)]
                 key = f"{doc_name}_chunk_{idx}"
@@ -188,7 +190,7 @@ class SmartSearchEngine:
                     "text": chunk
                 }
     
-    def search(self, query: str, top_k: int = 10, filters: Dict[str, Any] = None) -> List[SearchResult]:
+    def search(self, query: str, top_k: int = 10, filters: dict[str, Any] = None) -> list[SearchResult]:
         """
         Perform semantic search.
         
@@ -298,7 +300,7 @@ class SmartSearchEngine:
         
         return 0.0
     
-    def _extract_matched_terms(self, query: str, text: str) -> List[str]:
+    def _extract_matched_terms(self, query: str, text: str) -> list[str]:
         """Extract terms from query that match the text."""
         if not query or not text:
             return []
@@ -326,7 +328,7 @@ class SmartSearchEngine:
         
         return text[:100] + "..." if len(text) > 100 else text
     
-    def _apply_filters(self, results: List[SearchResult], filters: Dict) -> List[SearchResult]:
+    def _apply_filters(self, results: list[SearchResult], filters: dict) -> list[SearchResult]:
         """Apply filters to search results."""
         filtered = results
         
@@ -345,7 +347,7 @@ class SmartSearchEngine:
         
         return filtered
     
-    def _rank_results(self, results: List[SearchResult], query: str) -> List[SearchResult]:
+    def _rank_results(self, results: list[SearchResult], query: str) -> list[SearchResult]:
         """Rank search results by relevance."""
         if not results:
             return results
@@ -374,7 +376,7 @@ class SmartSearchEngine:
         
         return results
     
-    def _record_search(self, query: str, results_count: int, execution_time: float, filters: Dict = None):
+    def _record_search(self, query: str, results_count: int, execution_time: float, filters: dict = None):
         """Record search in history."""
         search_query = SearchQuery(
             id=f"search_{int(time.time())}",
@@ -392,7 +394,7 @@ class SmartSearchEngine:
         if len(self.search_history) > 1000:
             self.search_history = self.search_history[-1000:]
     
-    def get_search_suggestions(self, partial_query: str) -> List[str]:
+    def get_search_suggestions(self, partial_query: str) -> list[str]:
         """Get search suggestions based on partial query."""
         if not partial_query:
             return []
@@ -416,7 +418,7 @@ class SmartSearchEngine:
         
         return suggestions
     
-    def detect_patterns(self, min_frequency: int = 2) -> Dict[str, SearchPattern]:
+    def detect_patterns(self, min_frequency: int = 2) -> dict[str, SearchPattern]:
         """
         Detect search patterns from history.
         
@@ -456,7 +458,7 @@ class SmartSearchEngine:
         self.pattern_cache.update(patterns)
         return patterns
     
-    def get_search_stats(self) -> Dict[str, Any]:
+    def get_search_stats(self) -> dict[str, Any]:
         """Get search statistics."""
         if not self.search_history:
             return {

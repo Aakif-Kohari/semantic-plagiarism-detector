@@ -12,6 +12,8 @@ from src.core.lexical_similarity import (
     tokenize,
 )
 from src.core.similarity import (
+    DEFAULT_BATCH_SIZE,
+    DEFAULT_DOCUMENT_SIMILARITY_BATCH_SIZE,
     _validated_batch_size,
     calculate_paragraph_similarity_breakdown,
     chunk_max_similarity,
@@ -108,6 +110,49 @@ def test_document_similarity_matrix(dummy_embeddings):
     assert isinstance(df, pd.DataFrame)
     assert df.shape == (3, 3)
     assert list(df.columns) == ["doc_A", "doc_B", "doc_C"]
+
+
+def test_document_similarity_matrix_fallback_batch_size_constant():
+    assert DEFAULT_BATCH_SIZE == 2000
+    assert DEFAULT_DOCUMENT_SIMILARITY_BATCH_SIZE == 2000
+
+
+def test_document_similarity_matrix_fallback_batch_size_chunking(monkeypatch):
+    """Verify that when batch_size is None, document_similarity_matrix chunks using DEFAULT_BATCH_SIZE (Issue #3009)."""
+    import src.core.similarity as sim_mod
+
+    # Temporarily set DEFAULT_BATCH_SIZE to small value to verify chunking behavior
+    monkeypatch.setattr(sim_mod, "DEFAULT_BATCH_SIZE", 2)
+
+    docs = {
+        f"doc_{i}": np.random.RandomState(i).randn(2, 64).astype(np.float32)
+        for i in range(5)
+    }
+
+    df_default = sim_mod.document_similarity_matrix(docs)
+    df_explicit = sim_mod.document_similarity_matrix(docs, batch_size=2)
+
+    assert isinstance(df_default, pd.DataFrame)
+    assert df_default.shape == (5, 5)
+    assert np.allclose(df_default.values, df_explicit.values)
+
+
+def test_document_similarity_matrix_large_workload_fallback_chunked():
+    """Verify chunked execution on workloads spanning multiple default batch chunks."""
+    num_docs = 2100  # Exceeds DEFAULT_BATCH_SIZE of 2000
+    vecs = np.random.RandomState(42).randn(num_docs, 32).astype(np.float32)
+    # L2 normalize
+    vecs /= np.linalg.norm(vecs, axis=1, keepdims=True)
+
+    docs = {f"doc_{i}": vecs[i] for i in range(num_docs)}
+    df = document_similarity_matrix(docs, batch_size=None)
+
+    assert isinstance(df, pd.DataFrame)
+    assert df.shape == (num_docs, num_docs)
+    # Check diagonal
+    assert np.allclose(np.diag(df.values), 1.0, atol=1e-5)
+    # Check symmetry
+    assert np.allclose(df.values, df.values.T, atol=1e-5)
 
 
 def test_document_similarity_matrix_accepts_batch_size_basic(dummy_embeddings):
@@ -1070,13 +1115,13 @@ def test_find_most_similar_chunks_comparison_with_legacy():
 
     # Define the legacy implementation to compare against
     def legacy_find_most_similar_chunks(
-        chunks_a: List[str],
-        chunks_b: List[str],
+        chunks_a: list[str],
+        chunks_b: list[str],
         emb_a: np.ndarray,
         emb_b: np.ndarray,
         top_k: int = 3,
         threshold: float = 0.5,
-    ) -> List[Tuple[str, str, float]]:
+    ) -> list[tuple[str, str, float]]:
         if emb_a.size == 0 or emb_b.size == 0:
             return []
         from sklearn.metrics.pairwise import cosine_similarity
@@ -1179,6 +1224,37 @@ def test_document_similarity_matrix_hnsw_fallback(dummy_embeddings, monkeypatch)
     assert df.shape == (3, 3)
     assert np.isclose(df.loc["doc_A", "doc_A"], 1.0)
     assert df.loc["doc_A", "doc_B"] > df.loc["doc_A", "doc_C"]
+
+
+def test_apply_min_percentile_filter_non_square_matrix():
+    """Verify _apply_min_percentile_filter handles non-square matrices without crashing (Issue #3007)."""
+    from src.core.similarity import _apply_min_percentile_filter
+
+    # 1 x N matrix (e.g. comparing 1 query doc against 4 corpus docs)
+    matrix_1xn = np.array([[0.1, 0.4, 0.8, 0.9]])
+    filtered_1xn = _apply_min_percentile_filter(matrix_1xn, min_percentile=50.0)
+    assert isinstance(filtered_1xn, np.ndarray)
+    assert filtered_1xn.shape == (1, 4)
+    # 50th percentile of [0.1, 0.4, 0.8, 0.9] is 0.6; scores below 0.6 should be zeroed
+    np.testing.assert_array_equal(filtered_1xn, np.array([[0.0, 0.0, 0.8, 0.9]]))
+
+    # M x N non-square DataFrame
+    df_non_square = pd.DataFrame(
+        [[0.1, 0.3, 0.5], [0.7, 0.9, 0.2]],
+        index=["query1", "query2"],
+        columns=["docA", "docB", "docC"],
+    )
+    filtered_df = _apply_min_percentile_filter(df_non_square, min_percentile=50.0)
+    assert isinstance(filtered_df, pd.DataFrame)
+    assert filtered_df.shape == (2, 3)
+    # 50th percentile of [0.1, 0.2, 0.3, 0.5, 0.7, 0.9] is 0.4
+    assert filtered_df.loc["query1", "docA"] == 0.0
+    assert filtered_df.loc["query1", "docB"] == 0.0
+    assert filtered_df.loc["query1", "docC"] == 0.5
+    assert filtered_df.loc["query2", "docA"] == 0.7
+    assert filtered_df.loc["query2", "docB"] == 0.9
+    assert filtered_df.loc["query2", "docC"] == 0.0
+
 
 
 

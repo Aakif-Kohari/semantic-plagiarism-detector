@@ -11,6 +11,7 @@ import pytest
 from src.utils.storage_metrics import (
     _deduplicate_paths,
     calculate_storage_usage,
+    get_directory_size_bytes,
     get_faiss_index_paths,
     get_sqlite_db_paths,
 )
@@ -168,7 +169,7 @@ class TestModuleParses:
     @pytest.mark.parametrize(
         "name",
         ["_deduplicate_paths", "get_sqlite_db_paths", "get_faiss_index_paths",
-         "calculate_storage_usage"],
+         "calculate_storage_usage", "get_directory_size_bytes"],
     )
     def test_function_is_defined_exactly_once(self, name):
         """A second definition would silently shadow the first."""
@@ -422,3 +423,123 @@ class TestCalculateStorageUsageContract:
         assert result["faiss_file_count"] == 0
         assert result["faiss_bytes"] == 0
 
+
+def test_record_storage_snapshot_writes_history_row(tmp_path: Path) -> None:
+    history_db = tmp_path / "storage_history.db"
+    db_file = tmp_path / "corpus.db"
+    db_file.write_bytes(b"x" * 2048)
+
+    with patch(
+        "src.utils.storage_metrics.calculate_storage_usage",
+        return_value={"sqlite_bytes": 2048},
+    ), patch(
+        "src.utils.temp_manager.get_temp_directory_size_bytes",
+        return_value=512,
+    ):
+        from src.utils.storage_metrics import record_storage_snapshot
+
+        record_storage_snapshot(db_path=history_db)
+
+    import sqlite3
+
+    conn = sqlite3.connect(str(history_db))
+    row = conn.execute(
+        "SELECT date, db_size_bytes, temp_size_bytes FROM storage_history"
+    ).fetchone()
+    conn.close()
+
+    assert row is not None
+    assert row[1] == 2048
+    assert row[2] == 512
+
+
+def test_get_projected_days_until_full_from_growth(tmp_path: Path) -> None:
+    from src.utils.storage_metrics import (
+        _connect_storage_history,
+        get_projected_days_until_full,
+    )
+
+    history_db = tmp_path / "storage_history.db"
+    conn = _connect_storage_history(history_db)
+    conn.execute(
+        "INSERT INTO storage_history VALUES (?, ?, ?)",
+        ("2026-08-01", 1000, 0),
+    )
+    conn.execute(
+        "INSERT INTO storage_history VALUES (?, ?, ?)",
+        ("2026-08-11", 2000, 0),
+    )
+    conn.commit()
+    conn.close()
+
+    # Grew 1000 bytes over 10 days => 100 B/day; 3000 remaining to 5000 => 30 days
+    days = get_projected_days_until_full(5000, db_path=history_db)
+    assert days == pytest.approx(30.0)
+
+
+def test_get_projected_days_until_full_insufficient_history(tmp_path: Path) -> None:
+    from src.utils.storage_metrics import (
+        _connect_storage_history,
+        get_projected_days_until_full,
+    )
+
+    history_db = tmp_path / "storage_history.db"
+    conn = _connect_storage_history(history_db)
+    conn.execute(
+        "INSERT INTO storage_history VALUES (?, ?, ?)",
+        ("2026-08-01", 1000, 0),
+    )
+    conn.commit()
+    conn.close()
+
+    assert get_projected_days_until_full(10_000, db_path=history_db) == float("inf")
+
+
+class TestGetDirectorySizeBytes:
+    """Test suite for get_directory_size_bytes calculation and symlink handling."""
+
+    def test_sums_files_in_nested_subdirectories_exactly(self, tmp_path: Path):
+        """Create a temporary folder structure with 3 files of known sizes and assert exact sum."""
+        # File 1 in root: 100 bytes
+        file1 = tmp_path / "file1.bin"
+        file1.write_bytes(b"A" * 100)
+
+        # File 2 in subfolder: 250 bytes
+        sub_dir = tmp_path / "subdir"
+        sub_dir.mkdir()
+        file2 = sub_dir / "file2.bin"
+        file2.write_bytes(b"B" * 250)
+
+        # File 3 in nested subfolder: 500 bytes
+        nested_dir = sub_dir / "nested"
+        nested_dir.mkdir()
+        file3 = nested_dir / "file3.bin"
+        file3.write_bytes(b"C" * 500)
+
+        expected_total = 100 + 250 + 500  # 850 bytes
+        actual_total = get_directory_size_bytes(tmp_path)
+
+        assert actual_total == expected_total
+
+    def test_ignores_broken_symlinks(self, tmp_path: Path):
+        """Verify broken symlinks do not crash or alter the calculated size."""
+        file1 = tmp_path / "file1.txt"
+        file1.write_bytes(b"Hello World")  # 11 bytes
+
+        # Attempt to create a real broken symlink if OS supports it
+        broken_symlink = tmp_path / "broken_link.txt"
+        target_path = tmp_path / "nonexistent.txt"
+        try:
+            broken_symlink.symlink_to(target_path)
+        except (OSError, NotImplementedError):
+            pass
+
+        # Verify get_directory_size_bytes accurately counts file1 (11 bytes) and ignores broken link
+        size = get_directory_size_bytes(tmp_path)
+        assert size == 11
+
+
+    def test_returns_zero_for_nonexistent_directory(self, tmp_path: Path):
+        """Verify nonexistent directory path returns 0 bytes."""
+        nonexistent = tmp_path / "does_not_exist"
+        assert get_directory_size_bytes(nonexistent) == 0

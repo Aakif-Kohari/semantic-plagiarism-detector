@@ -24,7 +24,7 @@ class TranslationService:
         source_lang: str = "en", 
         target_lang: str = "es",
         confidence: Optional[float] = None
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Save a translation record to storage.
         
@@ -74,7 +74,7 @@ class TranslationService:
         self, 
         limit: Optional[int] = None, 
         source_lang: Optional[str] = None
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         Retrieve saved translations.
         
@@ -104,7 +104,7 @@ class TranslationService:
         
         return translations
     
-    def get_translation_by_text(self, text: str) -> Optional[Dict[str, Any]]:
+    def get_translation_by_text(self, text: str) -> Optional[dict[str, Any]]:
         """Retrieve a translation by original text."""
         try:
             with open(self.storage_file, "r") as f:
@@ -141,7 +141,7 @@ class TranslationService:
         with open(self.storage_file, "w") as f:
             json.dump([], f)
     
-    def get_statistics(self) -> Dict[str, Any]:
+    def get_statistics(self) -> dict[str, Any]:
         """Get statistics about saved translations."""
         try:
             with open(self.storage_file, "r") as f:
@@ -164,7 +164,7 @@ class TranslationService:
         }
 
 
-def save_translation_simple(text: str, translated_text: str, **kwargs) -> Dict[str, Any]:
+def save_translation_simple(text: str, translated_text: str, **kwargs) -> dict[str, Any]:
     """
     Simple function wrapper for saving translations.
     
@@ -205,7 +205,7 @@ class TranslationRecord:
         self.confidence = confidence
         self.timestamp = datetime.now(timezone.utc)  # ✅ FIXED (timezone-aware)
     
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert record to dictionary."""
         return {
             "text": self.text,
@@ -217,7 +217,7 @@ class TranslationRecord:
         }
     
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'TranslationRecord':
+    def from_dict(cls, data: dict[str, Any]) -> 'TranslationRecord':
         """Create record from dictionary."""
         record = cls(
             text=data["text"],

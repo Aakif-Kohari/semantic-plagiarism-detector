@@ -1,6 +1,8 @@
-from enum import IntEnum
-from typing import Dict, Optional
+import sys
 from dataclasses import dataclass
+from datetime import datetime
+from enum import IntEnum
+from typing import Any, Optional
 
 
 class CliExitCodes(IntEnum):
@@ -459,7 +461,7 @@ class CliExitCodes(IntEnum):
             return "UNKNOWN"
     
     @classmethod
-    def to_dict(cls) -> Dict[int, str]:
+    def to_dict(cls) -> dict[int, str]:
         return {code.value: code.name for code in cls}
     
     @classmethod
@@ -492,7 +494,7 @@ class ExitInfo:
             timestamp=datetime.now().isoformat()
         )
     
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "code": self.code,
             "message": self.message,
@@ -574,7 +576,7 @@ class ExitCodeManager:
     def print_all(self) -> None:
         CliExitCodes.print_all()
     
-    def to_dict(self) -> Dict[int, str]:
+    def to_dict(self) -> dict[int, str]:
         return CliExitCodes.to_dict()
     
     def to_json(self) -> str:

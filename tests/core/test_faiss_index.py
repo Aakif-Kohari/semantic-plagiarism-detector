@@ -4,10 +4,12 @@ import pytest
 
 from src.core.faiss_index import (
     ChunkRecord,
+    add_to_index,
     build_index,
     find_plagiarised_chunks,
     load_index,
     optimize_faiss_index,
+    remove_document_from_index,
     save_index,
     search_batch_vectors,
     search_similar_chunks,
@@ -345,3 +347,93 @@ def test_search_batch_vectors():
 
     with pytest.raises(ValueError):
         search_batch_vectors(query_batch, "not-a-faiss-index")
+
+
+# ── remove_document_from_index Tests (#4032) ─────────────────────────────────
+
+
+def _make_idmap_index(embeddings, chunked):
+    """Build an IndexIDMap-wrapped index via add_to_index (mirrors production path)."""
+    index = faiss.IndexFlatIP(384)
+    index, registry = add_to_index(index, [], embeddings, chunked)
+    return index, registry
+
+
+def test_remove_document_from_index_prunes_registry(two_doc_data):
+    """Normal deletion: after removing doc_a the registry/index counts are consistent."""
+    embeddings, chunked = two_doc_data
+    index, registry = _make_idmap_index(embeddings, chunked)
+
+    assert isinstance(index, faiss.IndexIDMap), "Precondition: index must be IDMap-wrapped"
+    assert index.ntotal == 6
+    assert len(registry) == 6
+
+    new_index, new_registry = remove_document_from_index(index, registry, "doc_a")
+
+    # Registry must only contain doc_b records
+    assert len(new_registry) == 3
+    assert all(r.doc_name == "doc_b" for r in new_registry)
+    assert not any(r.doc_name == "doc_a" for r in new_registry)
+
+    # FAISS vector count must match registry length (alignment invariant)
+    assert new_index.ntotal == len(new_registry)
+
+
+def test_remove_document_from_index_nonexistent_doc_noop(two_doc_data):
+    """Removing a doc that is not in the registry is a safe no-op — counts unchanged."""
+    embeddings, chunked = two_doc_data
+    index, registry = _make_idmap_index(embeddings, chunked)
+
+    ntotal_before = index.ntotal
+    reg_len_before = len(registry)
+
+    new_index, new_registry = remove_document_from_index(
+        index, registry, "nonexistent_doc"
+    )
+
+    assert new_index.ntotal == ntotal_before
+    assert len(new_registry) == reg_len_before
+
+
+def test_remove_document_from_index_search_excludes_deleted(two_doc_data):
+    """After removal, searching with any query never returns a record from the deleted doc."""
+    embeddings, chunked = two_doc_data
+    index, registry = _make_idmap_index(embeddings, chunked)
+
+    new_index, new_registry = remove_document_from_index(index, registry, "doc_a")
+
+    # Use doc_a's own embeddings as queries — the worst case for leaking deleted results.
+    for vec in embeddings["doc_a"]:
+        results = search_similar_chunks(vec, new_index, new_registry, top_k=10)
+        for record, _ in results:
+            assert record.doc_name != "doc_a", (
+                f"search returned a ChunkRecord from deleted document 'doc_a': {record!r}"
+            )
+
+# ── FAISS k-overflow regression test (#4034) ──────────────────────────────────
+
+
+def test_search_similar_chunks_k_larger_than_index_size():
+    """Regression: search with top_k > ntotal must not return -1-padded results.
+
+    Issue #4034: When top_k exceeds the number of vectors in the index, FAISS
+    pads its raw output with -1 sentinel indices.  search_similar_chunks() must
+    filter those sentinels and return only the real matches — no more, no fewer.
+    """
+    np.random.seed(0)
+    embeddings = {"doc_a": _unit_vecs(3)}
+    chunked = {"doc_a": ["chunk 0", "chunk 1", "chunk 2"]}
+
+    index, registry = build_index(embeddings, chunked, index_type="flat")
+    assert index.ntotal == 3  # sanity-check: exactly 3 vectors in the index
+
+    query = _unit_vecs(1)[0]
+    results = search_similar_chunks(query, index, registry, top_k=10)
+
+    # Must return exactly 3 matches — the full index — not 10 or fewer
+    assert len(results) == 3, f"Expected 3 results (index size), got {len(results)}"
+    # Every result must be a valid (ChunkRecord, float) pair — no -1 artifacts
+    for record, score in results:
+        assert isinstance(record, ChunkRecord)
+        assert record.doc_name == "doc_a"
+        assert isinstance(score, float)

@@ -65,12 +65,12 @@ class TeamWorkspace:
     id: str
     name: str
     description: str
-    members: List[str]
+    members: list[str]
     created_at: float
     created_by: str
-    projects: List[str] = field(default_factory=list)
-    settings: Dict[str, Any] = field(default_factory=dict)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    projects: list[str] = field(default_factory=list)
+    settings: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -88,10 +88,10 @@ class PlagiarismCase:
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
     created_by: str = ""
-    comments: List[Dict[str, Any]] = field(default_factory=list)
-    annotations: List[Dict[str, Any]] = field(default_factory=list)
-    history: List[Dict[str, Any]] = field(default_factory=list)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    comments: list[dict[str, Any]] = field(default_factory=list)
+    annotations: list[dict[str, Any]] = field(default_factory=list)
+    history: list[dict[str, Any]] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -99,10 +99,10 @@ class DiscussionThread:
     """Discussion thread."""
     id: str
     case_id: str
-    messages: List[Dict[str, Any]]
+    messages: list[dict[str, Any]]
     created_at: float
     updated_at: float
-    participants: List[str]
+    participants: list[str]
     resolved: bool = False
 
 
@@ -111,11 +111,11 @@ class ReviewQueue:
     """Review queue."""
     id: str
     name: str
-    case_ids: List[str]
+    case_ids: list[str]
     priority: CasePriority
     assigned_to: Optional[str] = None
     created_at: float = field(default_factory=time.time)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 # ==============================================================================
@@ -129,11 +129,11 @@ class CollaborationHub:
     
     def __init__(self, storage_path: Path):
         self.storage_path = storage_path
-        self.workspaces: Dict[str, TeamWorkspace] = {}
-        self.cases: Dict[str, PlagiarismCase] = {}
-        self.discussions: Dict[str, DiscussionThread] = {}
-        self.queues: Dict[str, ReviewQueue] = {}
-        self.activity_feed: List[Dict] = []
+        self.workspaces: dict[str, TeamWorkspace] = {}
+        self.cases: dict[str, PlagiarismCase] = {}
+        self.discussions: dict[str, DiscussionThread] = {}
+        self.queues: dict[str, ReviewQueue] = {}
+        self.activity_feed: list[dict] = []
         self._load_data()
     
     def _load_data(self):
@@ -183,7 +183,7 @@ class CollaborationHub:
         except Exception as e:
             print(f"Error saving collaboration data: {e}")
     
-    def create_workspace(self, name: str, description: str, created_by: str, members: List[str] = None) -> TeamWorkspace:
+    def create_workspace(self, name: str, description: str, created_by: str, members: list[str] = None) -> TeamWorkspace:
         """Create a new workspace."""
         workspace = TeamWorkspace(
             id=f"ws_{int(time.time())}",
@@ -267,7 +267,7 @@ class CollaborationHub:
             self._save_data()
             self._add_activity(f"New comment on case '{case.title}' by {user}")
     
-    def add_annotation(self, case_id: str, annotation: Dict[str, Any], user: str):
+    def add_annotation(self, case_id: str, annotation: dict[str, Any], user: str):
         """Add annotation to a case."""
         case = self.cases.get(case_id)
         if case:
@@ -354,15 +354,15 @@ class CollaborationHub:
             self.activity_feed = self.activity_feed[-1000:]
         self._save_data()
     
-    def get_cases_by_status(self, status: CaseStatus) -> List[PlagiarismCase]:
+    def get_cases_by_status(self, status: CaseStatus) -> list[PlagiarismCase]:
         """Get cases by status."""
         return [c for c in self.cases.values() if c.status == status]
     
-    def get_cases_by_assignee(self, assignee: str) -> List[PlagiarismCase]:
+    def get_cases_by_assignee(self, assignee: str) -> list[PlagiarismCase]:
         """Get cases by assignee."""
         return [c for c in self.cases.values() if c.assigned_to == assignee]
     
-    def get_team_metrics(self) -> Dict[str, Any]:
+    def get_team_metrics(self) -> dict[str, Any]:
         """Get team performance metrics."""
         total_cases = len(self.cases)
         resolved = len([c for c in self.cases.values() if c.status in [CaseStatus.RESOLVED, CaseStatus.CLOSED]])

@@ -18,6 +18,7 @@ from app.theme import (
     tier_color,
     tier_from_severity_label,
 )
+from app.css_constants import spd_root_css_variables
 
 
 def test_render_notification_badge_with_negative_count():
@@ -219,6 +220,74 @@ def test_inject_css_generates_css_without_errors():
     assert len(css.strip()) > 0
     assert "block-container" in css
     assert "stAlert" in css
+
+
+class TestSpdRootCssVariables:
+    """Tests for the --spd-* namespaced CSS custom properties (Issue #3762)."""
+
+    def test_returns_root_block(self):
+        css = spd_root_css_variables(THEMES["Light"], "#0D9488")
+        assert ":root {" in css
+
+    def test_includes_primary_and_bg_from_issue_examples(self):
+        """The two variable names given as examples in the issue text
+        (--spd-primary-color, --spd-bg-card) must be present verbatim."""
+        css = spd_root_css_variables(THEMES["Light"], "#0D9488")
+        assert "--spd-primary-color:" in css
+        assert "--spd-bg-card:" in css
+
+    def test_includes_all_expected_variables(self):
+        css = spd_root_css_variables(THEMES["Light"], "#0D9488")
+        for var in [
+            "--spd-primary",
+            "--spd-bg",
+            "--spd-bg-card",
+            "--spd-bg-surface",
+            "--spd-text",
+            "--spd-text-muted",
+            "--spd-border",
+            "--spd-input-bg",
+            "--spd-danger",
+            "--spd-danger-soft",
+            "--spd-warning",
+            "--spd-warning-soft",
+            "--spd-success",
+            "--spd-success-soft",
+            "--spd-neutral-soft",
+        ]:
+            assert f"{var}:" in css
+
+    def test_uses_supplied_accent_color(self):
+        css = spd_root_css_variables(THEMES["Light"], "#123456")
+        assert "--spd-primary: #123456;" in css
+        assert "--spd-primary-color: #123456;" in css
+
+    def test_light_and_dark_themes_produce_different_output(self):
+        light_css = spd_root_css_variables(THEMES["Light"], "#0D9488")
+        dark_css = spd_root_css_variables(THEMES["Dark"], "#2DD4BF")
+        assert light_css != dark_css
+        assert THEMES["Light"]["background"] in light_css
+        assert THEMES["Dark"]["background"] in dark_css
+
+    def test_balanced_braces(self):
+        css = spd_root_css_variables(THEMES["Light"], "#0D9488")
+        assert css.count("{") == css.count("}")
+
+
+def test_inject_css_includes_spd_namespaced_variables():
+    """inject_css() must emit the --spd-* variables alongside the existing
+    generic ones (Issue #3762)."""
+    with patch("app.theme.st.markdown") as mock_markdown:
+        inject_css()
+
+    css = mock_markdown.call_args_list[0].args[0]
+    assert "--spd-primary:" in css
+    assert "--spd-bg:" in css
+    assert "--spd-bg-card:" in css
+    # The pre-existing generic variables must still be present -- this is
+    # additive, not a replacement.
+    assert "--primary-bg:" in css
+    assert "--accent-color:" in css
 
 
 def test_sanitize_hex_color_valid_and_invalid():
@@ -551,9 +620,27 @@ def test_get_theme_accent_color():
     from app.theme import get_theme_accent_color
 
     assert get_theme_accent_color("Indigo") == "#4f46e5"
+    assert get_theme_accent_color("Emerald") == "#059669"
+    assert get_theme_accent_color("Crimson") == "#dc2626"
+    assert get_theme_accent_color("Amber") == "#d97706"
     assert get_theme_accent_color("Teal") == "#0d9488"
     assert get_theme_accent_color("Light") == "#0D9488"
     assert get_theme_accent_color("Dark") == "#2DD4BF"
+
+
+def test_inject_css_dynamic_primary_accent():
+    """Verify inject_css includes --primary-accent variable dynamically updated from session_state."""
+    from unittest.mock import patch
+    from app.theme import inject_css
+
+    mock_state = {"accent_color": "Crimson", "theme": "Light", "theme_colors": {"background": "#FFFFFF", "surface": "#F8FAFC", "card": "#FFFFFF", "ink": "#0F172A", "muted": "#64748B", "accent": "#0D9488", "border": "#E2E8F0", "input": "#FFFFFF", "neutral_soft": "#F1F5F9", "danger": "#FF4B4B", "danger_soft": "#FEE2E2", "warning": "#FFA500", "warning_soft": "#FEF3C7", "success": "#21C55D", "success_soft": "#DCFCE7"}}
+
+    with patch("app.theme.st.session_state", mock_state), patch("app.theme.st.markdown") as mock_md:
+        inject_css()
+        css = mock_md.call_args_list[0].args[0]
+        assert "--primary-accent: #dc2626" in css
+        assert "--accent-color: #dc2626" in css
+
 
 
 def test_build_active_tab_custom_css():
@@ -727,19 +814,19 @@ def test_sanitize_hex_color_invalid():
 
 def get_luminance(hex_color: str) -> float:
     """Calculate the relative luminance of a hex color."""
-    hex_color = hex_color.lstrip('#')
+    hex_color = hex_color.lstrip("#")
     if len(hex_color) == 3:
-        hex_color = ''.join(c + c for c in hex_color)
-    
+        hex_color = "".join(c + c for c in hex_color)
+
     rgb = tuple(int(hex_color[i:i+2], 16) / 255.0 for i in (0, 2, 4))
-    
+
     linear_rgb = []
     for c in rgb:
         if c <= 0.03928:
             linear_rgb.append(c / 12.92)
         else:
             linear_rgb.append(((c + 0.055) / 1.055) ** 2.4)
-            
+
     return 0.2126 * linear_rgb[0] + 0.7152 * linear_rgb[1] + 0.0722 * linear_rgb[2]
 
 
@@ -747,11 +834,29 @@ def get_contrast_ratio(hex1: str, hex2: str) -> float:
     """Calculate the WCAG contrast ratio between two hex colors."""
     l1 = get_luminance(hex1)
     l2 = get_luminance(hex2)
-    
+
     lighter = max(l1, l2)
     darker = min(l1, l2)
-    
+
     return (lighter + 0.05) / (darker + 0.05)
+
+
+def test_get_luminance():
+    """Verify luminance calculations for standard reference colors."""
+    assert abs(get_luminance("#000000") - 0.0) < 1e-4
+    assert abs(get_luminance("#FFFFFF") - 1.0) < 1e-4
+    assert abs(get_luminance("#FFF") - 1.0) < 1e-4
+    assert abs(get_luminance("#000") - 0.0) < 1e-4
+
+
+def test_get_contrast_ratio():
+    """Verify contrast ratio calculations for standard reference pairs."""
+    # Black on white has maximum contrast ratio 21:1
+    assert abs(get_contrast_ratio("#000000", "#FFFFFF") - 21.0) < 0.1
+    assert abs(get_contrast_ratio("#FFFFFF", "#000000") - 21.0) < 0.1
+    # Same color has minimum contrast ratio 1:1
+    assert abs(get_contrast_ratio("#FFFFFF", "#FFFFFF") - 1.0) < 1e-4
+    assert abs(get_contrast_ratio("#123456", "#123456") - 1.0) < 1e-4
 
 
 def test_theme_wcag_contrast():
@@ -759,9 +864,14 @@ def test_theme_wcag_contrast():
     for theme_name, theme in THEMES.items():
         bg = theme.get("background")
         ink = theme.get("ink")
-        
-        if bg and ink:
-            contrast = get_contrast_ratio(bg, ink)
-            assert contrast >= 4.5, f"{theme_name} theme contrast ratio {contrast:.2f} is below 4.5:1 (bg: {bg}, ink: {ink})"
+
+        assert bg is not None, f"Theme {theme_name} missing 'background'"
+        assert ink is not None, f"Theme {theme_name} missing 'ink'"
+
+        contrast = get_contrast_ratio(bg, ink)
+        assert contrast >= 4.5, (
+            f"{theme_name} theme contrast ratio {contrast:.2f} is below 4.5:1 (bg: {bg}, ink: {ink})"
+        )
+
 
 

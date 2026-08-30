@@ -3,7 +3,7 @@
 from typing import Any, List
 
 
-def render_vector_search_timeline(reports: List[Any]) -> str:
+def render_vector_search_timeline(reports: list[Any]) -> str:
     """Renders HTML telemetry timeline list for FAISS vector search queries."""
     if not reports:
         return """
