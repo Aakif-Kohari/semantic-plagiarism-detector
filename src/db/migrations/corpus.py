@@ -372,6 +372,49 @@ def migration_015_pattern_recognition(
     )
 
 
+def migration_016_add_scheduler_runs(
+    connection: sqlite3.Connection,
+) -> None:
+    """Create the scheduler_runs table.
+
+    Tracks the last-completed run of background scheduled jobs (e.g. the
+    scheduled plagiarism rescan job) so a process restart does not lose track
+    of when a job last ran. Keyed by job_name.
+    """
+    connection.execute("""
+        CREATE TABLE IF NOT EXISTS scheduler_runs (
+            job_name           TEXT PRIMARY KEY,
+            last_run_at        TEXT NOT NULL,
+            documents_scanned  INTEGER NOT NULL DEFAULT 0,
+            new_incidents      INTEGER NOT NULL DEFAULT 0
+        )
+        """)
+
+
+def migration_017_add_incident_date_flagged_index(
+    connection: sqlite3.Connection,
+) -> None:
+    """Index plagiarism_incidents(date_flagged) for faster get_recent_incidents queries."""
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_incidents_date_flagged "
+        "ON plagiarism_incidents(date_flagged)"
+    )
+
+
+def migration_018_add_false_positives_audit_columns(
+    connection: sqlite3.Connection,
+) -> None:
+    """Add dismissed_by and dismissal_reason audit columns to false_positives table."""
+    if not column_exists(connection, "false_positives", "dismissed_by"):
+        connection.execute(
+            "ALTER TABLE false_positives ADD COLUMN dismissed_by TEXT DEFAULT 'admin'"
+        )
+    if not column_exists(connection, "false_positives", "dismissal_reason"):
+        connection.execute(
+            "ALTER TABLE false_positives ADD COLUMN dismissal_reason TEXT"
+        )
+
+
 CORPUS_MIGRATIONS = {
     1: migration_001_create_base_schema,
     2: migration_002_add_document_metadata,

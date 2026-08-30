@@ -15,6 +15,7 @@ from src.api.middleware import get_current_user
 from src.api.schemas import (
     HealthCheckResponse,
     HealthzResponse,
+    MetricFamily,
     StatusResponse,
 )
 from src.core.app_config import HEALTHZ_DB_PATHS
@@ -91,7 +92,12 @@ def metrics_prometheus():
     return PlainTextResponse(_gen().decode("utf-8"))
 
 
-@router.get("/metrics/json", tags=["Monitoring"])
+@router.get(
+    "/metrics/json",
+    tags=["Monitoring"],
+    response_model=dict[str, MetricFamily],
+    summary="JSON format metrics export",
+)
 def metrics_json():
     """JSON-format metrics export for non-Prometheus monitoring setups.
     
@@ -103,6 +109,7 @@ def metrics_json():
 
     if not PROMETHEUS_METRICS_ENABLED:
         raise HTTPException(status_code=404, detail="Metrics disabled")
+    from src.core.metrics import generate_metrics_json
 
     return JSONResponse(generate_metrics_json())
 

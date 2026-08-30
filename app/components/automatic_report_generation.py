@@ -374,6 +374,8 @@ class ReportGenerator:
         table {{
             width: 100%;
             border-collapse: collapse;
+            background-color: var(--background-color, #ffffff);
+            color: var(--text-color, #111827);
         }}
         th, td {{
             padding: 8px;
