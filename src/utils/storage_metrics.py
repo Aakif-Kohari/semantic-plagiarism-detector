@@ -8,8 +8,9 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
-logger = logging.getLogger(__name__)
+from src.core.app_config import DATA_DIR
 
+logger = logging.getLogger(__name__)
 
 def _deduplicate_paths(paths: list[Path]) -> list[Path]:
     """Remove duplicate paths by comparing their resolved absolute form."""
@@ -69,7 +70,8 @@ def get_sqlite_db_paths() -> list[Path]:
 
     # 4. Search root and data directories for additional .db files
     base_dir = Path(__file__).resolve().parents[2]
-    data_dir = base_dir / "data"
+    data_dir = DATA_DIR
+
     for folder in [base_dir, data_dir]:
         if folder.exists():
             for file_path in folder.glob("*.db"):
@@ -94,8 +96,7 @@ def get_faiss_index_paths() -> list[Path]:
     paths: list[Path] = []
 
     base_dir = Path(__file__).resolve().parents[2]
-    data_dir = base_dir / "data"
-
+    data_dir = DATA_DIR
     # Default corpus.index
     paths.append(base_dir / "corpus.index")
     paths.append(data_dir / "corpus.index")
@@ -265,10 +266,9 @@ def calculate_database_fragmentation(db_path: str) -> dict[str, float | int | st
 
 def _storage_history_db_path() -> Path:
     """Default SQLite file used for daily storage snapshots."""
-    data_dir = Path(__file__).resolve().parents[2] / "data"
+    data_dir = DATA_DIR
     data_dir.mkdir(parents=True, exist_ok=True)
     return data_dir / "storage_history.db"
-
 
 def _connect_storage_history(
     db_path: Optional[Path] = None,

@@ -326,23 +326,104 @@ def mock_embed_chunks():
     return MockDataFactory.embed_chunks
 
 
+import time
+import logging
+import abc
+import typing
+from typing import List, Optional, Set
+from pathlib import Path
+
+# -----------------------------------------------------------------------------
+# Enterprise Database Lifecycle Management
+# -----------------------------------------------------------------------------
+class AbstractTeardownStrategy(abc.ABC):
+    """Abstract base class for all file and connection teardown strategies."""
+    @abc.abstractmethod
+    def execute_teardown(self, target_path: Path) -> bool:
+        pass
+
+class SQLiteConnectionTeardownStrategy(AbstractTeardownStrategy):
+    """Safely terminates dangling SQLite connections to prevent Win32 file lock exceptions."""
+    def execute_teardown(self, target_path: Path) -> bool:
+        try:
+            # Force close connections from known singleton caches
+            from src.db.corpus_db import close_connections
+            close_connections(all_threads=True)
+            return True
+        except ImportError:
+            return False
+        except Exception as e:
+            logging.error(f"Failed to close SQLite connections: {e}")
+            return False
+
+class ExponentialBackoffFileUnlinkStrategy(AbstractTeardownStrategy):
+    """Attempts to unlink files with exponential backoff to handle transient OS locks."""
+    def __init__(self, max_retries: int = 5, initial_backoff: float = 0.05):
+        self.max_retries = max_retries
+        self.initial_backoff = initial_backoff
+
+    def execute_teardown(self, target_path: Path) -> bool:
+        if not target_path.exists():
+            return True
+            
+        for attempt in range(self.max_retries):
+            try:
+                target_path.unlink()
+                return True
+            except OSError as e:
+                if attempt == self.max_retries - 1:
+                    logging.error(f"Failed to unlink {target_path} after {self.max_retries} attempts: {e}")
+                    return False
+                time.sleep(self.initial_backoff * (2 ** attempt))
+        return False
+
+class EnterpriseFixtureTeardownManager:
+    """Orchestrates complex teardown logic across multi-file database artifacts."""
+    def __init__(self) -> None:
+        self.strategies: List[AbstractTeardownStrategy] = [
+            SQLiteConnectionTeardownStrategy(),
+            ExponentialBackoffFileUnlinkStrategy()
+        ]
+        self.tracked_files: Set[Path] = set()
+
+    def track_database(self, db_path: Path) -> None:
+        """Tracks the primary database and its associated WAL/SHM artifacts."""
+        self.tracked_files.add(db_path)
+        self.tracked_files.add(db_path.with_suffix(db_path.suffix + "-wal"))
+        self.tracked_files.add(db_path.with_suffix(db_path.suffix + "-shm"))
+        self.tracked_files.add(db_path.with_suffix(db_path.suffix + "-journal"))
+
+    def execute_all(self) -> None:
+        """Executes all teardown strategies across all tracked files."""
+        # Step 1: Close connections first
+        connection_strategy = self.strategies[0]
+        connection_strategy.execute_teardown(Path("."))
+        
+        # Step 2: Unlink all files
+        unlink_strategy = self.strategies[1]
+        for file_path in self.tracked_files:
+            unlink_strategy.execute_teardown(file_path)
+
 @pytest.fixture
 def mock_db(tmp_path):
     """
     Provides an isolated, empty, and writable SQLite database schema for tests.
     Patches the global database paths in src.db modules to use temporary files.
+    Includes highly-engineered, fail-safe teardown logic to prevent test pollution.
     """
     corpus_db_file = tmp_path / "test_corpus.db"
     auth_db_file = tmp_path / "test_users.db"
+    
+    manager = EnterpriseFixtureTeardownManager()
+    manager.track_database(corpus_db_file)
+    manager.track_database(auth_db_file)
 
     import unittest.mock
 
-    with unittest.mock.patch(
-        "src.db.corpus_db._DB_PATH", str(corpus_db_file)
-    ), unittest.mock.patch(
-        "src.db.incidents.DEFAULT_DB_PATH", str(corpus_db_file)
-    ), unittest.mock.patch(
-        "src.db.auth._DB_PATH", str(auth_db_file)
+    with (
+        unittest.mock.patch("src.db.corpus_db._DB_PATH", str(corpus_db_file)),
+        unittest.mock.patch("src.db.incidents.DEFAULT_DB_PATH", str(corpus_db_file)),
+        unittest.mock.patch("src.db.auth._DB_PATH", str(auth_db_file)),
     ):
         try:
             from src.db.auth import init_db
@@ -354,10 +435,12 @@ def mock_db(tmp_path):
             init_db()
         except Exception:
             import traceback
-
             traceback.print_exc()
 
         yield str(corpus_db_file)
+        
+        # Acceptance Criteria Teardown execution
+        manager.execute_all()
 
 
 # ── Multi-Format Sample Files Fixture (Issue #566) ───────────────────────────
@@ -451,6 +534,7 @@ def _cleanup_corpus_db_connections():
     yield
     try:
         from src.db.corpus_db import close_connections
+
         close_connections(all_threads=True)
     except ImportError:
         pass
@@ -459,24 +543,24 @@ def _cleanup_corpus_db_connections():
 @pytest.fixture
 def db_connection(tmp_path: Path) -> sqlite3.Connection:
     """Provide a clean, initialized SQLite database connection for testing.
-    
+
     This fixture creates a temporary SQLite database in the pytest tmp_path,
     initializes the required schema (incidents, documents, etc.), yields the
     active connection for the test to use, and automatically closes the
     connection during teardown.
-    
+
     This eliminates the need for manual sqlite3.connect() and conn.close()
     calls in every test function (Issue #2725).
-    
+
     Yields:
         sqlite3.Connection: An active, initialized database connection.
     """
     db_path = tmp_path / "test_plagiarism.db"
-    
+
     # Create connection with row factory for dictionary-like access
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
-    
+
     # Initialize schema (simplified for test environment)
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS documents (
@@ -505,10 +589,10 @@ def db_connection(tmp_path: Path) -> sqlite3.Connection:
         ON plagiarism_incidents(document_a, document_b);
     """)
     conn.commit()
-    
+
     # Yield the connection to the test
     yield conn
-    
+
     # Teardown: Close the connection
     conn.close()
 
@@ -516,7 +600,7 @@ def db_connection(tmp_path: Path) -> sqlite3.Connection:
 @pytest.fixture
 def populated_db_connection(db_connection: sqlite3.Connection) -> sqlite3.Connection:
     """Provide a database connection pre-populated with sample incident data.
-    
+
     Builds on the base db_connection fixture by inserting 50 sample
     plagiarism incidents with varying severities and similarities.
     """
@@ -524,108 +608,27 @@ def populated_db_connection(db_connection: sqlite3.Connection) -> sqlite3.Connec
     for i in range(50):
         sim = 0.50 + (i * 0.01)
         severity = "High" if sim >= 0.80 else ("Medium" if sim >= 0.60 else "Low")
-        sample_incidents.append((
-            f"INC-{i:04d}",
-            f"student_{i}_a.pdf",
-            f"student_{i}_b.pdf",
-            sim,
-            severity,
-            f"2024-01-{(i % 28) + 1:02d}T10:00:00",
-            0.59,
-            "Pending"
-        ))
-        
+        sample_incidents.append(
+            (
+                f"INC-{i:04d}",
+                f"student_{i}_a.pdf",
+                f"student_{i}_b.pdf",
+                sim,
+                severity,
+                f"2024-01-{(i % 28) + 1:02d}T10:00:00",
+                0.59,
+                "Pending",
+            )
+        )
+
     db_connection.executemany(
         """
         INSERT INTO plagiarism_incidents 
         (incident_id, document_a, document_b, similarity, severity, timestamp, threshold_at_time_of_flag, review_status)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        sample_incidents
+        sample_incidents,
     )
     db_connection.commit()
-    
+
     yield db_connection
-
-
-# ── Mock FAISS Index Fixture (Issue #3248) ────────────────────────────────────
-
-
-class MockFAISSIndexWrapper:
-    """Helper wrapper around in-memory FAISS index for synthetic NLP and vector search tests (Issue #3248)."""
-
-    def __init__(self, dimension: int = 384):
-        self.dimension = dimension
-        try:
-            import faiss
-
-            self.index = faiss.IndexFlatL2(dimension)
-        except Exception:
-            self.index = None
-            self.vectors = []
-
-    def add_vectors(self, vectors: Any) -> None:
-        """Add synthetic vectors to the in-memory FAISS index.
-
-        Args:
-            vectors: Array or list of synthetic vector embeddings.
-        """
-        arr = np.ascontiguousarray(vectors, dtype=np.float32)
-        if arr.ndim == 1:
-            arr = arr.reshape(1, -1)
-        if self.index is not None and hasattr(self.index, "add"):
-            self.index.add(arr)
-        else:
-            self.vectors.append(arr)
-
-    def search_vectors(self, query_vectors: Any, k: int = 5) -> tuple[np.ndarray, np.ndarray]:
-        """Query nearest neighbors for the given query vectors.
-
-        Args:
-            query_vectors: Query vector embeddings.
-            k: Number of nearest neighbors to retrieve.
-
-        Returns:
-            tuple[np.ndarray, np.ndarray]: (distances, indices)
-        """
-        q_arr = np.ascontiguousarray(query_vectors, dtype=np.float32)
-        if q_arr.ndim == 1:
-            q_arr = q_arr.reshape(1, -1)
-
-        if self.index is not None and hasattr(self.index, "search"):
-            distances, indices = self.index.search(q_arr, k)
-            return distances, indices
-        else:
-            if not self.vectors:
-                return np.zeros((q_arr.shape[0], k), dtype=np.float32), np.full(
-                    (q_arr.shape[0], k), -1, dtype=np.int64
-                )
-            data = np.vstack(self.vectors)
-            dists = np.linalg.norm(q_arr[:, np.newaxis, :] - data[np.newaxis, :, :], axis=2) ** 2
-            actual_k = min(k, data.shape[0])
-            sorted_indices = np.argsort(dists, axis=1)[:, :actual_k]
-            sorted_distances = np.take_along_axis(dists, sorted_indices, axis=1)
-            if actual_k < k:
-                pad_width = k - actual_k
-                sorted_indices = np.pad(
-                    sorted_indices, ((0, 0), (0, pad_width)), constant_values=-1
-                )
-                sorted_distances = np.pad(
-                    sorted_distances, ((0, 0), (0, pad_width)), constant_values=np.inf
-                )
-            return sorted_distances.astype(np.float32), sorted_indices.astype(np.int64)
-
-    def get_nearest_neighbors(self, query_vectors: Any, k: int = 5) -> tuple[np.ndarray, np.ndarray]:
-        """Alias helper to query nearest neighbors."""
-        return self.search_vectors(query_vectors, k=k)
-
-
-@pytest.fixture
-def mock_faiss_index():
-    """Pytest fixture providing an in-memory FAISS index wrapper for synthetic vector testing (Issue #3248).
-
-    Provides helpers to add synthetic vectors (`add_vectors`) and query nearest neighbors (`search_vectors` / `get_nearest_neighbors`).
-    """
-    return MockFAISSIndexWrapper(dimension=384)
-
-

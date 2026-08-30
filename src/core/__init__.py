@@ -16,6 +16,8 @@ from .document_parser import (
 )
 from .embedding_model import embed_chunks, embed_documents, get_document_embedding
 from .faiss_index import (
+    FAISSIndex,
+    FaissIndexManager,
     ChunkRecord,
     FaissChunkRecord,
     build_index,
@@ -69,7 +71,9 @@ __all__ = [
     "BrandingConfig",
     "ChunkRecord",
     "EventDispatcher",
+    "FAISSIndex",
     "FaissChunkRecord",
+    "FaissIndexManager",
     "HybridSimilarityEngine",
     "LexicalSimilarityEngine",
     "PLAGIARISM_THRESHOLD",

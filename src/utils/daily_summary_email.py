@@ -86,8 +86,20 @@ def get_admin_emails() -> list[str]:
         return admin_emails
 
     env_email = os.getenv("ADMIN_EMAIL")
-    if env_email and is_valid_email(env_email):
-        return [env_email.strip()]
+    if env_email:
+        raw_emails = re.split(r"[,;]", env_email)
+        valid_emails = []
+        for e in raw_emails:
+            cleaned = e.strip()
+            if cleaned:
+                if is_valid_email(cleaned):
+                    valid_emails.append(cleaned)
+                else:
+                    logger.warning(
+                        f"Skipping invalid admin email token configuration: \"{cleaned}\""
+                    )
+        if valid_emails:
+            return valid_emails
 
     return []
 
@@ -178,6 +190,95 @@ def build_severity_section_html(severity: str, incidents: list[dict[str, Any]]) 
     return html
 
 
+def build_email_text_body(
+    incidents_data: list[dict[str, Any]],
+    total_scans: int,
+    footer_note: Optional[str] = None,
+) -> str:
+    """
+    Build a structured plain-text fallback email body for terminal clients and screen readers.
+
+    Issue #3450: Plain-text MIME part fallback for summary emails.
+
+    Args:
+        incidents_data: List of incident dictionaries.
+        total_scans: Total number of scans processed in the period.
+        footer_note: Optional custom administrator note to display.
+
+    Returns:
+        str: Structured plain-text summary body.
+    """
+    lines = []
+    lines.append("DAILY PLAGIARISM SUMMARY")
+    lines.append("=" * 24)
+    report_time = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    lines.append(f"Report generated: {report_time}")
+    lines.append("")
+
+    if not incidents_data:
+        lines.append("No new plagiarism incidents detected in the last 24 hours.")
+        lines.append(f"Total scans processed: {total_scans}")
+        if footer_note:
+            lines.append("")
+            lines.append(f"Note from Administrator:\n{footer_note}")
+        return "\n".join(lines)
+
+    high_severity = [
+        inc for inc in incidents_data if inc.get("severity_rank") == "High"
+    ]
+    medium_severity = [
+        inc for inc in incidents_data if inc.get("severity_rank") == "Medium"
+    ]
+    low_severity = [inc for inc in incidents_data if inc.get("severity_rank") == "Low"]
+    other_severity = [
+        inc
+        for inc in incidents_data
+        if inc.get("severity_rank") not in ("High", "Medium", "Low")
+    ]
+
+    lines.append(f"Total new incidents: {len(incidents_data)}")
+    lines.append(f"Total scans processed: {total_scans}")
+    lines.append("")
+    lines.append("Severity Breakdown:")
+    lines.append(f"- High: {len(high_severity)}")
+    lines.append(f"- Medium: {len(medium_severity)}")
+    lines.append(f"- Low: {len(low_severity)}")
+    if other_severity:
+        lines.append(f"- Other / Unranked: {len(other_severity)}")
+    lines.append("")
+
+    severity_groups = [
+        ("HIGH SEVERITY INCIDENTS", high_severity),
+        ("MEDIUM SEVERITY INCIDENTS", medium_severity),
+        ("LOW SEVERITY INCIDENTS", low_severity),
+    ]
+    if other_severity:
+        severity_groups.append(("OTHER / UNRANKED INCIDENTS", other_severity))
+
+    for rank, group in severity_groups:
+        lines.append(f"--- {rank} ({len(group)}) ---")
+        if not group:
+            lines.append(f"No {rank.lower()} detected.")
+        else:
+            for inc in group:
+                doc_a = inc.get("document_a", "Unknown")
+                doc_b = inc.get("document_b", "Unknown")
+                sim = inc.get("similarity_score", 0.0)
+                date_flg = inc.get("date_flagged", "Unknown")
+                lines.append(
+                    f"* Document A: {doc_a}\n  Document B: {doc_b}\n  Similarity: {sim:.2%}\n  Date Flagged: {date_flg}"
+                )
+        lines.append("")
+
+    if footer_note:
+        lines.append(f"Note from Administrator:\n{footer_note}")
+        lines.append("")
+
+    app_base_url = os.getenv("APP_BASE_URL", "http://localhost:8501")
+    lines.append(f"Review all incidents in the dashboard: {app_base_url}")
+    return "\n".join(lines)
+
+
 def build_email_html_body(
     incidents_data: list[dict[str, Any]],
     total_scans: int,
@@ -248,7 +349,7 @@ def build_email_html_body(
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f9f9f9; border-radius: 8px;">
         <h2 style="color: #333333; text-align: center; border-bottom: 2px solid #007bff; padding-bottom: 10px;">Daily Plagiarism Summary</h2>
         <p style="color: #666666; font-size: 14px; text-align: right;">
-            Report generated on: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}
+            Report generated on: {datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")}
         </p>
 
         <div style="background-color: #ffffff; padding: 20px; border-radius: 8px; margin-top: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
@@ -270,7 +371,7 @@ def build_email_html_body(
         {footer_note_html}
 
         <p style="color: #888888; text-align: center; font-size: 14px; margin-top: 30px;">
-            <a href="{os.getenv('APP_BASE_URL', 'http://localhost:8501')}" style="color: #007bff; text-decoration: none;">Review all incidents in the dashboard</a>
+            <a href="{os.getenv("APP_BASE_URL", "http://localhost:8501")}" style="color: #007bff; text-decoration: none;">Review all incidents in the dashboard</a>
         </p>
     </div>
     </body>
@@ -483,11 +584,12 @@ def send_email(
     attachment_filename: str = "daily_plagiarism_summary.csv",
     timeout: float = 10.0,
     reply_to: Optional[str] = None,
-    attach_csv: bool = True,
-    csv_data: Optional[bytes | str] = None,
 ) -> bool:
     """
-    Send an email using SMTP.
+    Send an email using SMTP with multipart/alternative container supporting plain-text and HTML versions.
+
+    Issue #3450: Attach both MIMEText(text_body, "plain") and MIMEText(html_body, "html") to a
+    MIMEMultipart("alternative") container for screen reader and terminal client compatibility.
 
     Args:
         to_emails: List of recipient email addresses
@@ -499,6 +601,7 @@ def send_email(
         reply_to: Optional Reply-To email address header
         attach_csv: Option to attach incidents CSV report (default: True)
         csv_data: Optional raw CSV bytes or string content for the attachment
+        text_body: Optional plain-text formatted alternative body
 
     Returns:
         True if email sent successfully, False otherwise
@@ -519,10 +622,41 @@ def send_email(
         raise ValueError(f"Invalid reply-to email address: {reply_to}")
 
     smtp_server = os.getenv("SMTP_SERVER")
-    smtp_port = int(os.getenv("SMTP_PORT", "587"))
+    
+    # Issue #3446: Validate SMTP port number range (1 <= port <= 65535) with fallback to default 587
+    raw_smtp_port = os.getenv("SMTP_PORT", "587")
+    try:
+        smtp_port = int(raw_smtp_port)
+        if not (1 <= smtp_port <= 65535):
+            logger.warning(
+                "Invalid SMTP_PORT '%s' out of range (1-65535). Falling back to default port 587.",
+                raw_smtp_port,
+            )
+            smtp_port = 587
+    except (ValueError, TypeError):
+        logger.warning(
+            "Invalid non-integer SMTP_PORT '%s'. Falling back to default port 587.",
+            raw_smtp_port,
+        )
+        smtp_port = 587
+
     smtp_username = os.getenv("SMTP_USERNAME")
     smtp_password = os.getenv("SMTP_PASSWORD")
     from_email = os.getenv("FROM_EMAIL", smtp_username)
+
+    # Issue #3443: Support explicit SSL/TLS configuration toggles
+    smtp_use_ssl_env = os.getenv("SMTP_USE_SSL")
+    smtp_use_tls_env = os.getenv("SMTP_USE_TLS")
+
+    if smtp_use_ssl_env is not None:
+        use_ssl = smtp_use_ssl_env.lower().strip() in ("true", "1", "yes", "on")
+    else:
+        use_ssl = smtp_port == 465
+
+    if smtp_use_tls_env is not None:
+        use_tls = smtp_use_tls_env.lower().strip() in ("true", "1", "yes", "on")
+    else:
+        use_tls = not use_ssl
 
     if not all([smtp_server, smtp_username, smtp_password]):
         msg = "SMTP configuration incomplete. Please set SMTP_SERVER, SMTP_USERNAME, and SMTP_PASSWORD."
@@ -549,7 +683,12 @@ def send_email(
             if reply_to:
                 msg_obj["Reply-To"] = reply_to
 
-            html_part = MIMEText(html_body, "html")
+            # Issue #3450: Attach plain-text alternative first, followed by HTML part
+            if text_body:
+                text_part = MIMEText(text_body, "plain", "utf-8")
+                msg_obj.attach(text_part)
+
+            html_part = MIMEText(html_body, "html", "utf-8")
             msg_obj.attach(html_part)
 
             if attach_csv:
@@ -564,7 +703,7 @@ def send_email(
                 )
                 msg_obj.attach(attachment)
 
-            if smtp_port == 465:
+            if use_ssl:
                 logger.debug(
                     "Using SMTP_SSL (implicit SSL) on port %d with timeout %.1fs (attempt %d/%d)",
                     smtp_port,
@@ -579,14 +718,16 @@ def send_email(
                     server.send_message(msg_obj)
             else:
                 logger.debug(
-                    "Using SMTP with STARTTLS on port %d with timeout %.1fs (attempt %d/%d)",
+                    "Using SMTP (STARTTLS=%s) on port %d with timeout %.1fs (attempt %d/%d)",
+                    use_tls,
                     smtp_port,
                     timeout,
                     attempt + 1,
                     max_retries + 1,
                 )
                 with smtplib.SMTP(smtp_server, smtp_port, timeout=timeout) as server:
-                    server.starttls()
+                    if use_tls:
+                        server.starttls()
                     server.login(smtp_username, smtp_password)
                     server.send_message(msg_obj)
 
@@ -745,6 +886,9 @@ def send_daily_summary(
     html_body = build_email_html_body(
         incidents_data=incidents, total_scans=100, footer_note=footer_note
     )
+    text_body = build_email_text_body(
+        incidents_data=incidents, total_scans=100, footer_note=footer_note
+    )
 
     csv_data = None
     if attach_csv:
@@ -769,6 +913,7 @@ def send_daily_summary(
         reply_to=reply_to,
         attach_csv=attach_csv,
         csv_data=csv_data,
+        text_body=text_body,
     )
 
     return success
