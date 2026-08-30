@@ -202,4 +202,7 @@ def test_incremental_workflow_add_update_remove(mock_index, temp_metadata_path):
     # Remove one vector
     index = remove_vectors_incremental(index, [new_vids[0]], mgr)
     assert index.ntotal == start_id + 1
-    assert mgr.get_vector_mapping(new_vids[0]) is None
+    assert mgr.get_vector_mapping(new_vids[1]) is None
+    doc_new_vecs = mgr.get_vectors_for_document("doc_new")
+    assert len(doc_new_vecs) == 1
+    assert mgr.get_vector_mapping(doc_new_vecs[0])["embedding_text"] == "Text B"

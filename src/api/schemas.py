@@ -66,6 +66,15 @@ class TokenResponse(BaseModel):
     )
 
 
+class PasswordChangeSchema(BaseModel):
+    """Request schema for password change."""
+
+    old_password: str = Field(..., description="Current password")
+    new_password: str = Field(
+        ..., description="New password complying with complexity rules"
+    )
+
+
 class RevokeRequest(BaseModel):
     """Request schema for token revocation."""
 
@@ -593,6 +602,8 @@ class AsyncScanStatusResponse(BaseModel):
     )
 
 
+class MetricSample(BaseModel):
+    " \Schema for an individual Prometheus metric sample.\\n
 # ============================================================================
 # Example Paginated Response for Documents
 # ============================================================================

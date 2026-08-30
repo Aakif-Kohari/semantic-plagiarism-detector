@@ -93,13 +93,7 @@ __all__ = [
     "CLI_INVALID_COMMAND",
     "EXPORT_WRITE_FAILED",
     "EXPORT_GENERATION_IO_FAILED",
-    "EVENT_MALFORMED_PAYLOAD",
-    "EVENT_MISSING_FIELD",
-    "EVENT_UNKNOWN_TYPE",
-    "EventSchemaError",
-    "SSOConfigurationError",
-]
-# Authentication Errors
+]  # Authentication Errors
 AUTH_USERNAME_EMPTY = "Username cannot be empty."
 AUTH_PASSWORD_TOO_SHORT = "Password must be at least 6 characters long."
 AUTH_INVALID_ROLE = "Role must be one of: {roles}"

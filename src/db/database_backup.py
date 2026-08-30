@@ -417,8 +417,7 @@ def get_database_table_stats(db_path: str | Path) -> dict[str, int]:
 
     if not resolved_path.is_file():
         logger.warning(
-            "get_database_table_stats: path is not a file: %s, "
-            "returning empty stats.",
+            "get_database_table_stats: path is not a file: %s, returning empty stats.",
             resolved_path,
         )
         return {"_table_count": 0}
@@ -605,7 +604,7 @@ def _resolve_authorized_backup(
     authorized_directory = Path(backup_dir).expanduser().resolve(strict=True)
     if not authorized_directory.is_dir():
         raise NotADirectoryError(
-            "Designated backup path is not a directory: " f"{authorized_directory}"
+            f"Designated backup path is not a directory: {authorized_directory}"
         )
 
     candidate = Path(source).expanduser()
@@ -803,7 +802,7 @@ def cleanup_old_backups(
                 files_deleted += 1
                 bytes_freed += file_stat.st_size
                 logger.info(
-                    "Deleted stale backup: %s " "(age: %.1f days)",
+                    "Deleted stale backup: %s (age: %.1f days)",
                     file_path.name,
                     file_age_seconds / 86400,
                 )
@@ -815,7 +814,7 @@ def cleanup_old_backups(
                 )
 
     logger.info(
-        "Backup cleanup complete. Deleted %s files, " "freed %s bytes.",
+        "Backup cleanup complete. Deleted %s files, freed %s bytes.",
         files_deleted,
         bytes_freed,
     )

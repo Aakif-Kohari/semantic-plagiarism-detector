@@ -508,35 +508,12 @@ def _validate_password(password: str) -> str:
     return password
 
 
+# Imported from src.security.password_validator
+from src.security.password_validator import validate_password_complexity
+
 def _validate_password_complexity(password: str) -> str:
-    """Enforce strong password policy for user creation and password updates."""
-    password = str(password)
-    if len(password) < 8:
-        raise ValueError("Password must be at least 8 characters long.")
-    if len(password) > 128:
-        raise ValueError("Password cannot exceed 128 characters.")
-    if not re.search(r"[A-Z]", password):
-        raise ValueError("Password must contain at least one uppercase letter.")
-    if not re.search(r"\d", password):
-        raise ValueError("Password must contain at least one number.")
-    if not re.search(r"[@$!%*?&_\-#^()+=\[\]{}|:<>,./~\\]", password):
-        raise ValueError(
-            "Password must contain at least one special character (e.g. @$!%*?&)."
-        )
-    if zxcvbn is not None:
-        result = zxcvbn.zxcvbn(password)
-        if result.get("score", 0) < 3:
-            feedback = result.get("feedback", {})
-            warning = feedback.get("warning")
-            if warning:
-                raise ValueError(f"Password is too weak or common: {warning}")
-            raise ValueError(
-                "Password is too weak or commonly used. Please choose a stronger password."
-            )
+    validate_password_complexity(password)
     return password
-
-
-validate_password_complexity = _validate_password_complexity
 
 
 def _validate_role(role: str) -> str:
@@ -816,6 +793,7 @@ def add_user(username: str, password: str, role: str = "teacher") -> None:
     try:
         username = _validate_username(username)
         password = _validate_password(password)
+        validate_password_complexity(password)
         role = _validate_role(role)
         hashed = _hash_password(password)
         now_str = dt.now(timezone.utc).isoformat()
@@ -910,6 +888,7 @@ def update_password(
     try:
         username = _validate_username(username)
         new_password = _validate_password(new_password)
+        validate_password_complexity(new_password)
 
         with _connect() as conn:
             cursor = conn.execute(
@@ -1661,13 +1640,12 @@ def _cleanup_revoked_tokens() -> int:
             if expired_signatures:
                 placeholders = ",".join("?" for _ in expired_signatures)
                 cur = conn.execute(
-                    f"DELETE FROM revoked_tokens WHERE token_signature IN ({placeholders})",  # nosec
+                    f"DELETE FROM revoked_tokens WHERE token_signature IN ({placeholders})",
                     expired_signatures,
                 )
                 deleted_count = cur.rowcount
                 conn.commit()
                 if deleted_count > 0:
-                    clear_revocation_cache()
                     logger.info(
                         f"Cleaned up {deleted_count} expired entries from revoked_tokens table."
                     )
@@ -1735,6 +1713,34 @@ def revoke_token(token: str, details: str | None = None) -> None:
         raise sqlite3.Error(f"Failed to revoke token: {e}") from e
 
 
+def revoke_all_user_refresh_tokens(username: str) -> None:
+    """
+    Revokes and deletes all active refresh token families for a specified user,
+    forcing immediate re-authentication across all connected user devices.
+    """
+    username = _validate_username(username)
+    password_changed_at = dt.now(timezone.utc).isoformat()
+    try:
+        with _connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE users
+                SET password_changed_at = ?
+                WHERE username = ?
+                """,
+                (password_changed_at, username),
+            )
+            if cursor.rowcount == 0:
+                raise ValueError("User not found.")
+            conn.commit()
+            # Clear revocation cache to force refetching
+            clear_revocation_cache()
+            print(f"[SECURITY] All active refresh tokens revoked cleanly for user: {username}")
+    except sqlite3.Error as e:
+        logger.error(f"[SECURITY ERROR] Failed to invalidate active user token sessions: {e}")
+        raise sqlite3.Error(f"Failed to revoke user tokens: {e}") from e
+
+
 def is_token_revoked(token: str) -> bool:
     """Return True if the token or its SHA-256 signature exists in revoked_tokens.
 
@@ -1755,6 +1761,40 @@ def is_token_revoked(token: str) -> bool:
     signature = _get_token_signature(token)
     if signature in _revoked_token_cache:
         return _revoked_token_cache[signature]
+
+    # 2. Check if the token is a JWT and if it was issued before password_changed_at
+    parts = token.split(".")
+    if len(parts) == 3:
+        try:
+            import base64
+            import json
+            
+            payload_b64 = parts[1]
+            rem = len(payload_b64) % 4
+            if rem > 0:
+                payload_b64 += "=" * (4 - rem)
+            payload_bytes = base64.urlsafe_b64decode(payload_b64.encode("utf-8"))
+            payload = json.loads(payload_bytes.decode("utf-8"))
+            
+            sub = payload.get("sub")
+            iat = payload.get("iat")
+            if sub and iat is not None:
+                with _connect() as conn:
+                    row = conn.execute(
+                        "SELECT password_changed_at FROM users WHERE username = ?",
+                        (sub.lower(),),
+                    ).fetchone()
+                    if row and row[0]:
+                        p_changed_str = row[0].replace("Z", "+00:00")
+                        password_changed_dt = dt.fromisoformat(p_changed_str)
+                        password_changed_ts = int(password_changed_dt.timestamp())
+                        
+                        if int(iat) < password_changed_ts:
+                            _revoked_token_cache[token] = True
+                            _revoked_token_cache[signature] = True
+                            return True
+        except Exception as e:
+            logger.warning(f"Error parsing token for password change invalidation check: {e}")
 
     global _last_revoked_cleanup
     now = time.time()
@@ -2908,6 +2948,7 @@ __all__ = [
     "get_users_by_role",
     "get_users_by_permission",
     "promote_user",
+    "revoke_all_user_refresh_tokens",
     "demote_user",
     "render_role_badge",
     "render_role_selector",

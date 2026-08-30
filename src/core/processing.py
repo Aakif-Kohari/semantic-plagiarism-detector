@@ -23,10 +23,10 @@ from src.core.document_parser import extract_text
 from src.core.embedding_model import embed_documents
 from src.core.faiss_index import ChunkRecord, build_index, add_vectors_incremental
 from src.core.faiss_index_metadata import FAISSIndexMetadata
-from src.core.similarity import document_similarity_matrix, flag_plagiarismfrom src.core.text_chunking import chunk_documents
+from src.core.similarity import document_similarity_matrix, flag_plagiarism
+from src.core.text_chunking import chunk_documents
 from src.utils.tracing import get_tracer
 
-logger = logging.getLogger(__name__)
 logger = logging.getLogger(__name__)
 
 
@@ -92,7 +92,10 @@ def run_full_pipeline(
                     continue
                 try:
                     raw_texts[name] = extract_text(
-                        io.BytesIO(data), name, ocr_language=ocr_language, ocr_dpi=ocr_dpi
+                        io.BytesIO(data),
+                        name,
+                        ocr_language=ocr_language,
+                        ocr_dpi=ocr_dpi,
                     )
                 except Exception as exc:
                     failed_files.append(name)
@@ -125,7 +128,8 @@ def run_full_pipeline(
             embeddings = embed_documents(chunked_docs)
             first_emb = next(iter(embeddings.values()), None)
             embed_span.set_attribute(
-                "embedding.dims", first_emb.shape[1] if first_emb is not None and first_emb.size else 0
+                "embedding.dims",
+                first_emb.shape[1] if first_emb is not None and first_emb.size else 0,
             )
 
         with tracer.start_as_current_span("pipeline.similarity_scoring") as sim_span:

@@ -47,6 +47,98 @@ class ChunkRecord:
 FaissChunkRecord = ChunkRecord
 
 
+class FaissIndexManager:
+    """Manager and wrapper around a FAISS vector index (Issue #4033).
+
+    Provides high-level index management, vector addition, nearest-neighbor
+    search, and dimension/vector-count introspection.
+    """
+
+    def __init__(
+        self,
+        index: Optional[Any] = None,
+        dimension: int = 384,
+        index_type: str = "Flat",
+    ):
+        self.dimension = dimension
+        self.index_type = index_type
+        if index is not None:
+            self.index = index
+            if hasattr(index, "d"):
+                self.dimension = index.d
+        elif faiss is not None:
+            if index_type.lower() == "flat":
+                self.index = faiss.IndexFlatIP(dimension)
+            else:
+                self.index = faiss.IndexFlatIP(dimension)
+        else:
+            self.index = None
+
+    @property
+    def total_vectors(self) -> int:
+        """Return the total number of vectors in the index, or 0 if uninitialized."""
+        if self.index is None:
+            return 0
+        return int(getattr(self.index, "ntotal", 0) or 0)
+
+    @property
+    def ntotal(self) -> int:
+        """Alias for total_vectors returning the underlying index.ntotal or 0."""
+        return self.total_vectors
+
+    def add(
+        self,
+        vectors: Any,
+        metadata: Optional[dict] = None,
+    ) -> None:
+        """Add vectors to the underlying FAISS index."""
+        if self.index is None:
+            if faiss is not None:
+                self.index = faiss.IndexFlatIP(self.dimension)
+            else:
+                raise RuntimeError("FAISS is not initialized or unavailable")
+
+        arr = np.ascontiguousarray(vectors, dtype=np.float32)
+        if arr.ndim == 1:
+            arr = arr.reshape(1, -1)
+        norms = np.linalg.norm(arr, axis=1, keepdims=True)
+        norms = np.where(norms == 0, 1.0, norms)
+        arr = arr / norms
+        self.index.add(arr)
+        faiss_vectors_gauge.set(self.total_vectors)
+
+    def search(
+        self,
+        query: Any,
+        top_k: int = 5,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Search nearest neighbors for given query vector(s)."""
+        if self.index is None or self.total_vectors == 0:
+            q_arr = np.ascontiguousarray(query, dtype=np.float32)
+            if q_arr.ndim == 1:
+                q_arr = q_arr.reshape(1, -1)
+            return np.zeros((q_arr.shape[0], top_k), dtype=np.float32), np.full(
+                (q_arr.shape[0], top_k), -1, dtype=np.int64
+            )
+
+        q_arr = np.ascontiguousarray(query, dtype=np.float32)
+        if q_arr.ndim == 1:
+            q_arr = q_arr.reshape(1, -1)
+        norms = np.linalg.norm(q_arr, axis=1, keepdims=True)
+        norms = np.where(norms == 0, 1.0, norms)
+        q_arr = q_arr / norms
+
+        fetch_k = min(top_k, self.total_vectors)
+        distances, indices = self.index.search(q_arr, fetch_k)
+        if fetch_k < top_k:
+            pad_width = top_k - fetch_k
+            indices = np.pad(indices, ((0, 0), (0, pad_width)), constant_values=-1)
+            distances = np.pad(distances, ((0, 0), (0, pad_width)), constant_values=-1.0)
+        return distances, indices
+
+
+FAISSIndex = FaissIndexManager
+
 def build_index(
     embeddings: dict[str, np.ndarray],
     chunked_docs: dict[str, list[str]],
@@ -169,6 +261,9 @@ def search_similar_chunks(
         List of (ChunkRecord, similarity_score) tuples, descending by score.
     """
     vec = query_embedding.astype("float32").reshape(1, -1)
+    norm = np.linalg.norm(vec)
+    if norm > 0:
+        vec = vec / norm
     fetch_k = min(top_k * 3, index.ntotal) if exclude_doc else top_k
     fetch_k = max(fetch_k, 1)
 
@@ -234,6 +329,102 @@ def search_batch_vectors(
     return distances, indices
 
 
+def search_index(
+    query_vectors: np.ndarray | list[list[float]] | list[float],
+    index: Optional[faiss.Index] = None,
+    registry: Optional[list[ChunkRecord]] = None,
+    threshold: float = 0.0,
+    top_k: int = 10,
+    exclude_doc: Optional[str] = None,
+) -> list[dict[str, Any]]:
+    """Search the FAISS vector index with score threshold filtering (Issue #4036).
+
+    Queries candidate vectors and filters out any match where similarity score
+    is strictly less than the specified threshold.
+
+    Args:
+        query_vectors: 1D or 2D array or list of query embedding vectors.
+        index:         FAISS index instance.
+        registry:      Optional list of ChunkRecord objects corresponding to index IDs.
+        threshold:     Minimum similarity score (0.0 to 1.0) required to include a match.
+        top_k:         Maximum number of nearest matches to inspect per query vector.
+        exclude_doc:   Optional document name to exclude from search results.
+
+    Returns:
+        list[dict[str, Any]]: List of matches, each containing doc_name, chunk_index,
+            chunk_text, similarity_score, and metadata. All matches have similarity_score >= threshold.
+    """
+    if query_vectors is None:
+        return []
+
+    if isinstance(query_vectors, (list, tuple)):
+        query_mat = np.array(query_vectors, dtype=np.float32)
+    elif isinstance(query_vectors, np.ndarray):
+        query_mat = query_vectors.astype(np.float32)
+    else:
+        raise TypeError("query_vectors must be a numpy.ndarray or sequence of floats")
+
+    if query_mat.size == 0:
+        return []
+
+    if query_mat.ndim == 1:
+        query_mat = query_mat.reshape(1, -1)
+
+    if index is None or getattr(index, "ntotal", 0) == 0:
+        return []
+
+    # Unit-normalize queries for cosine similarity / inner product
+    norms = np.linalg.norm(query_mat, axis=1, keepdims=True)
+    norms = np.where(norms == 0, 1.0, norms)
+    query_mat = query_mat / norms
+
+    fetch_k = min(top_k * 3, index.ntotal) if exclude_doc else min(top_k, index.ntotal)
+    fetch_k = max(fetch_k, 1)
+
+    distances, indices = index.search(query_mat, fetch_k)  # type: ignore[call-arg]
+
+    matches: list[dict[str, Any]] = []
+    seen_keys: set[tuple[str, int]] = set()
+
+    for q_idx in range(query_mat.shape[0]):
+        q_scores = distances[q_idx]
+        q_indices = indices[q_idx]
+
+        for score, idx in zip(q_scores, q_indices):
+            if idx < 0:
+                continue
+            sim_score = float(round(float(score), 4))
+            if sim_score < threshold:
+                continue
+
+            record = registry[idx] if (registry and idx < len(registry)) else None
+            doc_name = record.doc_name if record else f"doc_{idx}"
+            chunk_text = record.chunk_text if record else ""
+            chunk_idx = record.chunk_index if record else int(idx)
+            metadata = record.metadata if record else {}
+
+            if exclude_doc and doc_name == exclude_doc:
+                continue
+
+            key = (doc_name, chunk_idx)
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+
+            matches.append(
+                {
+                    "doc_name": doc_name,
+                    "chunk_index": chunk_idx,
+                    "chunk_text": chunk_text,
+                    "similarity_score": sim_score,
+                    "metadata": metadata,
+                }
+            )
+
+    matches.sort(key=lambda x: x["similarity_score"], reverse=True)
+    return matches[:top_k]
+
+
 def find_plagiarised_chunks(
     embeddings: dict[str, np.ndarray],
     chunked_docs: dict[str, list[str]],
@@ -278,18 +469,16 @@ def find_plagiarised_chunks(
                 if pair_key in seen_pairs:
                     continue
                 seen_pairs.add(pair_key)
+                if chunk_idx < len(chunks):
+                    c_item = chunks[chunk_idx]
+                    src_text = getattr(c_item, "text", str(c_item))
+                else:
+                    src_text = ""
+
                 matches.append(
                     {
                         "source_doc": doc_name,
-                        "source_chunk_text": (
-                            (
-                                chunks[chunk_idx].text
-                                if hasattr(chunks[chunk_idx], "text")
-                                else chunks[chunk_idx]
-                            )
-                            if chunk_idx < len(chunks)
-                            else ""
-                        ),
+                        "source_chunk_text": src_text,
                         "match_doc": record.doc_name,
                         "match_chunk_text": record.chunk_text,
                         "similarity": round(score, 4),
@@ -558,14 +747,12 @@ def remove_document_from_index(
     # IndexIDMap.index is the wrapped base index.  IVF centroid structures are
     # unreliable after remove_ids, so only attempt in-memory reconstruct for
     # flat index types. IndexHNSWFlat does not support reconstruct().
-    inner = index.index
-    use_fast_path = not isinstance(inner, (faiss.IndexIVFFlat, faiss.IndexHNSWFlat))
+    inner = faiss.downcast_index(index.index) if hasattr(faiss, "downcast_index") else index.index
+    use_fast_path = not isinstance(inner, (faiss.IndexIVFFlat, faiss.IndexHNSWFlat)) and not hasattr(inner, "hnsw")
 
     if use_fast_path:
         try:
-            vectors = np.vstack(
-                [index.reconstruct(int(sid)) for sid in surviving_ids]
-            ).astype("float32")
+            vectors = inner.reconstruct_n(0, inner.ntotal).astype("float32")
             new_index = build_index_from_matrix(vectors, use_id_map=True)
             logger.info(
                 "[faiss_index] remove_document_from_index: compacted in-memory "
