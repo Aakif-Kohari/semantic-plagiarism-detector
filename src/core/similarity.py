@@ -14,6 +14,7 @@ Recent Additions (Issue #1956):
 import logging
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
+from src.core.plagiarism_evidence import build_plagiarism_evidence
 from src.core.threshold_calibration import (
     compute_calibration_metrics,
     find_optimal_threshold,
@@ -768,20 +769,34 @@ def flag_plagiarism(
                 chunk_text_b = chunk_b.text if hasattr(chunk_b, "text") else chunk_b
                 matched_length = len(chunk_text.split())
                 chunk_pair_texts = (chunk_text, chunk_text_b)
-            flags.append(
-                {
-                    "doc_a": doc_a,
-                    "doc_b": doc_b,
-                    "similarity": round(score, 4),
-                    "threshold_at_time_of_flag": float(threshold),
-                    "matched_length": matched_length,
-                    "severity": severity_from_score(
-                        score,
-                        DEFAULT_THRESHOLDS,
-                    ),
-                }
-            )
+            flag_dict = {
+                "doc_a": doc_a,
+                "doc_b": doc_b,
+                "similarity": round(score, 4),
+                "threshold_at_time_of_flag": float(threshold),
+                "matched_length": matched_length,
+                "severity": severity_from_score(
+                    score,
+                    DEFAULT_THRESHOLDS,
+                ),
+            }
+            
+            # Attach evidence if chunk data available
             if chunk_pair_texts is not None:
+                evidence = build_plagiarism_evidence(
+                    doc_a=doc_a,
+                    doc_b=doc_b,
+                    semantic_score=score,
+                    lexical_score=None,
+                    hybrid_score=None,
+                    matched_chunks=(chunk_pair_texts[0], chunk_pair_texts[1]),
+                    threshold=threshold,
+                    severity=flag_dict["severity"],
+                    chunk_similarity_matrix=sim_matrix,
+                )
+                flag_dict["evidence"] = evidence.to_dict()
+            
+            flags.append(flag_dict)            if chunk_pair_texts is not None:
                 _chunk_pair_texts[(doc_a, doc_b)] = chunk_pair_texts
 
     flags.sort(key=lambda item: item["similarity"], reverse=True)
