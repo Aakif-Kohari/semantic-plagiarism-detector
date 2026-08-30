@@ -2123,14 +2123,13 @@ class DummyMetric10(AbstractCircuitBreakerMetric):
     pass
 
 
+
 import abc
 import concurrent.futures
 import threading
 
-
 class ExtractionTimeoutError(TimeoutError):
     pass
-
 
 class EnterpriseTimeoutCircuitBreaker:
     def __init__(self, timeout_seconds: float = 10.0):
@@ -2144,12 +2143,9 @@ class EnterpriseTimeoutCircuitBreaker:
         except concurrent.futures.TimeoutError as e:
             future.cancel()
             executor.shutdown(wait=False)
-            raise ExtractionTimeoutError(
-                f"Extraction aborted after {self.timeout_seconds}s limit."
-            ) from e
+            raise ExtractionTimeoutError(f"Extraction aborted after {self.timeout_seconds}s limit.") from e
         finally:
             executor.shutdown(wait=False)
-
 
 def _extract_text_internal(
     file: PDFInput,
@@ -2460,8 +2456,6 @@ def _validate_ooxml_archive(file_bytes: bytes) -> bool:
         return True
     except (zipfile.BadZipFile, Exception):
         return False
-
-
 def extract_text(
     file: PDFInput,
     filename: str,
@@ -2481,7 +2475,7 @@ def extract_text(
             ocr_language=ocr_language,
             ocr_dpi=ocr_dpi,
             clean_whitespace=clean_whitespace,
-            mask_named_entities=mask_named_entities,
+            mask_named_entities=mask_named_entities
         )
     except ExtractionTimeoutError as e:
         logger.error(f"[document_parser] Extraction timed out for {filename}: {e}")

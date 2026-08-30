@@ -18,19 +18,24 @@ import pandas as pd
 from sklearn.metrics.pairwise import cosine_similarity
 
 from src.core.ai_detector import detect_documents_ai_probability
-from src.core.config import PLAGIARISM_THRESHOLD, severity_from_score
+from src.core.config import INCREMENTAL_INDEX_ENABLED, PLAGIARISM_THRESHOLD, severity_from_score
 from src.core.document_parser import extract_text
 from src.core.embedding_model import embed_documents
-from src.core.faiss_index import ChunkRecord, build_index
-from src.core.similarity import document_similarity_matrix, flag_plagiarism
-from src.core.text_chunking import chunk_documents
+from src.core.faiss_index import ChunkRecord, build_index, add_vectors_incremental
+from src.core.faiss_index_metadata import FAISSIndexMetadata
+from src.core.similarity import document_similarity_matrix, flag_plagiarismfrom src.core.text_chunking import chunk_documents
 from src.utils.tracing import get_tracer
 
+logger = logging.getLogger(__name__)
 logger = logging.getLogger(__name__)
 
 
 class PipelineResult(NamedTuple):
-    """Named outputs from ``run_full_pipeline`` (still unpackable as a tuple)."""
+       """
+
+    def is_incremental_update(self) -> bool:
+        """Check if this result is from incremental index update vs full rebuild."""
+        return hasattr(self, "_is_incremental") and self._is_incrementalNamed outputs from ``run_full_pipeline`` (still unpackable as a tuple)."""
 
     raw_texts: dict[str, str]
     chunked_docs: dict[str, list[str]]
@@ -54,8 +59,10 @@ def run_full_pipeline(
     ignore_phrases: Optional[str] = None,
     url_text: Optional[str] = None,
     url_filename: Optional[str] = None,
-) -> PipelineResult:
-    """Execute the full document upload pipeline outside of Streamlit.
+    existing_index: Any = None,
+    existing_registry: Dict[str, ChunkRecord] = None,
+    use_incremental: bool = INCREMENTAL_INDEX_ENABLED,
+) -> PipelineResult:    """Execute the full document upload pipeline outside of Streamlit.
 
     This is the same logic as ``streamlit_app.run_pipeline()`` but without
     the ``@st.cache_data`` decorator and ``st.warning`` calls, making it
@@ -157,9 +164,38 @@ def run_full_pipeline(
                 logger.debug("System memory usage check failed: %s", exc)
 
         with tracer.start_as_current_span("pipeline.faiss_search") as index_span:
-            faiss_index, registry = build_index(embeddings, chunked_docs)
-            index_span.set_attribute("faiss.index_size", len(registry))
-
+            if use_incremental and existing_index is not None:
+                metadata_mgr = FAISSIndexMetadata()
+                faiss_index = existing_index
+                registry = existing_registry if existing_registry else {}
+                
+                # Add new documents incrementally
+                for doc_name, emb_list in embeddings.items():
+                    if doc_name not in registry:
+                        chunks = chunked_docs.get(doc_name, [])
+                        texts = [
+                            c.text if hasattr(c, "text") else c for c in chunks
+                        ]
+                        faiss_index, _ = add_vectors_incremental(
+                            faiss_index,
+                            emb_list,
+                            doc_name,
+                            list(range(len(chunks))),
+                            texts,
+                            metadata_mgr,
+                        )
+                        for i, chunk in enumerate(chunks):
+                            chunk_obj = chunk if isinstance(chunk, ChunkRecord) else ChunkRecord(
+                                doc_name=doc_name,
+                                chunk_index=i,
+                                chunk_text=chunk.text if hasattr(chunk, "text") else chunk,
+                            )
+                            registry[f"{doc_name}_{i}"] = chunk_obj
+                logger.info("Used incremental index update for %d documents", len(embeddings))
+            else:
+                faiss_index, registry = build_index(embeddings, chunked_docs)
+            
+            index_span.set_attribute("faiss.index_size", faiss_index.ntotal)
         ai_probabilities = detect_documents_ai_probability(chunked_docs)
 
         flags = flag_plagiarism(
@@ -172,13 +208,23 @@ def run_full_pipeline(
         with tracer.start_as_current_span("pipeline.incident_sync"):
             pass
 
+        # Enrich flags with evidence if available
+        enriched_flags = flags
+        if chunked_docs and embeddings:
+            for flag in enriched_flags:
+                if "evidence" not in flag:
+                    logger.debug(
+                        "Flag for %s vs %s has no evidence attached",
+                        flag.get("doc_a"),
+                        flag.get("doc_b"),
+                    )
+
         return PipelineResult(
             raw_texts=raw_texts,
             chunked_docs=chunked_docs,
             embeddings=embeddings,
             sim_df=sim_df,
-            chunk_sim_df=chunk_sim_df,
-            faiss_index=faiss_index,
+            chunk_sim_df=chunk_sim_df,            faiss_index=faiss_index,
             registry=registry,
             ai_probabilities=ai_probabilities,
             flags=flags,
