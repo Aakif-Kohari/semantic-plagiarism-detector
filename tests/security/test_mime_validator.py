@@ -241,7 +241,7 @@ def test_weak_pk_signature_without_full_magic_bytes_is_rejected():
 
 def test_too_many_archive_members_are_rejected(monkeypatch):
     monkeypatch.setattr(
-        "src.security.mime_validator." "MAX_OOXML_ARCHIVE_ENTRIES",
+        "src.security.mime_validator.MAX_OOXML_ARCHIVE_ENTRIES",
         2,
     )
 
@@ -323,7 +323,7 @@ def test_validate_mime_type_magic_fallback(monkeypatch):
 
 def test_validate_mime_type_accepts_valid_legacy_doc_header(monkeypatch):
     """A .doc file with the complete OLE signature is accepted."""
-    valid_doc = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" b"\x00" * 64
+    valid_doc = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1\x00" * 64
     monkeypatch.setattr(
         "src.security.mime_validator._check_magic_bytes",
         lambda *_args: None,
@@ -365,7 +365,7 @@ def test_validate_mime_type_rejects_truncated_legacy_doc_header(monkeypatch):
 
 
 def test_validate_mime_type_legacy_doc_extension_is_case_insensitive(monkeypatch):
-    valid_doc = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" b"\x00" * 16
+    valid_doc = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1\x00" * 16
     monkeypatch.setattr(
         "src.security.mime_validator._check_magic_bytes",
         lambda *_args: None,
@@ -416,3 +416,110 @@ def test_legitimate_documents_not_flagged_as_executable():
     assert is_executable_upload(b"PK\x03\x04\x14\x00\x00\x00", "essay.docx") is False
     assert is_executable_upload(b"Just plain text essay content.", "notes.txt") is False
     assert is_executable_upload(b"col1,col2,col3\n1,2,3\n", "dataset.csv") is False
+
+
+def test_ooxml_xml_entities_forbidden():
+    """Verify that OOXML archives containing XML DTDs or entities in [Content_Types].xml are rejected."""
+    dtd_content_types = """<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE Types [
+  <!ENTITY lol "lol">
+]>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+</Types>
+"""
+    archive_with_dtd = build_zip(
+        {
+            "[Content_Types].xml": dtd_content_types,
+            "_rels/.rels": "<Relationships/>",
+            "word/document.xml": "<w:document/>",
+        }
+    )
+
+    assert validate_mime_type(archive_with_dtd, "report.docx") is False
+
+
+def build_docm() -> bytes:
+    return build_zip(
+        {
+            "[Content_Types].xml": CONTENT_TYPES_TEMPLATE.format(
+                part="/word/document.xml",
+                content_type="application/vnd.ms-word.document.macroEnabled.main+xml",
+            ),
+            "_rels/.rels": "<Relationships/>",
+            "word/document.xml": "<w:document/>",
+        }
+    )
+
+
+def build_xlsm() -> bytes:
+    return build_zip(
+        {
+            "[Content_Types].xml": CONTENT_TYPES_TEMPLATE.format(
+                part="/xl/workbook.xml",
+                content_type="application/vnd.ms-excel.sheet.macroEnabled.main+xml",
+            ),
+            "_rels/.rels": "<Relationships/>",
+            "xl/workbook.xml": "<workbook/>",
+        }
+    )
+
+
+def test_macro_enabled_documents_rejected_by_default():
+    # 1. Blocked extension checks
+    assert is_executable_upload(b"PK\x03\x04", "report.docm") is True
+    assert is_executable_upload(b"PK\x03\x04", "report.xlsm") is True
+
+    # 2. validate_mime_type checks
+    assert validate_mime_type(build_docm(), "report.docm") is False
+    assert validate_mime_type(build_xlsm(), "report.xlsm") is False
+
+    # 3. Spoofed docx/xlsx carrying macros inside
+    spoofed_docx = build_docm()  # built as docm but named as docx
+    assert validate_mime_type(spoofed_docx, "spoofed.docx") is False
+
+    spoofed_xlsx = build_xlsm()  # built as xlsm but named as xlsx
+    assert validate_mime_type(spoofed_xlsx, "spoofed.xlsx") is False
+
+
+def test_macro_enabled_documents_allowed_if_configured():
+    # 1. Extension check when macros allowed
+    assert is_executable_upload(b"PK\x03\x04", "report.docm", allow_macros=True) is False
+    assert is_executable_upload(b"PK\x03\x04", "report.xlsm", allow_macros=True) is False
+
+    # 2. validate_mime_type checks
+    assert validate_mime_type(build_docm(), "report.docm", allow_macros=True) is True
+    assert validate_mime_type(build_xlsm(), "report.xlsm", allow_macros=True) is True
+
+    # 3. Spoofed docx/xlsx carrying macros accepted if macros allowed
+    spoofed_docx = build_docm()
+    assert validate_mime_type(spoofed_docx, "spoofed.docx", allow_macros=True) is True
+
+
+def test_ooxml_oversized_content_types_rejected():
+    """Verify that OOXML archives with [Content_Types].xml exceeding 2MB are rejected."""
+    # Create an oversized [Content_Types].xml (3MB) using comment padding
+    padding_size = 3 * 1024 * 1024
+    oversized_content = "<!-- " + ("A" * padding_size) + " -->\n" + CONTENT_TYPES_TEMPLATE.format(
+        part="/word/document.xml",
+        content_type=(
+            "application/vnd.openxmlformats-officedocument."
+            "wordprocessingml.document.main+xml"
+        ),
+    )
+
+    archive = build_zip(
+        {
+            "[Content_Types].xml": oversized_content,
+            "_rels/.rels": "<Relationships/>",
+            "word/document.xml": "<w:document/>",
+        }
+    )
+
+    from src.security.mime_validator import _validate_ooxml_archive
+
+    assert _validate_ooxml_archive(archive, "docx", "report.docx") is False
+    assert validate_mime_type(archive, "report.docx") is False
+
+
+

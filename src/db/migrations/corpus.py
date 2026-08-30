@@ -576,8 +576,25 @@ def migrate_corpus_database(
 ) -> int:
     """Upgrade corpus.db to the latest supported schema version."""
     connection.execute("PRAGMA foreign_keys = ON")
-    return run_migrations(
-        connection,
-        migrations=CORPUS_MIGRATIONS,
-        target_version=CORPUS_SCHEMA_VERSION,
-    )
+
+    db_path = _corpus_db_file_path(connection)
+    backup_path = db_path.with_name("corpus_pre_migrate.db.bak") if db_path else None
+
+    if backup_path is not None:
+        shutil.copy2(db_path, backup_path)
+
+    try:
+        return run_migrations(
+            connection,
+            migrations=CORPUS_MIGRATIONS,
+            target_version=CORPUS_SCHEMA_VERSION,
+        )
+    except Exception:
+        if backup_path is not None and backup_path.exists():
+            logger.error(
+                "Migration failed; restoring corpus.db from backup %s.",
+                backup_path,
+            )
+            connection.close()
+            shutil.copy2(backup_path, db_path)
+        raise

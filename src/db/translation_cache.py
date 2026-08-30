@@ -403,7 +403,9 @@ def get_cached_translation(
                             (datetime.utcnow().isoformat(), source_hash),
                         )
                         logger.debug(
-                            "Cache hit for translation: %s -> %s", source_lang, target_lang
+                            "Cache hit for translation: %s -> %s",
+                            source_lang,
+                            target_lang,
                         )
                         return row["translated_text"]
 

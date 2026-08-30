@@ -22,7 +22,7 @@ MAX_FILENAME_LENGTH = 128
 
 _HTML_TAG_RE = re.compile(r"<[^>]*>")
 _CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
-_UNSAFE_RE = re.compile(r"[^A-Za-z0-9._ -]+")
+_UNSAFE_RE = re.compile(r"[^\w._ -]+", re.UNICODE)
 _SEPARATOR_RE = re.compile(r"[\s_-]+")
 _DOT_RE = re.compile(r"\.{2,}")
 _WINDOWS_RESERVED_NAMES = {
@@ -193,7 +193,15 @@ def sanitize_filename(
         if not stem:
             stem = safe_fallback[:maximum_stem_length] or DEFAULT_FILENAME
 
-    return f"{stem}{extension}"
+    sanitized = f"{stem}{extension}"
+    if sanitized.startswith("."):
+        stem_fallback = fallback or DEFAULT_FILENAME
+        stem_fallback = stem_fallback.strip(" ._-")
+        if not stem_fallback:
+            stem_fallback = DEFAULT_FILENAME
+        sanitized = f"{stem_fallback}{sanitized}"
+
+    return sanitized
 
 
 def unique_filename(

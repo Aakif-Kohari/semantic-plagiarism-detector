@@ -102,14 +102,14 @@ def test_cli_scan_success_csv_format(
 
     # Filter out commented metadata lines for parsing validation, or inspect metadata explicitly
     lines = [line for line in captured.out.strip().split("\n") if line.strip()]
-    
+
     # Verify metadata header lines start with '#'
     assert lines[0].startswith("#")
     assert any("Threshold Used: 0.8" in line for line in lines)
 
     # Find the row index where standard CSV headers begin
     header_idx = next(i for i, line in enumerate(lines) if not line.startswith("#"))
-    
+
     assert lines[header_idx] == "doc_a,doc_b,similarity_score"
     assert lines[header_idx + 1] == "doc1.txt,doc2.txt,1.0"
 
@@ -400,9 +400,7 @@ def test_seed_data_database_matches_active_corpus_schema(tmp_path):
     )
 
     assert result.returncode == 0, (
-        "Seed generation failed.\n"
-        f"STDOUT:\n{result.stdout}\n"
-        f"STDERR:\n{result.stderr}"
+        f"Seed generation failed.\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
     )
 
     generated_db = generated_dir / "corpus.db"
@@ -601,9 +599,7 @@ def test_cli_main_verify_schema_success(tmp_path, capsys):
     "src.core.embedding_model.embed_chunks",
     side_effect=MockDataFactory.embed_chunks,
 )
-def test_cli_scan_recursive(
-    mock_embed, mock_model_info, temp_assignments_dir, capsys
-):
+def test_cli_scan_recursive(mock_embed, mock_model_info, temp_assignments_dir, capsys):
     """Test scanning documents in nested subdirectories."""
     nested_dir = temp_assignments_dir / "student_1" / "assignment"
     nested_dir.mkdir(parents=True)
@@ -663,6 +659,7 @@ def test_cli_main_verify_schema_cannot_combine_with_subcommand(tmp_path):
             main()
         # argparse exits with 2 for argument errors
         assert excinfo.value.code == 2
+
 
 def test_cli_main_scan_recursive(temp_assignments_dir):
     """Test the --recursive CLI flag."""

@@ -83,17 +83,11 @@ def _get_redirect_uri() -> str:
     return os.getenv("APP_BASE_URL", "http://localhost:8501")
 
 
-def verify_sso_state_payload(
+def verify_sso_state(
     state: str, stored_state: Dict[str, Any]
 ) -> Tuple[bool, Optional[str]]:
     """
-    Verify a state token against the ``state_data`` payload it was issued with.
-
-    This is the stateless counterpart to :func:`verify_sso_state`. That one
-    asks the auth database whether a state row is live and unused; this one
-    checks a token against the dict returned as the third element of
-    :func:`get_google_auth_url` / :func:`get_github_auth_url`, which is useful
-    when the payload is held in the session rather than the database.
+    Verify that the state token is valid and not expired.
 
     Args:
         state: The state parameter received from the OAuth callback
@@ -166,31 +160,19 @@ def get_google_auth_url() -> Tuple[str, str, Dict[str, Any]]:
     """
     Return the Google OAuth authorization URL, state, and state data.
 
-    PKCE (Issue #3453): The returned ``state_data`` dict includes a
-    ``code_verifier`` key that **must** be passed to
-    :func:`exchange_google_code` when exchanging the authorization code.
-
     Returns:
         tuple[str, str, dict]: (authorization_url, state_token, state_data)
     """
     _load_env()
     client_id = os.getenv("GOOGLE_CLIENT_ID")
     if not client_id:
-        raise SSOConfigurationError("GOOGLE_CLIENT_ID environment variable is not configured")
+        raise ValueError("GOOGLE_CLIENT_ID environment variable is not configured")
 
     redirect_uri = _get_redirect_uri()
     state = f"google_{secrets.token_urlsafe(16)}"
 
-    # PKCE: generate code_verifier / code_challenge pair (Issue #3453)
-    code_verifier, code_challenge = generate_pkce_pair()
-    
     # Create state data with timestamp for expiration checking
-    state_data = {
-        "token": state,
-        "created_at": time.time(),
-        "provider": "google",
-        "code_verifier": code_verifier,
-    }
+    state_data = {"token": state, "created_at": time.time(), "provider": "google"}
 
     try:
         from src.db.auth import store_sso_state
@@ -395,22 +377,13 @@ def get_github_auth_url() -> Tuple[str, str, Dict[str, Any]]:
     _load_env()
     client_id = os.getenv("GITHUB_CLIENT_ID")
     if not client_id:
-        raise SSOConfigurationError("GITHUB_CLIENT_ID environment variable is not configured")
+        raise ValueError("GITHUB_CLIENT_ID environment variable is not configured")
 
     redirect_uri = _get_redirect_uri()
     state = f"github_{secrets.token_urlsafe(16)}"
 
     # Create state data with timestamp for expiration checking
     state_data = {"token": state, "created_at": time.time(), "provider": "github"}
-
-    try:
-        from src.db.auth import store_sso_state
-
-        store_sso_state(state)
-    except Exception as e:
-        logger.warning(f"Failed to store GitHub SSO state parameter: {e}")
-
-    github_scopes = os.getenv("GITHUB_OAUTH_SCOPES", "user:email")
 
     query_params = {
         "client_id": client_id,
@@ -585,11 +558,11 @@ def cleanup_expired_states(
     states: Dict[str, Dict[str, Any]],
 ) -> Dict[str, Dict[str, Any]]:
     """
-    Remove expired state tokens from memory dictionary.
-    
+    Clean up expired state tokens from the database or in-memory store.
+
     Args:
-        states: Dictionary mapping state tokens to state metadata
-        
+        states: Dictionary of stored states {state_token: state_data}
+
     Returns:
         dict: Cleaned states dictionary
     """
@@ -608,124 +581,3 @@ def cleanup_expired_states(
         logger.info(f"Cleaned up {expired_count} expired OAuth state tokens")
 
     return valid_states
-
-
-def get_azure_auth_url() -> tuple[str, str]:
-    """Return the Microsoft / Azure AD OAuth authorization URL and state."""
-    _load_env()
-    client_id = os.getenv("AZURE_CLIENT_ID")
-    if not client_id:
-        raise SSOConfigurationError("AZURE_CLIENT_ID environment variable is not configured")
-    tenant_id = os.getenv("AZURE_TENANT_ID", "common")
-    redirect_uri = _get_redirect_uri()
-    state = f"azure_{secrets.token_urlsafe(16)}"
-
-    try:
-        from src.db.auth import store_sso_state
-
-        store_sso_state(state)
-    except Exception as e:
-        logger.warning(f"Failed to store Azure SSO state parameter: {e}")
-
-    query_params = {
-        "response_type": "code",
-        "client_id": client_id,
-        "redirect_uri": redirect_uri,
-        "scope": "openid profile email User.Read",
-        "state": state,
-        "prompt": "select_account",
-    }
-
-    encoded_args = urllib.parse.urlencode(query_params)
-    url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/authorize?{encoded_args}"
-
-    return url, state
-
-
-def exchange_azure_code(
-    code: str, state: str | None = None
-) -> tuple[SSOUserProfile | None, str | None]:
-    """Exchange Azure AD authorization code for access token and fetch user info."""
-    if state is not None:
-        if not verify_sso_state(state):
-            return (
-                None,
-                "Invalid or expired SSO state parameter (CSRF protection failed).",
-            )
-
-    _load_env()
-    client_id = os.getenv("AZURE_CLIENT_ID")
-    if not client_id:
-        raise SSOConfigurationError("AZURE_CLIENT_ID environment variable is not configured")
-    client_secret = os.getenv("AZURE_CLIENT_SECRET")
-    if not client_secret:
-        raise SSOConfigurationError("AZURE_CLIENT_SECRET environment variable is not configured")
-    tenant_id = os.getenv("AZURE_TENANT_ID", "common")
-    redirect_uri = _get_redirect_uri()
-
-    try:
-        token_resp = requests.post(
-            f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token",
-            data={
-                "client_id": client_id,
-                "client_secret": client_secret,
-                "code": code,
-                "redirect_uri": redirect_uri,
-                "grant_type": "authorization_code",
-                "scope": "openid profile email User.Read",
-            },
-            timeout=10,
-        )
-    except requests.Timeout:
-        logger.error("OAuth token exchange timed out")
-        return None, "SSO provider timed out. Please try again."
-    except Exception as e:
-        logger.error(f"OAuth token exchange unexpected error: {e}")
-        return None, "SSO authentication failed"
-
-    if 400 <= token_resp.status_code < 500:
-        return None, "Invalid or expired SSO authorization code"
-    if not token_resp.ok:
-        return None, "SSO authentication failed"
-
-    token_json = token_resp.json()
-    if token_json.get("error"):
-        logger.error(
-            f"Azure OAuth error response: {token_json.get('error_description') or token_json.get('error')}"
-        )
-        return None, "Invalid or expired SSO authorization code"
-
-    access_token = token_json.get("access_token")
-    if not access_token:
-        return None, "Invalid or expired SSO authorization code"
-
-    try:
-        user_info_resp = requests.get(
-            "https://graph.microsoft.com/v1.0/me",
-            headers={"Authorization": f"Bearer {access_token}"},
-            timeout=10,
-        )
-    except requests.Timeout:
-        logger.error("OAuth user information request timed out")
-        return None, "SSO provider timed out. Please try again."
-    except Exception as e:
-        logger.error(f"OAuth user information request unexpected error: {e}")
-        return None, "SSO authentication failed"
-
-    if 400 <= user_info_resp.status_code < 500:
-        return None, "Invalid or expired SSO authorization code"
-    if not user_info_resp.ok:
-        return None, "SSO authentication failed"
-
-    user_data = user_info_resp.json()
-    email = user_data.get("mail") or user_data.get("userPrincipalName", "")
-    raw_username = email.split("@")[0] if email else ""
-    username = re.sub(r"[^a-zA-Z0-9_-]", "_", raw_username)
-
-    profile = SSOUserProfile(
-        email=email,
-        username=username,
-        name=user_data.get("displayName", ""),
-        avatar="",
-    )
-    return profile, None

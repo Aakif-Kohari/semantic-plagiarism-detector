@@ -4,7 +4,7 @@ Issue: #4004
 """
 
 import pytest
-from unicode_utils import remove_zero_width_spaces, has_zero_width_spaces
+from src.utils.unicode_utils import remove_zero_width_spaces, has_zero_width_spaces
 
 
 class TestRemoveZeroWidthSpaces:
