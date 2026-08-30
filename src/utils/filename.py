@@ -11,8 +11,7 @@ from collections.abc import Collection, Mapping
 from pathlib import PurePath
 from typing import IO, TypeVar
 
-DEFAULT_FILENAME = "document"
-
+DEFAULT_FILENAME = os.getenv("DEFAULT_FALLBACK_FILENAME", "document")
 # Upper bound on a sanitized filename, in characters.
 #
 # 128 leaves headroom under the 255-byte limit most filesystems impose, which
@@ -73,12 +72,19 @@ def get_file_sha256_hash(file_bytes: bytes) -> str:
 
 def compute_file_hash_stream(
     file_stream: IO[bytes],
-    chunk_size: int = 65536,
+    chunk_size: int = 1024 * 1024,
 ) -> str:
     """Return the SHA-256 hex digest for a file-like object.
 
     The stream is read incrementally in fixed-size chunks to avoid loading
     the entire file into memory.
+
+    Args:
+        file_stream: Binary stream to read and hash.
+        chunk_size: Number of bytes per read iteration (default 1 MB = 1024 * 1024).
+
+    Returns:
+        The hexadecimal SHA-256 hash string.
     """
     hasher = hashlib.sha256()
 
@@ -109,6 +115,21 @@ def normalize_sha256_hash(hash_str: str) -> str:
     return hash_str.lower()
 
 
+def is_windows_reserved_name(name: str) -> bool:
+    """Return True if the name or its base stem matches a Windows reserved device name.
+
+    Windows prohibits device names both standalone and with extensions (e.g.
+    'NUL', 'NUL.txt', 'CON.pdf', 'COM1.docx', 'aux.tar.gz').
+    """
+    if not name or not isinstance(name, str):
+        return False
+    normalized = name.strip(" ._-").upper()
+    if normalized in _WINDOWS_RESERVED_NAMES:
+        return True
+    base = normalized.split(".")[0]
+    return base in _WINDOWS_RESERVED_NAMES
+
+
 def sanitize_filename(
     filename: object,
     *,
@@ -127,7 +148,7 @@ def sanitize_filename(
         raise ValueError("max_length must be at least 8.")
 
     raw = html.unescape(str(filename or ""))
-    raw = unicodedata.normalize("NFKC", raw)
+    raw = unicodedata.normalize("NFC", raw)
     raw = _CONTROL_RE.sub("", raw)
 
     # Strip markup before selecting the basename. Closing tags contain "/"
@@ -150,7 +171,7 @@ def sanitize_filename(
     if not stem:
         stem = safe_fallback
 
-    if stem.upper() in _WINDOWS_RESERVED_NAMES:
+    if is_windows_reserved_name(stem):
         stem = f"_{stem}"
 
     maximum_stem_length = max_length - len(extension)
@@ -323,7 +344,7 @@ def get_final_extension(filename: object) -> str:
     from hiding an executable payload, such as ``document.pdf.exe``.
     """
     raw = html.unescape(str(filename or ""))
-    raw = unicodedata.normalize("NFKC", raw)
+    raw = unicodedata.normalize("NFC", raw)
     raw = _CONTROL_RE.sub("", raw)
     raw = _HTML_TAG_RE.sub("", raw)
     basename = _basename(raw).strip()

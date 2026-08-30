@@ -6,8 +6,8 @@ import time
 from datetime import datetime, timezone
 
 import psutil
-from fastapi import APIRouter, Request, Security, status
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi import APIRouter, HTTPException, Query, Request, Security, status
+from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 
 from src.api.middleware import get_current_user
 from src.api.schemas import (
@@ -69,11 +69,13 @@ def get_service_status(request: Request):
 def get_api_usage(request: Request):
     """Public usage endpoint returning total scan count and system uptime."""
     from src.api.routers.analysis import total_scans
+    from src.utils.processing_time import format_uptime_seconds
 
     uptime = time.time() - START_TIME
     return {
         "total_scans": total_scans,
         "uptime_seconds": float(uptime),
+        "uptime_formatted": format_uptime_seconds(uptime),
     }
 
 
@@ -183,3 +185,46 @@ def get_version(request: Request):
         "version": getattr(request.app, "version", APP_VERSION),
         "status": "active",
     }
+
+
+@router.get(
+    "/api/v1/admin/backup/download",
+    tags=["System Administration"],
+    summary="Download streamed database backup snapshot",
+)
+@router.get(
+    "/api/v1/backup/download",
+    tags=["System Administration"],
+    summary="Download streamed database backup snapshot",
+)
+def download_database_backup(
+    db_name: str = Query(
+        default="corpus.db", description="Database file to download (corpus.db or users.db)"
+    ),
+    _user: dict = Security(get_current_user, scopes=["admin"]),
+):
+    """Stream a transactionally consistent SQLite database snapshot directly from disk in chunks."""
+    from pathlib import Path
+    from src.core.app_config import AUTH_DB_PATH, CORPUS_DB_PATH
+    from src.db.database_backup import iter_sqlite_snapshot_chunks
+
+    if db_name in ("users.db", "auth.db"):
+        target_path = Path(AUTH_DB_PATH)
+    else:
+        target_path = Path(CORPUS_DB_PATH)
+
+    if not target_path.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Database file '{db_name}' not found.",
+        )
+
+    headers = {
+        "Content-Disposition": f'attachment; filename="{target_path.name}"',
+    }
+
+    return StreamingResponse(
+        iter_sqlite_snapshot_chunks(target_path),
+        media_type="application/x-sqlite3",
+        headers=headers,
+    )
