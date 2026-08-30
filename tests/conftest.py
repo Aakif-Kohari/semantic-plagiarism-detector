@@ -631,4 +631,75 @@ def populated_db_connection(db_connection: sqlite3.Connection) -> sqlite3.Connec
     )
     db_connection.commit()
 
+
+
+
+
+@pytest.fixture
+def mock_fast_tokenizer(monkeypatch):
+    """
+    A lightweight deterministic mock tokenizer that produces fixed-length token arrays.
+    Prevents unit tests from downloading/loading massive PyTorch/HuggingFace models.
+    """
+    from unittest.mock import MagicMock
+    import torch
+
+    class MockFastTokenizer(MagicMock):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.model_max_length = 512
+            self.pad_token_id = 0
+            self.eos_token_id = 2
+            self.bos_token_id = 1
+            
+        def __call__(self, text, *args, **kwargs):
+            if isinstance(text, str):
+                texts = [text]
+            else:
+                texts = text
+                
+            batch_size = len(texts)
+            # Dummy fixed-length array
+            seq_len = 16 
+            
+            input_ids = torch.ones((batch_size, seq_len), dtype=torch.long)
+            attention_mask = torch.ones((batch_size, seq_len), dtype=torch.long)
+            
+            # Make it deterministic based on input length
+            for i, t in enumerate(texts):
+                length = min(len(t) // 4 + 1, seq_len)
+                input_ids[i, :length] = torch.arange(1, length + 1)
+                attention_mask[i, length:] = 0
+                
+            return {
+                "input_ids": input_ids,
+                "attention_mask": attention_mask
+            }
+
+    tokenizer = MockFastTokenizer()
+    
+    # Mock AutoModelForSequenceClassification to avoid loading it
+    mock_model = MagicMock()
+    mock_model.config.max_position_embeddings = 512
+    
+    # Mock loss to return a tensor with a valid value so perplexity does not crash
+    mock_outputs = MagicMock()
+    mock_outputs.loss.item.return_value = 1.0
+    type(mock_outputs.loss).__float__ = MagicMock(return_value=1.0)
+    mock_model.return_value = mock_outputs
+    
+    try:
+        import transformers
+        monkeypatch.setattr(transformers.AutoTokenizer, "from_pretrained", lambda *args, **kwargs: tokenizer)
+        monkeypatch.setattr(transformers.AutoModelForSequenceClassification, "from_pretrained", lambda *args, **kwargs: mock_model)
+    except ImportError:
+        pass
+        
+    try:
+        import sentence_transformers
+        monkeypatch.setattr(sentence_transformers, "SentenceTransformer", lambda *args, **kwargs: MagicMock())
+    except ImportError:
+        pass
+        
+    return tokenizer
     yield db_connection
