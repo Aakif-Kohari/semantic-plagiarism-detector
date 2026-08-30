@@ -25,8 +25,9 @@ from typing import Dict, Iterable, List, Optional, Set, Tuple
 
 import numpy as np
 import pandas as pd
-from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
+import scipy.sparse as sp
 
 from src.core.stopwords import get_stopword_manager, tokenize_filtered
 
@@ -829,6 +830,53 @@ def scale_lexical_matrix(
         )
         return pd.DataFrame(scaled_vals, index=matrix.index, columns=matrix.columns)
     return softmax_normalize_scores(matrix, steepness=steepness, midpoint=midpoint)
+
+
+def compute_vectorized_jaccard_matrix(documents: list[str]) -> np.ndarray:
+    """Compute pairwise Jaccard similarity for a list of documents using vectorized operations.
+
+    This function leverages SciPy sparse matrices to compute the Jaccard similarity
+    matrix significantly faster than naive Python set intersections, which is
+    essential for processing thousands of documents.
+
+    Parameters
+    ----------
+    documents : list[str]
+        A list of document texts.
+
+    Returns
+    -------
+    np.ndarray
+        A 2D NumPy array of shape (N, N) where N is the number of documents,
+        representing the pairwise Jaccard similarity scores.
+    """
+    if not documents:
+        return np.array([])
+    
+    # Vectorize documents into binary bag-of-words (Boolean arrays)
+    vectorizer = CountVectorizer(binary=True, token_pattern=r"(?u)\b\w+\b")
+    try:
+        X = vectorizer.fit_transform(documents)
+    except ValueError:
+        # Occurs if documents are entirely empty
+        N = len(documents)
+        return np.zeros((N, N))
+
+    # X is shape (N, V). Intersection is dot product of binary matrices
+    intersection = X.dot(X.T).toarray()
+    
+    # Sum across columns to get the number of unique words per document
+    row_sums = X.sum(axis=1).A.flatten()
+    
+    # Union = |A| + |B| - |A ∩ B|
+    # row_sums[:, None] creates a column vector, row_sums[None, :] a row vector
+    union = row_sums[:, None] + row_sums[None, :] - intersection
+    
+    # Avoid division by zero
+    with np.errstate(divide='ignore', invalid='ignore'):
+        jaccard_matrix = np.where(union != 0, intersection / union, 0.0)
+        
+    return jaccard_matrix
 
 
 def compute_char_ngram_similarity(text_a: str, text_b: str, n: int = 5) -> float:
