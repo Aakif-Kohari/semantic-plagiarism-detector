@@ -416,3 +416,25 @@ def test_legitimate_documents_not_flagged_as_executable():
     assert is_executable_upload(b"PK\x03\x04\x14\x00\x00\x00", "essay.docx") is False
     assert is_executable_upload(b"Just plain text essay content.", "notes.txt") is False
     assert is_executable_upload(b"col1,col2,col3\n1,2,3\n", "dataset.csv") is False
+
+
+def test_ooxml_xml_entities_forbidden():
+    """Verify that OOXML archives containing XML DTDs or entities in [Content_Types].xml are rejected."""
+    dtd_content_types = """<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE Types [
+  <!ENTITY lol "lol">
+]>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+</Types>
+"""
+    archive_with_dtd = build_zip(
+        {
+            "[Content_Types].xml": dtd_content_types,
+            "_rels/.rels": "<Relationships/>",
+            "word/document.xml": "<w:document/>",
+        }
+    )
+
+    assert validate_mime_type(archive_with_dtd, "report.docx") is False
+

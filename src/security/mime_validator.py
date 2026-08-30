@@ -406,7 +406,11 @@ def _validate_ooxml_archive(
                 )
                 return False
 
-            root = ElementTree.fromstring(content_types_xml)
+            root = ElementTree.fromstring(
+                content_types_xml,
+                forbid_dtd=True,
+                forbid_entities=True,
+            )
             declared_content_types = {
                 element.attrib.get("ContentType", "")
                 for element in root.iter()
