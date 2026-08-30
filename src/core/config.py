@@ -11,7 +11,7 @@ import json
 import logging
 import os
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -234,6 +234,7 @@ DEFAULT_CROSS_ENCODER_MODEL: Final[str] = os.getenv(
 )
 DEFAULT_CROSS_ENCODER_TOP_K: Final[int] = int(os.getenv("CROSS_ENCODER_TOP_K", "50"))
 
+
 @dataclass(frozen=True)
 class SimilarityThresholds:
     """Validated plagiarism and severity boundaries."""
@@ -326,49 +327,62 @@ INCREMENTAL_INDEX_REBUILD_THRESHOLD: Final[float] = float(
     os.getenv("INCREMENTAL_INDEX_REBUILD_THRESHOLD", "50.0")
 )
 
+# FAISS HNSW Configuration (Issue #4030)
+FAISS_INDEX_TYPE: Final[str] = os.getenv("FAISS_INDEX_TYPE", "auto").strip().lower()
+FAISS_HNSW_EF_CONSTRUCTION: Final[int] = int(
+    os.getenv("FAISS_HNSW_EF_CONSTRUCTION", "100")
+)
+FAISS_HNSW_EF_SEARCH: Final[int] = int(os.getenv("FAISS_HNSW_EF_SEARCH", "64"))
+
+
 def load_calibrated_thresholds(
     calibration_id: Optional[str] = None,
 ) -> Optional[SimilarityThresholds]:
     """Load calibrated thresholds from disk by calibration_id, or return None.
-    
+
     Args:
         calibration_id: Specific calibration version to load. If None, loads the latest.
-    
+
     Returns:
         SimilarityThresholds instance if calibration file exists, else None.
     """
     if not os.path.exists(CALIBRATED_THRESHOLDS_PATH):
         return None
-    
+
     try:
         with open(CALIBRATED_THRESHOLDS_PATH, "r", encoding="utf-8") as f:
             data = json.load(f)
-        
+
         if not isinstance(data, dict):
             return None
-        
+
         # If calibration_id specified, look for that version
         if calibration_id and calibration_id in data.get("calibrations", {}):
             cal_data = data["calibrations"][calibration_id]
             return SimilarityThresholds(
-                plagiarism=float(cal_data.get("plagiarism", DEFAULT_THRESHOLDS.plagiarism)),
+                plagiarism=float(
+                    cal_data.get("plagiarism", DEFAULT_THRESHOLDS.plagiarism)
+                ),
                 medium=float(cal_data.get("medium", DEFAULT_THRESHOLDS.medium)),
                 high=float(cal_data.get("high", DEFAULT_THRESHOLDS.high)),
             )
-        
+
         # Otherwise, load latest calibration
         if data.get("latest_calibration_id"):
             cal_data = data["calibrations"][data["latest_calibration_id"]]
             return SimilarityThresholds(
-                plagiarism=float(cal_data.get("plagiarism", DEFAULT_THRESHOLDS.plagiarism)),
+                plagiarism=float(
+                    cal_data.get("plagiarism", DEFAULT_THRESHOLDS.plagiarism)
+                ),
                 medium=float(cal_data.get("medium", DEFAULT_THRESHOLDS.medium)),
                 high=float(cal_data.get("high", DEFAULT_THRESHOLDS.high)),
             )
-        
+
         return None
     except Exception as e:
         logger.warning("Failed to load calibrated thresholds: %s", e)
         return None
+
 
 def load_threshold_config(
     config_path: Optional[str] = None,
@@ -495,32 +509,35 @@ def severity_rank(label: str) -> int:
     return SEVERITY_RANK[normalize_severity_label(label)]
 
 
-
 # ============================================================================
 # OFFLINE MODE CONFIGURATION
 # ============================================================================
 
+
 def get_offline_mode_status() -> bool:
     """Check if offline mode is enabled."""
     import os
+
     return os.getenv("OFFLINE_MODE", "false").lower() == "true"
 
 
 def get_offline_config() -> dict[str, Any]:
     """Get offline mode configuration."""
     import os
+
     return {
         "enabled": get_offline_mode_status(),
         "cache_dir": os.getenv("OFFLINE_CACHE_DIR", ".cache/offline"),
         "model_cache_dir": os.getenv("OFFLINE_MODEL_CACHE_DIR", ".cache/models"),
         "max_cache_size_mb": int(os.getenv("OFFLINE_MAX_CACHE_SIZE_MB", "500")),
         "preload_models": os.getenv("OFFLINE_PRELOAD_MODELS", "true").lower() == "true",
-        "disable_telemetry": os.getenv("OFFLINE_DISABLE_TELEMETRY", "true").lower() == "true",
+        "disable_telemetry": os.getenv("OFFLINE_DISABLE_TELEMETRY", "true").lower()
+        == "true",
     }
+
 
 def test_branding_config_path_exists():
     """Test that BRANDING_CONFIG_PATH resolves to an existing file."""
     config_path = config_module.BRANDING_CONFIG_PATH  # noqa: F821
 
     assert os.path.isfile(config_path)
-
