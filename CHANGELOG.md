@@ -34,6 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Robust claim parsing in `.github/workflows/ecsoc-automation.yml` using structured hidden HTML comments to prevent breaking on greeting message variations.
 - Imported `timezone` alongside `datetime` so the audit-log CSV export no longer raises `NameError` while building its UTC-stamped filename, which took the whole Audit Logs view down whenever there were rows to show (`app/pages/3_Audit_Logs.py`).
 - Restored broken imports in `badge_generator.py` and kept invalid hex colors falling back to `DEFAULT_BADGE_COLOR`.
+- Rewrote the ten demonstration strings in `_generate_sample_ai_texts` and `_generate_sample_human_texts` as implicit concatenation; they were single-quoted literals wrapped across physical lines, which left the whole module uncompilable (`AI_ADVANCED_Text_Gen.py`).
 
 ### Security
 - Centralize spreadsheet formula sanitization in `export_sanitizer` and apply it across excel, bulk, and batch exports (`src/utils/export_sanitizer.py`).
