@@ -56,7 +56,9 @@ def cosine_distance_to_similarity(distance: float) -> float:
 # ── Validation helpers ─────────────────────────────────────────────────────────
 
 
-def _validated_batch_size(batch_size: Optional[int | float | str]) -> Optional[int]:
+def _validated_batch_size(
+    batch_size: Optional[Union[int, float, str]],
+) -> Optional[int]:
     """Return a safe integer batch size or None for unbatched execution."""
     from src.errors import SIM_BATCH_SIZE_INVALID
 

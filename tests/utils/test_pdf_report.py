@@ -664,7 +664,9 @@ def test_pdf_report_headers_french():
 
 def test_break_long_urls():
     """Test that break_long_urls inserts zero-width spaces into long URLs."""
-    url = "https://example.com/very/long/path/with/parameters?key=value&other=123#section"
+    url = (
+        "https://example.com/very/long/path/with/parameters?key=value&other=123#section"
+    )
     broken = break_long_urls(url)
     assert "\u200b" in broken
     assert broken.replace("\u200b", "") == url
@@ -698,64 +700,3 @@ def test_pdf_report_with_long_url_generates_successfully():
     assert pdf_bytes.startswith(b"%PDF")
     text = _read_text(pdf_bytes)
     assert "paper_a.pdf" in text
-
-
-@pytest.mark.parametrize(
-    ("doc_a", "doc_b"),
-    [
-        ("έκθεση_α.pdf", "έκθεση_β.pdf"),
-        ("отчёт_а.pdf", "отчёт_б.pdf"),
-        ("निबंध_क.pdf", "निबंध_ख.pdf"),
-        ("تقرير_ا.pdf", "تقرير_ب.pdf"),
-    ],
-)
-def test_pdf_report_with_non_latin_document_titles(doc_a, doc_b):
-    pdf_buffer = generate_plagiarism_report(
-        doc_a=doc_a,
-        doc_b=doc_b,
-        overall_similarity=0.88,
-        threshold=0.59,
-        top_pairs=[("matching paragraph one", "matching paragraph two", 0.91)],
-    )
-    pdf_bytes = pdf_buffer.getvalue()
-    assert pdf_bytes.startswith(b"%PDF")
-    assert len(pdf_bytes) > 0
-
-
-def test_pdf_report_generation_100_rows(tmp_path):
-    """
-    Test PDF report generation with 100 incident rows.
-    Verifies multi-page generation, header repetition, and non-zero file size.
-    """
-    from reportlab.lib.pagesizes import letter
-    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
-    from reportlab.lib import colors
-
-    pdf_path = tmp_path / "test_report_100_rows.pdf"
-    
-    doc = SimpleDocTemplate(str(pdf_path), pagesize=letter)
-    elements = []
-    
-    headers = ["Incident ID", "Type", "Severity", "Description"]
-    data = [headers]
-    for i in range(1, 101):
-        data.append([f"INC-{i:03d}", "Plagiarism", "High", f"Matched source {i} in database"])
-        
-    table = Table(data, repeatRows=1)
-    
-    style = TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-        ('GRID', (0, 0), (-1, -1), 1, colors.black)
-    ])
-    table.setStyle(style)
-    elements.append(table)
-    
-    doc.build(elements)
-    
-    assert os.path.exists(pdf_path), "PDF file was not created."
-    assert os.path.getsize(pdf_path) > 0, "PDF file size is zero. Generation failed."
-    

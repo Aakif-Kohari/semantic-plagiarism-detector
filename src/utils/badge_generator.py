@@ -213,6 +213,13 @@ def validate_hex_color(
 
     # 1. Check if it's a valid standard hex code
     if _HEX_COLOR_PATTERN.match(cleaned_color):
+        # Normalize 3-digit hex to 6-digit for consistency (e.g., #f00 -> #ff0000)
+        if len(cleaned_color) == 4:  # #RGB
+            return (
+                f"#{cleaned_color[1] * 2}{cleaned_color[2] * 2}{cleaned_color[3] * 2}"
+            )
+        if len(cleaned_color) == 5:  # #RGBA
+            return f"#{cleaned_color[1] * 2}{cleaned_color[2] * 2}{cleaned_color[3] * 2}{cleaned_color[4] * 2}"
         return cleaned_color
 
     # 2. Check if it's a recognized CSS named color (Issue #2898)

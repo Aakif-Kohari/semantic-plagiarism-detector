@@ -1661,13 +1661,12 @@ def _cleanup_revoked_tokens() -> int:
             if expired_signatures:
                 placeholders = ",".join("?" for _ in expired_signatures)
                 cur = conn.execute(
-                    f"DELETE FROM revoked_tokens WHERE token_signature IN ({placeholders})",  # nosec
+                    f"DELETE FROM revoked_tokens WHERE token_signature IN ({placeholders})",
                     expired_signatures,
                 )
                 deleted_count = cur.rowcount
                 conn.commit()
                 if deleted_count > 0:
-                    clear_revocation_cache()
                     logger.info(
                         f"Cleaned up {deleted_count} expired entries from revoked_tokens table."
                     )

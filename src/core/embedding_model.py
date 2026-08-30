@@ -307,6 +307,7 @@ def _get_model() -> SentenceTransformer:
 # under different filenames.
 _MODEL_WEIGHT_EXTENSIONS = (".bin", ".safetensors", ".onnx", ".gguf")
 
+
 def _resolve_cache_root() -> Path:
     """Resolve the HuggingFace hub cache root used for model downloads."""
     configured = _get_cache_dir()

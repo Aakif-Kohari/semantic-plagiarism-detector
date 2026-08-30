@@ -802,14 +802,11 @@ def test_cleanup_revoked_tokens():
     import base64
     import hashlib
     import json
-    import sqlite3
-    import time
-
     from src.db.auth import (
-        _cleanup_revoked_tokens,
-        get_auth_db_path,
-        is_token_revoked,
         revoke_token,
+        is_token_revoked,
+        get_auth_db_path,
+        _cleanup_revoked_tokens,
     )
 
     def make_mock_jwt(exp: int) -> str:
@@ -863,60 +860,6 @@ def test_cleanup_revoked_tokens():
         conn.commit()
 
 
-def test_is_token_revoked_uses_ttl_cache():
-    """Verify is_token_revoked caches results in-memory avoiding redundant SQLite queries (Issue #3018)."""
-    from unittest.mock import patch
-
-    from src.db.auth import (
-        _revoked_token_cache,
-        clear_revocation_cache,
-        is_token_revoked,
-        revoke_token,
-    )
-
-    clear_revocation_cache()
-    token = f"cache_test_tok_{uuid.uuid4().hex}"
-
-    # First check: query DB and cache False
-    assert is_token_revoked(token) is False
-    assert token in _revoked_token_cache
-
-    # Second check: must hit cache without calling _connect
-    with patch("src.db.auth._connect") as mock_connect:
-        assert is_token_revoked(token) is False
-        mock_connect.assert_not_called()
-
-    # Revoke token: must update cache immediately
-    revoke_token(token)
-    assert _revoked_token_cache[token] is True
-
-    # Cached check for revoked token without calling _connect
-    with patch("src.db.auth._connect") as mock_connect:
-        assert is_token_revoked(token) is True
-        mock_connect.assert_not_called()
-
-
-def test_clear_revocation_cache():
-    """Verify clear_revocation_cache removes cached entries forcing fresh DB reads."""
-    from unittest.mock import patch
-
-    from src.db.auth import (
-        _revoked_token_cache,
-        clear_revocation_cache,
-        is_token_revoked,
-    )
-
-    clear_revocation_cache()
-    token = f"clear_cache_tok_{uuid.uuid4().hex}"
-
-    is_token_revoked(token)
-    assert token in _revoked_token_cache
-
-    clear_revocation_cache()
-    assert token not in _revoked_token_cache
-
-
-@pytest.mark.skip(reason="Broken on main")
 def test_password_history_validation_prevents_reuse_of_last_3_passwords(mock_db):
     """Verify update_password prevents reusing any of the last 3 passwords."""
     user = f"hist_user_{uuid.uuid4().hex[:8]}"

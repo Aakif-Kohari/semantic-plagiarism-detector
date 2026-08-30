@@ -16,15 +16,13 @@ logger = logging.getLogger(__name__)
 ALLOWED_MIME_TYPES: dict[str, list[str]] = {
     "pdf": ["application/pdf"],
     "docx": [
-        "application/vnd.openxmlformats-officedocument."
-        "wordprocessingml.document",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "application/zip",
         "application/x-zip-compressed",
         "application/octet-stream",
     ],
     "xlsx": [
-        "application/vnd.openxmlformats-officedocument."
-        "spreadsheetml.sheet",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "application/zip",
         "application/x-zip-compressed",
         "application/octet-stream",
