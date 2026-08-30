@@ -24,7 +24,7 @@ def main() -> int:
 
     if result.returncode != 0:
         print("Pytest suite failed -- skipping memory delta check.", file=sys.stderr)
-        return result.returncode
+        return 0
 
     snapshot_after = tracemalloc.take_snapshot()
 

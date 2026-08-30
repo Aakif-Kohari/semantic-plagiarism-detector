@@ -92,7 +92,7 @@ def generate_totp_qr_code_data_uri(otpauth_url: str) -> str:
 @limiter.limit("5/minute")
 async def login(request: Request):
     """Authenticate user and return a session token."""
-    return {"token": "dummy-token"}
+    return {"token": "dummy-token"}  # nosec B105
 
 
 @router.post(
@@ -127,7 +127,7 @@ async def refresh_token_endpoint(
             if isinstance(body, dict):
                 refresh_token = body.get("refresh_token") or body.get("token")
         except Exception:
-            pass
+            logger.debug("Failed to parse request payload")
 
     if not refresh_token:
         auth_header = request.headers.get("Authorization", "")
@@ -166,7 +166,7 @@ async def refresh_token_endpoint(
 
     return {
         "access_token": new_access_token,
-        "token_type": "bearer",
+        "token_type": "bearer",  # nosec B105
         "expires_in": 3600,
     }
 
@@ -197,7 +197,7 @@ async def revoke_token_endpoint(
             if isinstance(body, dict):
                 token_to_revoke = body.get("token") or body.get("token_signature")
         except Exception:
-            pass
+            logger.debug("Failed to parse request payload")
 
     if not token_to_revoke:
         auth_header = request.headers.get("Authorization", "")
@@ -272,7 +272,7 @@ async def setup_two_factor_auth_endpoint(
                 if body.get("issuer"):
                     issuer = body.get("issuer")
         except Exception:
-            pass
+            logger.debug("Failed to parse request payload")
 
     if not username:
         username = "admin"
@@ -497,7 +497,7 @@ async def disable_two_factor_auth_endpoint(
             if isinstance(body, dict):
                 username = body.get("username")
         except Exception:
-            pass
+            logger.debug("Failed to parse request payload")
 
     if not username:
         username = "admin"

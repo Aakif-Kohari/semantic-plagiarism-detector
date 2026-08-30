@@ -5,7 +5,7 @@ Issue: #4015
 
 import math
 import pytest
-from embedding_utils import l2_normalize
+from src.utils.embedding_utils import l2_normalize
 
 
 class TestL2NormalizationBasic:
