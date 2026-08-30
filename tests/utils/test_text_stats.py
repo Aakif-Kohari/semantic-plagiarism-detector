@@ -1,7 +1,14 @@
-from src.utils.text_stats import (count_words,format_text_stats, get_char_count,
-                                   get_reading_time_minutes, get_word_count,
-                                   get_sentence_count, get_syllable_count,
-                                   get_readability_metrics, get_text_stats)
+from src.utils.text_stats import (
+    count_words,
+    format_text_stats,
+    get_char_count,
+    get_reading_time_minutes,
+    get_word_count,
+    get_sentence_count,
+    get_syllable_count,
+    get_readability_metrics,
+    get_text_stats,
+)
 
 """Unit tests for src/utils/text_stats.py.
 

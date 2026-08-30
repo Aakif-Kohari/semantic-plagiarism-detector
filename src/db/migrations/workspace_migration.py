@@ -72,9 +72,9 @@ def migrate_to_multitenancy(db_path: str) -> None:
         # 4. Backfill existing null records into default workspace
         for table in tables:
             cursor.execute(
-                f"UPDATE {table} SET workspace_id = ? WHERE workspace_id IS NULL",
+                f"UPDATE {table} SET workspace_id = ? WHERE workspace_id IS NULL",  # nosec
                 (default_ws_id,),
-            )  # nosec
+            )
 
         conn.commit()
         logger.info("Multi-tenancy migration completed successfully.")

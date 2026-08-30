@@ -172,14 +172,6 @@ repos:
         name: checkov (security)
         files: .*\.(tf|yml|yaml|json)$
 
-  # JSON formatting
-#  - repo: https://github.com/jumanjihouse/pre-commit-hooks
-#    rev: 3.0.0
-#    hooks:
-#      - id: jq
-#        name: jq (json format)
-#        args: ["--indent", "2", "-S"]
-
   # Python docstring validation
   - repo: https://github.com/econchick/interrogate
     rev: 1.5.0

@@ -144,9 +144,6 @@ UPLOAD_RATE_TTL = int(
 BADGE_TTL = int(
     os.getenv("BADGE_TTL", str(24 * 60 * 60))
 )  # 24 hours for badge buffer cache
-SCAN_JOBS_TTL = int(
-    os.getenv("SCAN_JOBS_TTL", str(24 * 60 * 60))
-)  # 24 hours for scan jobs
 DEFAULT_TTL = int(
     os.getenv("DEFAULT_TTL", str(24 * 60 * 60))
 )  # 24 hours fallback for keys without explicit TTL
@@ -203,7 +200,7 @@ class PayloadCompressor:
 
             logger.debug(
                 f"[CacheCompression] Compressed payload from {len(data)}B to {len(compressed_data)}B. "
-                f"Ratio: {compression_ratio:.2f}x. Time: {(time.perf_counter()-start_time)*1000:.2f}ms"
+                f"Ratio: {compression_ratio:.2f}x. Time: {(time.perf_counter() - start_time) * 1000:.2f}ms"
             )
 
             return cls.MAGIC_HEADER + compressed_data
@@ -226,7 +223,7 @@ class PayloadCompressor:
 
                 logger.debug(
                     f"[CacheCompression] Decompressed payload. "
-                    f"Time: {(time.perf_counter()-start_time)*1000:.2f}ms"
+                    f"Time: {(time.perf_counter() - start_time) * 1000:.2f}ms"
                 )
                 return decompressed_data
 
@@ -544,8 +541,9 @@ class RedisCache:
                         except Exception:
                             pass
                     else:
-                        self._inc_hits()
-                        return pickle.loads(decompressed)  # nosec
+                        with self._lock:
+                            self._hits += 1
+                        return pickle.loads(decompressed)
 
             except Exception as e:
                 logger.error(
@@ -604,7 +602,8 @@ class RedisCache:
                         except Exception:
                             pass
                     else:
-                        self._inc_hits()
+                        with self._lock:
+                            self._hits += 1
                         return json.loads(decompressed.decode("utf-8"))
 
             except Exception as e:
@@ -904,11 +903,10 @@ def clear_all_large_data(session_id: str | Path) -> None:
                     pipeline.delete(*chunk)
                 pipeline.execute()
         else:
-            prefixes = (f"spd:v1:large:{sid_str}:", f"spd:v1:large:{sid_str}/")
             keys_to_remove = [
                 k
                 for k in cache.fallback_cache.keys()
-                if any(k.startswith(p) for p in prefixes)
+                if k.startswith(f"spd:v1:large:{session_id}:")
             ]
             for key in keys_to_remove:
                 del cache.fallback_cache[key]

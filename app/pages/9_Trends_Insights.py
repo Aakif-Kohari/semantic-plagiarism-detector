@@ -317,7 +317,7 @@ def plot_top_flagged_pairs(df: pd.DataFrame) -> go.Figure:
     ))
     fig.update_layout(
         title="Top Flagged Document Pairs",
-        xaxis_title="Times Flagged", yaxis="",
+        xaxis_title="Times Flagged", yaxis_title="",
         template="plotly_dark", height=400,
         yaxis=dict(autorange="reversed"),
     )
@@ -481,7 +481,7 @@ def plot_forecast(df: pd.DataFrame, forecast: pd.DataFrame) -> go.Figure:
             marker=dict(size=4),
         ))
         fig.add_trace(go.Scatter(
-            x=pd.concat([forecast["date"], forecast["date"][::-1]),
+            x=pd.concat([forecast["date"], forecast["date"][::-1]]),
             y=pd.concat([forecast["upper_bound"], forecast["lower_bound"][::-1]]),
             fill="toself", fillcolor="rgba(245,158,11,0.1)",
             line=dict(color="rgba(255,255,255,0)"),

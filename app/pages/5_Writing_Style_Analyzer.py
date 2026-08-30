@@ -94,11 +94,15 @@ def _compute_style_profile(text: str, author: str = "Unknown") -> dict[str, Any]
     pronouns_total = pronouns_i + pronouns_you + pronouns_third
 
     # Passive voice indicators
-    passive_words = ['was', 'were', 'been', 'being', 'is', 'are', 'am']
     be_forms = ['is', 'are', 'was', 'were', 'be', 'been', 'being']
-    past_participle_count = sum(1 for i, w in enumerate(words)
-                               if w.lower() in be_forms and i + 1 < len(words)
-                               and words[i + 1][0].isupper() if words[i + 1] else False)
+    past_participle_count = sum(
+        1
+        for i, w in enumerate(words)
+        if w.lower() in be_forms
+        and i + 1 < len(words)
+        and words[i + 1]
+        and words[i + 1][0].isupper()
+    )
 
     # Adjective/adverb density
     ly_words = sum(1 for w in words if w.lower().endswith('ly') and len(w) > 3)

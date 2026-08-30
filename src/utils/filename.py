@@ -22,7 +22,7 @@ MAX_FILENAME_LENGTH = 128
 
 _HTML_TAG_RE = re.compile(r"<[^>]*>")
 _CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
-_UNSAFE_RE = re.compile(r"[^A-Za-z0-9._ -]+")
+_UNSAFE_RE = re.compile(r"[^\w._ -]+", re.UNICODE)
 _SEPARATOR_RE = re.compile(r"[\s_-]+")
 _DOT_RE = re.compile(r"\.{2,}")
 _WINDOWS_RESERVED_NAMES = {
@@ -115,6 +115,21 @@ def normalize_sha256_hash(hash_str: str) -> str:
     return hash_str.lower()
 
 
+def is_windows_reserved_name(name: str) -> bool:
+    """Return True if the name or its base stem matches a Windows reserved device name.
+
+    Windows prohibits device names both standalone and with extensions (e.g.
+    'NUL', 'NUL.txt', 'CON.pdf', 'COM1.docx', 'aux.tar.gz').
+    """
+    if not name or not isinstance(name, str):
+        return False
+    normalized = name.strip(" ._-").upper()
+    if normalized in _WINDOWS_RESERVED_NAMES:
+        return True
+    base = normalized.split(".")[0]
+    return base in _WINDOWS_RESERVED_NAMES
+
+
 def sanitize_filename(
     filename: object,
     *,
@@ -156,7 +171,7 @@ def sanitize_filename(
     if not stem:
         stem = safe_fallback
 
-    if stem.upper() in _WINDOWS_RESERVED_NAMES:
+    if is_windows_reserved_name(stem):
         stem = f"_{stem}"
 
     maximum_stem_length = max_length - len(extension)
@@ -178,7 +193,15 @@ def sanitize_filename(
         if not stem:
             stem = safe_fallback[:maximum_stem_length] or DEFAULT_FILENAME
 
-    return f"{stem}{extension}"
+    sanitized = f"{stem}{extension}"
+    if sanitized.startswith("."):
+        stem_fallback = fallback or DEFAULT_FILENAME
+        stem_fallback = stem_fallback.strip(" ._-")
+        if not stem_fallback:
+            stem_fallback = DEFAULT_FILENAME
+        sanitized = f"{stem_fallback}{sanitized}"
+
+    return sanitized
 
 
 def unique_filename(
