@@ -13,14 +13,25 @@ import os
 import time
 from typing import Any, Callable
 
-from prometheus_client import Counter, Gauge, Histogram, generate_latest
+from prometheus_client import REGISTRY, Counter, Gauge, Histogram, generate_latest
 
 logger = logging.getLogger(__name__)
+
+# Configurable environment variable to completely disable metrics collection.
+# If set to False, no metrics will be registered with the global collector
+# and the /metrics endpoints will return a 404 Not Found error.
+PROMETHEUS_METRICS_ENABLED = os.environ.get('PROMETHEUS_METRICS_ENABLED', 'True').lower() in ('true', '1', 't', 'yes')
+
+# The registry controls exposure. If enabled, it binds to the global prometheus REGISTRY.
+# If disabled, it binds to None, keeping metrics isolated and hidden from HTTP scrape endpoints.
+_registry = REGISTRY if PROMETHEUS_METRICS_ENABLED else None
+
 
 # ── Counters ───────────────────────────────────────────────────────────────────
 
 documents_total = Counter(
     "documents_total",
+    registry=_registry,
     "Cumulative number of documents ingested since process start. "
     "Monotonic: use rate()/increase() on this. For the current corpus size "
     "see the corpus_documents gauge.",
@@ -28,11 +39,13 @@ documents_total = Counter(
 
 flagged_incidents_total = Counter(
     "flagged_incidents_total",
+    registry=_registry,
     "Total number of flagged plagiarism incidents",
 )
 
 uploads_total = Counter(
     "uploads_total",
+    registry=_registry,
     "Total number of file upload batches processed",
     labelnames=["status"],
 )
@@ -41,22 +54,26 @@ uploads_total = Counter(
 
 corpus_size_gauge = Gauge(
     "corpus_size_bytes",
+    registry=_registry,
     "Total size on disk of the corpus database",
 )
 
 index_size_gauge = Gauge(
     "index_size_bytes",
+    registry=_registry,
     "Total size on disk of the FAISS index file",
 )
 
 corpus_documents_gauge = Gauge(
     "corpus_documents",
+    registry=_registry,
     "Current number of documents in the corpus. Goes down when documents are "
     "deleted, which is why this is a gauge and not documents_total.",
 )
 
 active_users_gauge = Gauge(
     "active_users",
+    registry=_registry,
     "Current number of active users",
 )
 
@@ -64,6 +81,7 @@ active_users_gauge = Gauge(
 
 pipeline_duration_seconds = Histogram(
     "pipeline_duration_seconds",
+    registry=_registry,
     "Duration of each pipeline stage in seconds",
     labelnames=["stage"],
     buckets=(0.01, 0.05, 0.1, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 120.0),
@@ -71,6 +89,7 @@ pipeline_duration_seconds = Histogram(
 
 query_response_time_seconds = Histogram(
     "query_response_time_seconds",
+    registry=_registry,
     "Duration of similarity search queries in seconds",
     buckets=(0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0),
 )
@@ -111,6 +130,8 @@ def timed(stage: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
 
 def generate_metrics_json() -> dict[str, Any]:
     """Return all metrics as a JSON-serialisable dict for non-Prometheus consumers."""
+    if not PROMETHEUS_METRICS_ENABLED:
+        return {}
     from prometheus_client.parser import text_string_to_metric_families
 
     raw = generate_latest().decode("utf-8")
