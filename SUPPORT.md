@@ -33,6 +33,53 @@ Instead, please report security vulnerabilities privately:
 
 ---
 
+## 📋 Support Response Times
+
+This section outlines our Support Level Agreements (SLAs) and expected response timelines for different types of community support requests. These guidelines help us prioritize issues and set expectations for response times.
+
+### Response Time Matrix
+
+| Issue Type | Priority | Initial Response | Resolution Target | Notes |
+| :--- | :--- | :--- | :--- | :--- |
+| **Critical Security Vulnerability** | Critical | 24 hours | 48 hours | Reported via private security email. Immediate triage and patch development. |
+| **Bug Reports** | High | 48-72 hours | 1-2 weeks | Reproducible bugs with clear steps and logs. |
+| **Feature Requests** | Medium | 1 week | Case-by-case | Evaluated based on community demand and roadmap alignment. |
+| **General Questions** | Low | 1-2 weeks | Best-effort | GitHub Discussions recommended for Q&A. |
+| **Documentation Clarifications** | Low | 1-2 weeks | Best-effort | May be addressed in documentation updates. |
+
+### Support Level Details
+
+#### 🔴 Critical Issues
+- **Definition:** Security vulnerabilities, production outages, data loss risks.
+- **Response:** Best-effort within 24 hours via email.
+- **Channel:** Private email to [security@domain.com](mailto:security@domain.com)
+- **SLA:** Target patch delivery within 48 hours of confirmation.
+
+#### 🟠 High Priority Issues
+- **Definition:** Reproducible bugs affecting core functionality, blocking workflows.
+- **Response:** Initial response within 48-72 hours.
+- **Channel:** GitHub Issues with bug report template.
+- **Resolution Target:** 1-2 weeks, depending on severity and complexity.
+
+#### 🟡 Medium Priority Issues
+- **Definition:** Feature requests, enhancements, non-critical bugs.
+- **Response:** Initial response within 1 week.
+- **Channel:** GitHub Issues or GitHub Discussions.
+- **Resolution Target:** Evaluated based on community interest and resource availability.
+
+#### 🟢 Low Priority Issues
+- **Definition:** General questions, documentation clarifications, usage guidance.
+- **Response:** Best-effort within 1-2 weeks.
+- **Channel:** GitHub Discussions recommended.
+- **Resolution Target:** Best-effort, may be addressed in batch documentation updates.
+
+### Community Support Expectations
+
+- **Best-Effort Basis:** Community support is provided on a best-effort basis. Response times are targets, not guarantees, and may vary based on team availability and issue complexity.
+- **Volunteer Contributions:** This project is maintained by volunteer contributors. Please be patient and respectful in your interactions.
+- **Escalation Path:** For urgent business-critical issues, consider opening a GitHub Sponsor inquiry or contacting [security@domain.com](mailto:security@domain.com) for guidance.
+
+---
 ## ⚡ Troubleshooting Batch Uploads
 
 When processing large batches of PDF/DOCX assignments or generating high-dimensional vector embeddings, memory allocation spikes can occur. Below are common FAQs, memory management tips, and recommended environment settings to ensure smooth throughput and prevent Out-Of-Memory (OOM) errors.

@@ -18,13 +18,17 @@ We take the security of the **Semantic Plagiarism Detection System** seriously. 
 
 **Please do NOT open a public GitHub issue for security vulnerabilities.** We request that you do not disclose the vulnerability publicly before a fix is released.
 
-Instead, send a detailed email to our private security alias **[security@domain.com](mailto:security@domain.com)** to report vulnerabilities privately with the following information:
+Instead, please report vulnerabilities privately using **GitHub Private Vulnerability Reporting**. 
 
-1. Description of the vulnerability and potential impact.
-2. Step-by-step instructions to reproduce the issue (including sample input files or payload snippets).
-3. Any proposed mitigations or code patches.
+To report a vulnerability:
+1. Navigate to the **Security** tab of this repository.
+2. Click on **Advisories** in the left sidebar (under Vulnerability reporting).
+3. Click on the **Report a vulnerability** button.
+4. Provide a detailed description of the vulnerability and its potential impact.
+5. Include step-by-step instructions to reproduce the issue (including sample input files or payload snippets).
+6. Provide any proposed mitigations or code patches if you have them.
 
-The maintainers will investigate, validate, and coordinate disclosure.
+The maintainers will investigate, validate, and coordinate disclosure. Alternatively, if GitHub Private Vulnerability Reporting is unavailable, you can report vulnerabilities directly via email to [security@domain.com](mailto:security@domain.com).
 
 ### Response Timeline
 
@@ -83,9 +87,15 @@ To protect cache data, session states, and FAISS indices from unauthorized acces
 - **Restricted Users:** Create a dedicated user for the plagiarism detector that is only allowed access to the specific keyspaces it uses:
   ```redis
   user spd_app on >StrongPassword ~spd:v1:* +@all -@dangerous
-  ```
-- **Disable Unused Commands:** Block high-risk commands such as `FLUSHALL`, `FLUSHDB`, `KEYS`, `CONFIG`, and `SHUTDOWN` for the application user.
+
+```
+
+* **Disable Unused Commands:** Block high-risk commands such as `FLUSHALL`, `FLUSHDB`, `KEYS`, `CONFIG`, and `SHUTDOWN` for the application user.
 
 ## Security Contact
 
-For security vulnerabilities (such as SSRF, SQLi, or RCE), please email our dedicated security team at **[security@domain.com](mailto:security@domain.com)** or contact project maintainers privately. Please do not disclose security vulnerabilities through public GitHub issues.
+For security vulnerabilities (such as SSRF, SQLi, or RCE), please report them using the repository's **Security > Advisories > Report a vulnerability** feature, or contact project maintainers privately. Please do not disclose security vulnerabilities through public GitHub issues.
+
+```
+
+```
