@@ -2,15 +2,11 @@
 
 from __future__ import annotations
 
-import logging
-import shutil
 import sqlite3
-from pathlib import Path
 
 from .common import column_exists, run_migrations, table_exists
 
-logger = logging.getLogger(__name__)
-CORPUS_SCHEMA_VERSION = 15
+CORPUS_SCHEMA_VERSION = 18
 
 
 def migration_001_create_base_schema(
@@ -82,7 +78,7 @@ def migration_004_add_plagiarism_incidents(
             similarity_score REAL NOT NULL,
             severity_rank TEXT NOT NULL,
             review_status TEXT NOT NULL DEFAULT 'Pending'
-                CHECK (review_status IN ('Pending', 'Resolved')),
+                CHECK (review_status IN ('Pending', 'Resolved', 'Dismissed')),
             date_flagged TEXT NOT NULL,
             last_seen TEXT NOT NULL
         )
@@ -392,6 +388,9 @@ CORPUS_MIGRATIONS = {
     13: migration_013_add_incident_archive_table,
     14: migration_013_add_incident_severity_idx,
     15: migration_015_pattern_recognition,
+    16: migration_016_add_scheduler_runs,
+    17: migration_017_add_incident_date_flagged_index,
+    18: migration_018_add_false_positives_audit_columns,
 }
 
 
@@ -491,6 +490,22 @@ def down_015_pattern_recognition(connection: sqlite3.Connection) -> None:
     connection.execute("DROP TABLE IF EXISTS plagiarism_patterns")
 
 
+def down_016_add_scheduler_runs(connection: sqlite3.Connection) -> None:
+    connection.execute("DROP TABLE IF EXISTS scheduler_runs")
+
+
+def down_017_add_incident_date_flagged_index(connection: sqlite3.Connection) -> None:
+    connection.execute("DROP INDEX IF EXISTS idx_incidents_date_flagged")
+
+
+def down_018_add_false_positives_audit_columns(
+    connection: sqlite3.Connection,
+) -> None:
+    """Remove dismissed_by and dismissal_reason audit columns from false_positives table."""
+    _drop_column_if_exists(connection, "false_positives", "dismissed_by")
+    _drop_column_if_exists(connection, "false_positives", "dismissal_reason")
+
+
 CORPUS_DOWN_MIGRATIONS = {
     1: down_001_create_base_schema,
     2: down_002_add_document_metadata,
@@ -507,32 +522,16 @@ CORPUS_DOWN_MIGRATIONS = {
     13: down_013_add_incident_archive_table,
     14: down_014_add_incident_severity_idx,
     15: down_015_pattern_recognition,
+    16: down_016_add_scheduler_runs,
+    17: down_017_add_incident_date_flagged_index,
+    18: down_018_add_false_positives_audit_columns,
 }
-
-
-def _corpus_db_file_path(connection: sqlite3.Connection) -> Path | None:
-    """Return the on-disk path of the connection's "main" database.
-
-    Returns ``None`` for in-memory or temporary databases (no file to
-    back up).
-    """
-    for _, name, filename in connection.execute("PRAGMA database_list"):
-        if name == "main" and filename:
-            return Path(filename)
-    return None
 
 
 def migrate_corpus_database(
     connection: sqlite3.Connection,
 ) -> int:
-    """Upgrade corpus.db to the latest supported schema version.
-
-    SQLite does not fully support transactional DDL, so a mid-migration
-    failure can leave the database half-migrated. To protect against
-    this (issue #2929), the on-disk database file is copied to
-    ``corpus_pre_migrate.db.bak`` before any migration scripts run. If a
-    migration raises, the original file is restored from that backup.
-    """
+    """Upgrade corpus.db to the latest supported schema version."""
     connection.execute("PRAGMA foreign_keys = ON")
 
     db_path = _corpus_db_file_path(connection)

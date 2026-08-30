@@ -4,6 +4,7 @@ test_daily_summary_email.py
 Tests for daily summary email functionality and HTML template generation.
 """
 
+import html
 import re
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
@@ -11,9 +12,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from src.utils.daily_summary_email import (
+    DEFAULT_EMAIL_SUBJECT_TEMPLATE,
     build_email_html_body,
+    build_email_text_body,
     build_incident_row_html,
     build_severity_section_html,
+    export_incidents_to_csv,
+    format_subject_line,
     generate_daily_summary_html,
     get_admin_emails,
     get_incidents_last_24h,
@@ -187,7 +192,6 @@ def test_get_admin_emails_no_valid_db_emails(mock_get_users):
 
     assert emails == ["fallback@example.com"]
 
-
 @patch("src.utils.daily_summary_email.get_all_users")
 @patch.dict("os.environ", {"ADMIN_EMAIL": "invalid-admin-email"}, clear=True)
 def test_get_admin_emails_no_valid_db_or_env_email(mock_get_users):
@@ -199,6 +203,32 @@ def test_get_admin_emails_no_valid_db_or_env_email(mock_get_users):
     emails = get_admin_emails()
 
     assert emails == []
+
+
+@patch("src.utils.daily_summary_email.get_all_users")
+@patch.dict("os.environ", {"ADMIN_EMAIL": "admin1@example.com, admin2@example.com;admin3@example.org"})
+def test_get_admin_emails_comma_and_semicolon_separated(mock_get_users):
+    """Test get_admin_emails handles mixed comma and semicolon separated lists in env."""
+    mock_get_users.return_value = []  # Fallback to env variable
+    
+    emails = get_admin_emails()
+    
+    assert emails == ["admin1@example.com", "admin2@example.com", "admin3@example.org"]
+
+
+@patch("src.utils.daily_summary_email.get_all_users")
+@patch.dict("os.environ", {"ADMIN_EMAIL": "admin1@example.com,invalid-email, admin2@example.com"})
+def test_get_admin_emails_separated_with_invalid_skips_and_warns(mock_get_users, caplog):
+    """Test get_admin_emails filters out invalid email tokens from a list and logs warnings."""
+    import logging
+    mock_get_users.return_value = []
+    
+    with caplog.at_level(logging.WARNING):
+        emails = get_admin_emails()
+        
+    assert emails == ["admin1@example.com", "admin2@example.com"]
+    assert any("Skipping invalid admin email token configuration" in record.message for record in caplog.records)
+
 
 
 def test_build_email_html_body_with_incidents_legacy_args(mock_incidents):
@@ -258,6 +288,34 @@ def test_send_email_success(mock_smtp):
         "FROM_EMAIL": "test@example.com",
     },
 )
+
+def test_send_email_includes_anti_spam_headers(mock_smtp):
+    """Issue #3447: automated summary emails must carry Auto-Submitted and
+    X-Auto-Response-Suppress headers so Outlook/Gmail spam filters and
+    auto-responders treat them correctly."""
+    mock_server = MagicMock()
+    mock_smtp.return_value.__enter__.return_value = mock_server
+
+    result = send_email(["recipient@example.com"], "Test Subject", "<p>Test Body</p>")
+
+    assert result is True
+    sent_message = mock_server.send_message.call_args[0][0]
+    assert sent_message["Auto-Submitted"] == "auto-generated"
+    assert sent_message["X-Auto-Response-Suppress"] == "All"
+
+
+@patch("smtplib.SMTP")
+@patch.dict(
+    "os.environ",
+    {
+        "SMTP_SERVER": "smtp.example.com",
+        "SMTP_PORT": "587",
+        "SMTP_USERNAME": "test@example.com",
+        "SMTP_PASSWORD": "password",
+        "FROM_EMAIL": "test@example.com",
+    },
+)
+
 def test_send_email_custom_attachment_filename(mock_smtp):
     """Test custom CSV attachment filename."""
     mock_server = MagicMock()
@@ -541,6 +599,49 @@ class TestEmailTemplateHelpers:
         assert "Low Severity Incidents (1)" in html
         assert "Doc1" in html
         assert "85.00%" in html
+
+    def test_build_email_html_body_across_incident_volumes(self):
+        empty = build_email_html_body(incidents_data=[], total_scans=10)
+        assert "No new plagiarism incidents detected" in empty
+
+        one = [
+            {
+                "document_a": "solo_a.pdf",
+                "document_b": "solo_b.pdf",
+                "similarity_score": 0.91,
+                "severity_rank": "High",
+                "date_flagged": "2026-08-23",
+            }
+        ]
+        html_one = build_email_html_body(incidents_data=one, total_scans=10)
+        assert "<strong>Total new incidents:</strong> 1" in html_one
+        assert "High Severity Incidents (1)" in html_one
+        assert "solo_a.pdf" in html_one
+
+        ranks = (["High"] * 34) + (["Medium"] * 33) + (["Low"] * 33)
+        many = []
+        for i, rank in enumerate(ranks):
+            many.append(
+                {
+                    "document_a": f"doc_a_{i}.pdf",
+                    "document_b": f"doc_b_{i}.pdf",
+                    "similarity_score": (
+                        0.9 if rank == "High" else 0.7 if rank == "Medium" else 0.4
+                    ),
+                    "severity_rank": rank,
+                    "date_flagged": "2026-08-23",
+                }
+            )
+
+        html_many = build_email_html_body(incidents_data=many, total_scans=200)
+        assert "<strong>Total new incidents:</strong> 100" in html_many
+        assert "High Severity Incidents (34)" in html_many
+        assert "Medium Severity Incidents (33)" in html_many
+        assert "Low Severity Incidents (33)" in html_many
+        assert html_many.count("<table") == 3
+        assert html_many.rstrip().endswith("</html>")
+        for i in range(100):
+            assert f"doc_a_{i}.pdf" in html_many
 
     def test_build_email_html_body_with_custom_footer_note(self):
         """Test that custom footer note is included in HTML output (#1252)."""

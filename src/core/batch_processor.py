@@ -58,8 +58,8 @@ class BatchJob:
 
     job_id: str
     name: str = ""
-    file_paths: List[str] = field(default_factory=list)
-    document_paths: List[str] = field(default_factory=list)
+    file_paths: list[str] = field(default_factory=list)
+    document_paths: list[str] = field(default_factory=list)
     status: Any = "pending"
     priority: BatchPriority = BatchPriority.NORMAL
     created_at: Any = field(default_factory=lambda: datetime.now().isoformat())
@@ -73,8 +73,8 @@ class BatchJob:
     flagged_pairs: int = 0
     high_severity_count: int = 0
     error_message: Optional[str] = None
-    errors: List[Dict[str, str]] = field(default_factory=list)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    errors: list[dict[str, str]] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
     results: Any = field(default_factory=list)
 
     def __post_init__(self):
@@ -100,7 +100,7 @@ class BatchJob:
             return 0.0
         return (self.processed_files / self.total_files) * 100.0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert job to dictionary."""
         data = asdict(self)
         if isinstance(self.status, Enum):
@@ -160,7 +160,7 @@ class BatchConfig:
     save_progress: bool = True
     progress_file: str = ".cache/batch_progress.json"
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert config to dictionary."""
         return asdict(self)
 
@@ -180,12 +180,12 @@ class BatchProcessor:
 
     def __init__(self, config: Optional[BatchConfig] = None):
         self.config = config or BatchConfig()
-        self.jobs: Dict[str, BatchJob] = {}
-        self._jobs: Dict[str, BatchJob] = self.jobs
+        self.jobs: dict[str, BatchJob] = {}
+        self._jobs: dict[str, BatchJob] = self.jobs
         self._active_job: Optional[str] = None
         self._lock = threading.RLock()
-        self._callbacks: List[Callable] = []
-        self._progress_callbacks: List[Callable] = self._callbacks
+        self._callbacks: list[Callable] = []
+        self._progress_callbacks: list[Callable] = self._callbacks
         self._stop_processing = False
 
         self.metrics = {
@@ -229,7 +229,7 @@ class BatchProcessor:
     def create_job(
         self,
         name: str,
-        document_paths: List[str],
+        document_paths: list[str],
         priority: BatchPriority = BatchPriority.NORMAL,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> BatchJob:
@@ -527,7 +527,7 @@ class BatchProcessor:
         except Exception as e:
             logger.error(f"Failed to save progress: {e}")
 
-    def get_metrics(self) -> Dict[str, Any]:
+    def get_metrics(self) -> dict[str, Any]:
         """Get processing metrics."""
         return {
             **self.metrics,

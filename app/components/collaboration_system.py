@@ -67,8 +67,8 @@ class ReviewWorkflow:
     created_by: str
     created_at: datetime
     status: str  # 'pending', 'in_review', 'approved', 'rejected', 'needs_changes'
-    reviewers: List[str]
-    decisions: Dict[str, Dict]  # reviewer_id -> {decision, timestamp, comments}
+    reviewers: list[str]
+    decisions: dict[str, dict]  # reviewer_id -> {decision, timestamp, comments}
     current_reviewer_index: int = 0
     timeline: List[Dict] = None
     metadata: Dict = None
@@ -172,7 +172,7 @@ class AnnotationManager:
     """Manages document annotations and comments"""
 
     def __init__(self):
-        self.annotations: Dict[str, List[DocumentAnnotation]] = defaultdict(list)
+        self.annotations: dict[str, list[DocumentAnnotation]] = defaultdict(list)
         self.annotation_count = 0
 
     def add_annotation(
@@ -255,7 +255,7 @@ class WorkflowManager:
     """Manages review workflows for documents"""
 
     def __init__(self):
-        self.workflows: Dict[str, ReviewWorkflow] = {}
+        self.workflows: dict[str, ReviewWorkflow] = {}
         self.workflow_count = 0
 
     def create_workflow(
@@ -318,8 +318,8 @@ class ActivityManager:
     """Manages user sessions and real-time activity tracking"""
 
     def __init__(self):
-        self.sessions: Dict[str, UserSession] = {}
-        self.activity_log: List[Dict] = []
+        self.sessions: dict[str, UserSession] = {}
+        self.activity_log: list[dict] = []
         self.active_timeout_seconds = 300  # 5 minutes
 
     def create_session(self, user_id: str, username: str) -> UserSession:

@@ -17,11 +17,13 @@ from src.db.corpus_db import (
     get_document_chunks_count,
     get_document_count_by_user,
     get_document_count_fast,
+    get_document_word_counts,
     get_documents_by_class,
     get_unique_class_sections,
     purge_stale_trash,
     restore_document,
     soft_delete_document,
+    CorpusRepository,
 )
 
 

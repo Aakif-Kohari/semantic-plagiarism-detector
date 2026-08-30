@@ -120,7 +120,7 @@ def count_audit_logs(
         return 0
 
 
-def get_distinct_event_types() -> List[str]:
+def get_distinct_event_types() -> list[str]:
     """Get all distinct event types from audit logs."""
     try:
         from src.db.auth import auth_repo

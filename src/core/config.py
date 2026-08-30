@@ -69,7 +69,7 @@ class BrandingConfig:
         self.logo_path = logo_path
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "BrandingConfig":
+    def from_dict(cls, data: dict[str, Any]) -> "BrandingConfig":
         """
         Create BrandingConfig from dictionary with validation.
 
@@ -100,7 +100,7 @@ class BrandingConfig:
 
         return cls(brand_color=brand_color, logo_path=logo_path)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """
         Convert BrandingConfig to dictionary.
 
@@ -218,6 +218,21 @@ SEVERITY_RANK: Final[Mapping[str, int]] = {
 # Embedding batch size configuration (default: 32)
 EMBEDDING_BATCH_SIZE: Final[int] = int(os.getenv("EMBEDDING_BATCH_SIZE", "32"))
 
+# Minimum consecutive words for a highlighted match in side-by-side diffs.
+DEFAULT_DIFF_MIN_MATCH_LENGTH: Final[int] = int(
+    os.getenv("DEFAULT_DIFF_MIN_MATCH_LENGTH", "4")
+)
+
+# Cross-Encoder re-ranking stage (Issue #3911). FAISS/bi-encoder retrieval
+# stays the first-stage candidate search; only the top-K highest scoring
+# candidates are passed through the cross-encoder for precise re-scoring.
+CROSS_ENCODER_RERANKING_ENABLED: Final[bool] = os.getenv(
+    "CROSS_ENCODER_RERANKING_ENABLED", "true"
+).strip().lower() not in ("false", "0", "")
+DEFAULT_CROSS_ENCODER_MODEL: Final[str] = os.getenv(
+    "CROSS_ENCODER_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2"
+)
+DEFAULT_CROSS_ENCODER_TOP_K: Final[int] = int(os.getenv("CROSS_ENCODER_TOP_K", "50"))
 
 @dataclass(frozen=True)
 class SimilarityThresholds:
@@ -283,6 +298,77 @@ THRESHOLD_CONFIG_PATH: Final[str] = os.path.join(
     "thresholds.json",
 )
 
+# Calibrated thresholds storage (Issue #3912)
+CALIBRATED_THRESHOLDS_PATH: Final[str] = os.path.join(
+    os.path.dirname(__file__),
+    "..",
+    "..",
+    "config",
+    "calibrated_thresholds.json",
+)
+
+# Incremental FAISS index metadata (Issue #3913)
+FAISS_INDEX_METADATA_PATH: Final[str] = os.path.join(
+    os.path.dirname(__file__),
+    "..",
+    "..",
+    "config",
+    "faiss_index_metadata.json",
+)
+
+# Enable incremental index updates instead of full rebuild
+INCREMENTAL_INDEX_ENABLED: Final[bool] = os.getenv(
+    "INCREMENTAL_INDEX_ENABLED", "true"
+).strip().lower() not in ("false", "0", "")
+
+# Threshold for document changes triggering full index rebuild (%)
+INCREMENTAL_INDEX_REBUILD_THRESHOLD: Final[float] = float(
+    os.getenv("INCREMENTAL_INDEX_REBUILD_THRESHOLD", "50.0")
+)
+
+def load_calibrated_thresholds(
+    calibration_id: Optional[str] = None,
+) -> Optional[SimilarityThresholds]:
+    """Load calibrated thresholds from disk by calibration_id, or return None.
+    
+    Args:
+        calibration_id: Specific calibration version to load. If None, loads the latest.
+    
+    Returns:
+        SimilarityThresholds instance if calibration file exists, else None.
+    """
+    if not os.path.exists(CALIBRATED_THRESHOLDS_PATH):
+        return None
+    
+    try:
+        with open(CALIBRATED_THRESHOLDS_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        
+        if not isinstance(data, dict):
+            return None
+        
+        # If calibration_id specified, look for that version
+        if calibration_id and calibration_id in data.get("calibrations", {}):
+            cal_data = data["calibrations"][calibration_id]
+            return SimilarityThresholds(
+                plagiarism=float(cal_data.get("plagiarism", DEFAULT_THRESHOLDS.plagiarism)),
+                medium=float(cal_data.get("medium", DEFAULT_THRESHOLDS.medium)),
+                high=float(cal_data.get("high", DEFAULT_THRESHOLDS.high)),
+            )
+        
+        # Otherwise, load latest calibration
+        if data.get("latest_calibration_id"):
+            cal_data = data["calibrations"][data["latest_calibration_id"]]
+            return SimilarityThresholds(
+                plagiarism=float(cal_data.get("plagiarism", DEFAULT_THRESHOLDS.plagiarism)),
+                medium=float(cal_data.get("medium", DEFAULT_THRESHOLDS.medium)),
+                high=float(cal_data.get("high", DEFAULT_THRESHOLDS.high)),
+            )
+        
+        return None
+    except Exception as e:
+        logger.warning("Failed to load calibrated thresholds: %s", e)
+        return None
 
 def load_threshold_config(
     config_path: Optional[str] = None,
@@ -421,7 +507,7 @@ def get_offline_mode_status() -> bool:
     return os.getenv("OFFLINE_MODE", "false").lower() == "true"
 
 
-def get_offline_config() -> Dict[str, Any]:
+def get_offline_config() -> dict[str, Any]:
     """Get offline mode configuration."""
     import os
 

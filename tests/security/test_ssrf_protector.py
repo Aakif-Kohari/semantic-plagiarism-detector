@@ -12,11 +12,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+import src.security.ssrf_protector as ssrf_protector
 from src.security.ssrf_protector import (
     DEFAULT_USER_AGENT,
     RESTRICTED_IPV4_CIDR_BLOCKS,
     SSRFProtector,
     SSRFSecurityException,
+    get_user_agent,
     is_ip_in_cidr_block,
 )
 
@@ -54,6 +56,21 @@ def test_validate_webhook_url_dns_failure(mock_getaddrinfo):
     mock_getaddrinfo.side_effect = socket.gaierror("Name or service not known")
     with pytest.raises(SSRFSecurityException, match="DNS resolution failed"):
         SSRFProtector.validate_webhook_url("https://nonexistent.domain.local/api")
+
+
+@patch("src.security.ssrf_protector.socket.getaddrinfo")
+def test_ssrf_dns_resolution_failed_formatting(mock_getaddrinfo):
+    """Verify SSRF_DNS_RESOLUTION_FAILED message is formatted without error with hostname and gaierror string (Issue #3193)."""
+    target_hostname = "unresolvable-domain-12345.local"
+    gaierror_msg = "nodename nor servname provided, or not known"
+    mock_getaddrinfo.side_effect = socket.gaierror(8, gaierror_msg)
+
+    with pytest.raises(SSRFSecurityException) as exc_info:
+        SSRFProtector.validate_webhook_url(f"https://{target_hostname}/webhook")
+
+    err_message = str(exc_info.value)
+    assert target_hostname in err_message
+    assert gaierror_msg in err_message
 
 
 @patch("src.security.ssrf_protector.socket.getaddrinfo")
@@ -394,6 +411,49 @@ def test_validate_url_safety_allows_public_address(
 
     assert validated_url == "https://example.com/webhook"
     assert pinned_ip == "93.184.216.34"
+
+
+def test_user_agent_uses_environment_override(monkeypatch):
+    monkeypatch.setenv("SSRF_USER_AGENT", "SemanticPlagiarismDetector/2.0")
+    assert get_user_agent() == "SemanticPlagiarismDetector/2.0"
+
+
+def test_user_agent_environment_override_rejects_crlf(monkeypatch):
+    monkeypatch.setenv("SSRF_USER_AGENT", "TrustedAgent\r\nX-Injected: true")
+    with pytest.raises(
+        SSRFSecurityException,
+        match="User-Agent must not contain carriage return or line feed characters",
+    ):
+        get_user_agent()
+
+
+def test_explicit_user_agent_rejects_crlf():
+    with pytest.raises(
+        SSRFSecurityException,
+        match="User-Agent must not contain carriage return or line feed characters",
+    ):
+        get_user_agent("TrustedAgent\nX-Injected: true")
+
+
+@patch("src.security.ssrf_protector.socket.getaddrinfo")
+def test_validate_url_safety_uses_environment_user_agent(
+    mock_getaddrinfo,
+    mock_requests_head,
+    monkeypatch,
+):
+    mock_getaddrinfo.return_value = [
+        (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))
+    ]
+    monkeypatch.setenv("SSRF_USER_AGENT", "ConfiguredAgent/3.0")
+
+    SSRFProtector.validate_url_safety("https://example.com/webhook")
+
+    mock_requests_head.assert_called_once_with(
+        "https://example.com/webhook",
+        headers={"User-Agent": "ConfiguredAgent/3.0"},
+        timeout=5.0,
+        allow_redirects=False,
+    )
 
 
 def test_default_user_agent_constant_defined():
@@ -742,7 +802,9 @@ class TestEmptyAllowedDomainsBehavior:
         assert ip == "93.184.216.34"
 
         # Should fail for non-approved domain
-        with pytest.raises(SSRFSecurityException, match="not in the allowed domains"):
+        with pytest.raises(
+            SSRFSecurityException, match="not in ALLOWED_WEBHOOK_DOMAINS"
+        ):
             SSRFProtector._validate_url_target(
                 "https://malicious.com/webhook",
                 allowed_domains=["slack.com", "discord.com"],

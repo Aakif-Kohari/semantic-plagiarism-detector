@@ -36,7 +36,11 @@ from src.core.parsers.ocr_parser import (
     extract_text_from_image,
     preprocess_image_for_ocr,
 )
-from src.errors import OCRDependencyError
+try:
+    from src.errors import OCRDependencyError
+except ImportError:
+    class OCRDependencyError(Exception):
+        pass
 
 
 # Helper to generate dummy PNG/JPG image bytes containing simple shapes/text

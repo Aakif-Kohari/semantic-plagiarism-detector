@@ -137,7 +137,7 @@ def render_hybrid_comparison_chart(
     st.plotly_chart(fig, use_container_width=True)
 
 
-def render_hybrid_settings_panel() -> Dict[str, Any]:
+def render_hybrid_settings_panel() -> dict[str, Any]:
     """
     Render hybrid similarity settings panel.
 
@@ -235,7 +235,7 @@ def render_hybrid_settings_panel() -> Dict[str, Any]:
     }
 
 
-def render_hybrid_stats_chart(hybrid_stats: Dict[str, Any]) -> None:
+def render_hybrid_stats_chart(hybrid_stats: dict[str, Any]) -> None:
     """
     Render hybrid statistics chart.
 
@@ -338,13 +338,13 @@ def render_lexical_vs_semantic_scatter(
 
 def compute_and_display_hybrid_scores(
     semantic_matrix: pd.DataFrame,
-    texts: Dict[str, str],
+    texts: dict[str, str],
     alpha: float = 0.7,
     lexical_method: str = "tfidf",
     scale_scores: bool = False,
     steepness: float = 6.0,
     midpoint: float = 0.5,
-) -> Tuple[pd.DataFrame, Dict[str, Any]]:
+) -> tuple[pd.DataFrame, dict[str, Any]]:
     """
     Compute and display hybrid similarity scores.
 

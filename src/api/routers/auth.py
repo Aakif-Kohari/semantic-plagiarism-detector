@@ -1,7 +1,11 @@
 """src/api/routers/auth.py - Authentication and token management router."""
 
+import base64
+import io
 import logging
 
+import pyotp
+import qrcode
 from fastapi import APIRouter, HTTPException, Request, status
 
 from src.api.dependencies import limiter
@@ -12,11 +16,31 @@ from src.api.schemas import (
     RevokeRequest,
     RevokeResponse,
     TokenResponse,
+    TwoFactorSetupRequest,
+    TwoFactorSetupResponse,
 )
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Authentication"])
+
+
+def generate_totp_qr_code_data_uri(otpauth_url: str) -> str:
+    """Generate a base64-encoded PNG data URI of an otpauth:// URL using qrcode."""
+    qr = qrcode.QRCode(
+        version=1,
+        error_correction=qrcode.constants.ERROR_CORRECT_L,
+        box_size=10,
+        border=4,
+    )
+    qr.add_data(otpauth_url)
+    qr.make(fit=True)
+
+    img = qr.make_image(fill_color="black", back_color="white")
+    buffer = io.BytesIO()
+    img.save(buffer, format="PNG")
+    b64_png = base64.b64encode(buffer.getvalue()).decode("utf-8")
+    return f"data:image/png;base64,{b64_png}"
 
 
 @router.post(
@@ -176,4 +200,81 @@ async def revoke_token_endpoint(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to revoke token: {str(e)}",
+        )
+
+
+@router.post(
+    "/auth/2fa/setup",
+    summary="Initialize 2FA setup and return TOTP secret, otpauth URL, and base64 PNG QR code data URI",
+    response_model=TwoFactorSetupResponse,
+    status_code=status.HTTP_200_OK,
+    responses={
+        400: {"model": ErrorResponse, "description": "Bad Request"},
+        500: {"model": ErrorResponse, "description": "Internal Server Error"},
+    },
+)
+@router.post(
+    "/api/v1/auth/2fa/setup",
+    summary="Initialize 2FA setup and return TOTP secret, otpauth URL, and base64 PNG QR code data URI",
+    response_model=TwoFactorSetupResponse,
+    status_code=status.HTTP_200_OK,
+    responses={
+        400: {"model": ErrorResponse, "description": "Bad Request"},
+        500: {"model": ErrorResponse, "description": "Internal Server Error"},
+    },
+)
+async def setup_two_factor_auth_endpoint(
+    request: Request,
+    payload: TwoFactorSetupRequest | None = None,
+):
+    """
+    Initialize TOTP 2FA setup for a user or admin.
+    Generates a Base32 TOTP secret, otpauth:// URL, and a base64-encoded PNG QR code data URI
+    suitable for instant scanning in Google Authenticator or Authy.
+    """
+    username = None
+    issuer = "SemanticPlagiarismDetector"
+
+    if payload:
+        username = payload.username
+        if payload.issuer:
+            issuer = payload.issuer
+
+    if not username:
+        try:
+            body = await request.json()
+            if isinstance(body, dict):
+                username = body.get("username")
+                if body.get("issuer"):
+                    issuer = body.get("issuer")
+        except Exception:
+            pass
+
+    if not username:
+        username = "admin"
+
+    try:
+        from src.db.auth import enable_2fa, get_2fa_status, init_db
+
+        init_db()
+        enabled, existing_secret = get_2fa_status(username)
+        secret = existing_secret or pyotp.random_base32()
+
+        enable_2fa(username, secret)
+
+        totp = pyotp.TOTP(secret)
+        otpauth_url = totp.provisioning_uri(name=username, issuer_name=issuer)
+        qr_code_data_uri = generate_totp_qr_code_data_uri(otpauth_url)
+
+        return {
+            "secret": secret,
+            "otpauth_url": otpauth_url,
+            "qr_code_data_uri": qr_code_data_uri,
+            "message": "2FA setup initialized successfully. Scan QR code in Google Authenticator or Authy.",
+        }
+    except Exception as e:
+        logger.error("Failed to initialize 2FA setup for user %s: %s", username, e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to initialize 2FA setup: {str(e)}",
         )

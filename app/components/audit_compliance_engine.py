@@ -88,7 +88,7 @@ class AuditEvent:
     description: str
     ip_address: Optional[str] = None
     user_agent: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
     compliance_impact: Optional[str] = None
 
 
@@ -105,7 +105,7 @@ class PolicyViolation:
     resolved_at: Optional[float] = None
     resolved_by: Optional[str] = None
     action_taken: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -117,12 +117,12 @@ class ComplianceReport:
     period_start: str
     period_end: str
     status: ComplianceStatus
-    metrics: Dict[str, Any]
-    findings: List[Dict[str, Any]]
-    recommendations: List[str]
+    metrics: dict[str, Any]
+    findings: list[dict[str, Any]]
+    recommendations: list[str]
     generated_at: float
     generated_by: str
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -138,7 +138,7 @@ class ComplianceCertificate:
     status: ComplianceStatus
     certificate_hash: str
     issued_by: str
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -150,10 +150,10 @@ class RegulatoryStandard:
     type: Regulation
     version: str
     description: str
-    requirements: List[str]
+    requirements: list[str]
     last_updated: float
     is_active: bool = True
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 # ==============================================================================
@@ -168,8 +168,8 @@ class AuditTrailManager:
 
     def __init__(self, storage_path: Path):
         self.storage_path = storage_path
-        self.events: List[AuditEvent] = []
-        self.violations: List[PolicyViolation] = []
+        self.events: list[AuditEvent] = []
+        self.violations: list[PolicyViolation] = []
         self._load_data()
 
     def _load_data(self):
@@ -211,7 +211,7 @@ class AuditTrailManager:
         resource: str,
         description: str,
         severity: AuditSeverity = AuditSeverity.INFO,
-        metadata: Dict[str, Any] = None,
+        metadata: dict[str, Any] = None,
         ip_address: str = None,
         user_agent: str = None,
     ) -> AuditEvent:
@@ -229,6 +229,7 @@ class AuditTrailManager:
         Returns:
             AuditEvent: Created event
         """
+        payload = f"{user}{action}{resource}".encode()
         event = AuditEvent(
             id=f"audit_{int(time.time())}_{hashlib.md5(f'{user}{action}{resource}'.encode()).hexdigest()[:8]}",
             timestamp=time.time(),
@@ -278,6 +279,7 @@ class AuditTrailManager:
         Returns:
             PolicyViolation: Created violation
         """
+        viol_payload = f"{policy_type.value}{description}".encode()
         violation = PolicyViolation(
             id=f"viol_{int(time.time())}_{hashlib.md5(f'{policy_type.value}{description}'.encode()).hexdigest()[:8]}",
             policy_type=policy_type,
@@ -438,7 +440,7 @@ class PolicyEnforcer:
 
     def __init__(self, audit_manager: AuditTrailManager):
         self.audit_manager = audit_manager
-        self.policies: Dict[PolicyType, List[Dict]] = defaultdict(list)
+        self.policies: dict[PolicyType, list[dict]] = defaultdict(list)
         self._load_policies()
 
     def _load_policies(self):
@@ -724,7 +726,7 @@ class CertificateManager:
 
     def __init__(self, storage_path: Path):
         self.storage_path = storage_path
-        self.certificates: List[ComplianceCertificate] = []
+        self.certificates: list[ComplianceCertificate] = []
         self._load_certificates()
 
     def _load_certificates(self):
@@ -865,7 +867,7 @@ def render_audit_compliance_engine():
         render_certificate_management(engine)
 
 
-def render_compliance_dashboard(engine: Dict):
+def render_compliance_dashboard(engine: dict):
     """Render compliance dashboard."""
     st.markdown("#### 📊 Compliance Dashboard")
 
@@ -902,7 +904,7 @@ def render_compliance_dashboard(engine: Dict):
     st.plotly_chart(fig, use_container_width=True)
 
 
-def render_audit_trail(engine: Dict):
+def render_audit_trail(engine: dict):
     """Render audit trail UI."""
     st.markdown("#### 📝 Audit Trail")
 
@@ -965,7 +967,7 @@ def render_audit_trail(engine: Dict):
         st.info("No audit events found")
 
 
-def render_violation_management(engine: Dict):
+def render_violation_management(engine: dict):
     """Render violation management UI."""
     st.markdown("#### 🚨 Policy Violations")
 
@@ -1035,7 +1037,7 @@ def render_violation_management(engine: Dict):
         st.info("No violations found")
 
 
-def render_compliance_reports(engine: Dict):
+def render_compliance_reports(engine: dict):
     """Render compliance reports UI."""
     st.markdown("#### 📄 Compliance Reports")
 
@@ -1106,7 +1108,7 @@ def render_compliance_reports(engine: Dict):
             )
 
 
-def render_certificate_management(engine: Dict):
+def render_certificate_management(engine: dict):
     """Render certificate management UI."""
     st.markdown("#### 📜 Compliance Certificates")
 

@@ -69,14 +69,14 @@ class BatchJob:
     created_at: float
     started_at: Optional[float] = None
     completed_at: Optional[float] = None
-    data: Dict[str, Any] = field(default_factory=dict)
+    data: dict[str, Any] = field(default_factory=dict)
     result: Any = None
     error: Optional[str] = None
     retry_count: int = 0
     max_retries: int = 3
     progress: float = 0.0
-    logs: List[str] = field(default_factory=list)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    logs: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -90,9 +90,9 @@ class BatchResult:
     failed_count: int
     total_time: float
     average_time: float
-    errors: List[str] = field(default_factory=list)
-    results: List[Any] = field(default_factory=list)
-    metrics: Dict[str, Any] = field(default_factory=dict)
+    errors: list[str] = field(default_factory=list)
+    results: list[Any] = field(default_factory=list)
+    metrics: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -128,7 +128,7 @@ class EnhancedBatchProcessor:
         self.active_jobs: Dict[str, BatchJob] = {}
 
         # Worker management
-        self.workers: List[Dict] = []
+        self.workers: list[dict] = []
         self.worker_pool: Optional[concurrent.futures.ThreadPoolExecutor] = None
         self.is_running = False
         self.is_paused = False
@@ -532,7 +532,7 @@ class BatchScheduler:
 
     def __init__(self, processor: EnhancedBatchProcessor):
         self.processor = processor
-        self.schedules: List[Dict] = []
+        self.schedules: list[dict] = []
         self.is_running = False
         self.scheduler_thread: Optional[threading.Thread] = None
         self._load_schedules()

@@ -23,7 +23,7 @@ class ComparisonMetric:
     name: str
     score: float
     weight: float
-    details: Dict[str, Any] = None
+    details: dict[str, Any] = None
     threshold: float = 0.5
 
     def __post_init__(self):
@@ -45,9 +45,9 @@ class DocumentComparisonResult:
     doc_b: str
     timestamp: str
     overall_score: float
-    metrics: List[ComparisonMetric]
-    highlights: Dict[str, List[Tuple[int, int]]]
-    recommendations: List[str]
+    metrics: list[ComparisonMetric]
+    highlights: dict[str, list[tuple[int, int]]]
+    recommendations: list[str]
     risk_level: str  # 'low', 'medium', 'high', 'critical'
 
     def to_dict(self) -> Dict:

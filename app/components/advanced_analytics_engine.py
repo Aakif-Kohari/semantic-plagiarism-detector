@@ -88,9 +88,9 @@ class PredictiveInsight:
     severity: RiskLevel
     confidence: float
     timestamp: float
-    data: Dict[str, Any]
-    recommendations: List[str]
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    data: dict[str, Any]
+    recommendations: list[str]
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -98,11 +98,11 @@ class TrendForecast:
     """Trend forecast result."""
 
     period: ForecastPeriod
-    predicted_values: List[float]
-    confidence_interval: Tuple[float, float]
+    predicted_values: list[float]
+    confidence_interval: tuple[float, float]
     trend_direction: str  # increasing, decreasing, stable
-    peak_prediction: Dict[str, Any]
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    peak_prediction: dict[str, Any]
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -112,10 +112,10 @@ class RiskAssessment:
     document_id: str
     risk_score: float
     risk_level: RiskLevel
-    contributing_factors: List[str]
-    mitigation_steps: List[str]
+    contributing_factors: list[str]
+    mitigation_steps: list[str]
     timestamp: float
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -127,9 +127,9 @@ class AnomalyDetectionResult:
     severity: RiskLevel
     description: str
     detected_at: float
-    affected_data: Dict[str, Any]
+    affected_data: dict[str, Any]
     suggested_action: str
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 # ==============================================================================
@@ -787,7 +787,7 @@ class RiskScorer:
             return self._assess_risk_ml(document_id, data)
         return self._assess_risk_heuristic(document_id, data)
 
-    def _assess_risk_ml(self, document_id: str, data: Dict[str, Any]) -> RiskAssessment:
+    def _assess_risk_ml(self, document_id: str, data: dict[str, Any]) -> RiskAssessment:
         try:
             result = self._engine.score_document_risk(document_id, data)
             return RiskAssessment(
@@ -1059,7 +1059,7 @@ def render_analytics_engine():
         logger.exception("Failed to render threshold calibration report")
 
 
-def render_predictive_analytics(engine: Dict):
+def render_predictive_analytics(engine: dict):
     """Render predictive analytics UI."""
     st.markdown("#### 🔮 Predictive Analytics")
 
@@ -1171,7 +1171,7 @@ def render_predictive_analytics(engine: Dict):
             st.plotly_chart(fig, use_container_width=True)
 
 
-def render_anomaly_detection(engine: Dict):
+def render_anomaly_detection(engine: dict):
     """Render anomaly detection UI."""
     st.markdown("#### 🚨 Anomaly Detection")
 
@@ -1220,7 +1220,7 @@ def render_anomaly_detection(engine: Dict):
                             st.json(anomaly.affected_data)
 
 
-def render_insight_dashboard(engine: Dict):
+def render_insight_dashboard(engine: dict):
     """Render insight dashboard UI."""
     st.markdown("#### 💡 Automated Insights")
 
@@ -1276,7 +1276,7 @@ def render_insight_dashboard(engine: Dict):
                     st.json(insight.data)
 
 
-def render_risk_assessment(engine: Dict):
+def render_risk_assessment(engine: dict):
     """Render risk assessment UI."""
     st.markdown("#### 🎯 Risk Assessment")
 
@@ -1330,7 +1330,7 @@ def render_risk_assessment(engine: Dict):
                 st.markdown(f"- {step}")
 
 
-def render_pattern_recognition(engine: Dict):
+def render_pattern_recognition(engine: dict):
     """Render pattern recognition UI — delegates to the dedicated component when available."""
     try:
         from app.components.pattern_recognition_ui import render_pattern_recognition
@@ -1341,7 +1341,7 @@ def render_pattern_recognition(engine: Dict):
         _render_pattern_recognition_basic(engine)
 
 
-def _render_pattern_recognition_basic(engine: Dict):
+def _render_pattern_recognition_basic(engine: dict):
     """Fallback inline pattern recognition when the dedicated UI is unavailable."""
     st.markdown("#### Pattern Recognition")
     data = st.session_state.get("flags")

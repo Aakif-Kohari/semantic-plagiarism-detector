@@ -48,7 +48,7 @@ class SearchQuery:
 
     id: str
     query_text: str
-    filters: Dict[str, Any]
+    filters: dict[str, Any]
     search_type: str  # 'full_text', 'semantic', 'hybrid'
     timestamp: datetime
     user_id: str

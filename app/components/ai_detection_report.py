@@ -13,7 +13,7 @@ import streamlit as st
 from src.core.ai_detector_enhanced import AIDetectionResult
 
 
-def render_ai_detection_report(results: Dict[str, AIDetectionResult]) -> None:
+def render_ai_detection_report(results: dict[str, AIDetectionResult]) -> None:
     """
     Render detailed AI detection report.
     """

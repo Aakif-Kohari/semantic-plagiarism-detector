@@ -89,7 +89,7 @@ class CrossLingualExporter:
         logger.info(f"Exported report: {path}")
         return path
 
-    def export_all(self, result: Dict[str, Any]) -> Dict[str, str]:
+    def export_all(self, result: dict[str, Any]) -> dict[str, str]:
         """Export all formats."""
         exports = {}
         exports["json"] = self.export_json(result)

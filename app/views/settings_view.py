@@ -32,7 +32,13 @@ def render_settings_view(user_role: str, lang_code: str, root_dir: str):
 
     render_storage_quota_progress()
 
-    st.markdown("### 📊 Visualization")
+    st.markdown("### 📊 Theme & Visualization")
+    st.selectbox(
+        "🎨 Accent Color",
+        options=["Indigo", "Emerald", "Crimson", "Amber"],
+        key=SessionKeys.ACCENT_COLOR,
+        help="Select a custom accent color for UI highlights.",
+    )
     st.toggle(
         "Force Dark Mode Charts",
         value=False,

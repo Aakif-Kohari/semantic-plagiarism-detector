@@ -77,8 +77,8 @@ class Notification:
     timestamp: float
     status: NotificationStatus
     read_at: Optional[float] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
-    actions: List[Dict[str, str]] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
+    actions: list[dict[str, str]] = field(default_factory=list)
 
 
 @dataclass
@@ -90,10 +90,10 @@ class AlertRule:
     enabled: bool
     condition: str  # e.g., "similarity > 0.85"
     priority: NotificationPriority
-    channels: List[NotificationChannel]
+    channels: list[NotificationChannel]
     cooldown_seconds: int = 300
     last_triggered: Optional[float] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -110,8 +110,8 @@ class UserNotificationPreferences:
     weekly_summary: bool = False
     quiet_hours_start: Optional[int] = None  # Hour (0-23)
     quiet_hours_end: Optional[int] = None
-    muted_keywords: List[str] = field(default_factory=list)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    muted_keywords: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 # ==============================================================================
@@ -126,9 +126,9 @@ class NotificationManager:
 
     def __init__(self, storage_path: Path):
         self.storage_path = storage_path
-        self.notifications: List[Notification] = []
-        self.alert_rules: List[AlertRule] = []
-        self.user_preferences: Dict[str, UserNotificationPreferences] = {}
+        self.notifications: list[Notification] = []
+        self.alert_rules: list[AlertRule] = []
+        self.user_preferences: dict[str, UserNotificationPreferences] = {}
         self.notification_queue: queue.Queue = queue.Queue()
         self.is_running = False
         self.worker_thread: Optional[threading.Thread] = None
@@ -914,9 +914,10 @@ def render_notification_badge():
         unread = manager.get_unread_count(user)
 
         if unread > 0:
+            label = f"{unread} New Notification{'s' if unread != 1 else ''}"
             st.sidebar.markdown(
                 f"""
-                <div style="
+                <div role="button" aria-label="{label}" style="
                     background-color: #ff4b4b;
                     color: white;
                     padding: 8px 12px;

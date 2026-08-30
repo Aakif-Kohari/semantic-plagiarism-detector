@@ -70,12 +70,12 @@ class TeamWorkspace:
     id: str
     name: str
     description: str
-    members: List[str]
+    members: list[str]
     created_at: float
     created_by: str
-    projects: List[str] = field(default_factory=list)
-    settings: Dict[str, Any] = field(default_factory=dict)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    projects: list[str] = field(default_factory=list)
+    settings: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -94,10 +94,10 @@ class PlagiarismCase:
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
     created_by: str = ""
-    comments: List[Dict[str, Any]] = field(default_factory=list)
-    annotations: List[Dict[str, Any]] = field(default_factory=list)
-    history: List[Dict[str, Any]] = field(default_factory=list)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    comments: list[dict[str, Any]] = field(default_factory=list)
+    annotations: list[dict[str, Any]] = field(default_factory=list)
+    history: list[dict[str, Any]] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -106,10 +106,10 @@ class DiscussionThread:
 
     id: str
     case_id: str
-    messages: List[Dict[str, Any]]
+    messages: list[dict[str, Any]]
     created_at: float
     updated_at: float
-    participants: List[str]
+    participants: list[str]
     resolved: bool = False
 
 
@@ -119,11 +119,11 @@ class ReviewQueue:
 
     id: str
     name: str
-    case_ids: List[str]
+    case_ids: list[str]
     priority: CasePriority
     assigned_to: Optional[str] = None
     created_at: float = field(default_factory=time.time)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 # ==============================================================================
@@ -138,11 +138,11 @@ class CollaborationHub:
 
     def __init__(self, storage_path: Path):
         self.storage_path = storage_path
-        self.workspaces: Dict[str, TeamWorkspace] = {}
-        self.cases: Dict[str, PlagiarismCase] = {}
-        self.discussions: Dict[str, DiscussionThread] = {}
-        self.queues: Dict[str, ReviewQueue] = {}
-        self.activity_feed: List[Dict] = []
+        self.workspaces: dict[str, TeamWorkspace] = {}
+        self.cases: dict[str, PlagiarismCase] = {}
+        self.discussions: dict[str, DiscussionThread] = {}
+        self.queues: dict[str, ReviewQueue] = {}
+        self.activity_feed: list[dict] = []
         self._load_data()
 
     def _load_data(self):

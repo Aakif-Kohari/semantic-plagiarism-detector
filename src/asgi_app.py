@@ -21,6 +21,7 @@ from starlette.responses import JSONResponse, Response
 
 from src.core.scheduler import start_scheduler, stop_scheduler
 from src.utils.tracing import _tracer_provider, init_tracer_provider
+from src.api.middleware import validate_bearer_tokens_config
 
 DEFAULT_MAX_REQUEST_BYTES = 52_428_800
 JSON_API_PREFIX = "/api/"
@@ -347,7 +348,10 @@ async def _lifespan(app):
     the existing webhook layer).
     """
     init_tracer_provider()
+    validate_bearer_tokens_config()
     await start_scheduler()
+    from src.core.embedding_model import warmup_embedding_model
+    warmup_embedding_model()
     try:
         yield
     finally:

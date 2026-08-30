@@ -105,6 +105,14 @@ class TestRedisCache:
         get_session_state(session_id, key)
         mock_redis_client.get.assert_called_once_with(expected_key)
 
+    def test_cache_namespace_build_key_appends_app_version(self):
+        """Verify CacheNamespace.build_key appends APP_VERSION to Redis keys."""
+        from src.version import APP_VERSION
+
+        key = CacheNamespace.ANALYSIS.build_key("matrix_123")
+        assert key == f"spd:v1:analysis:{APP_VERSION}:matrix_123"
+        assert APP_VERSION in key
+
     def test_clear_session(self, cache_with_mock, mock_redis_client):
         """Test clearing session data."""
         session_id = "test_session"

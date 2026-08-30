@@ -251,9 +251,9 @@ class TagManager:
     """Manages document tags and categories"""
 
     def __init__(self):
-        self.tags: Dict[str, DocumentTag] = {}
-        self.categories: Dict[str, DocumentCategory] = {}
-        self.assignments: List[TagAssignment] = []
+        self.tags: dict[str, DocumentTag] = {}
+        self.categories: dict[str, DocumentCategory] = {}
+        self.assignments: list[TagAssignment] = []
         self.tag_counter = Counter()
         self.tag_usage = defaultdict(int)
 
@@ -444,7 +444,7 @@ class TagManager:
 
 
 @st.cache_data(show_spinner=False)
-def _categorize_content(content: str) -> Tuple[List[Tuple[str, float]], str, float]:
+def _categorize_content(content: str) -> tuple[list[tuple[str, float]], str, float]:
     """Cache the CPU-heavy tagging/category analysis for immutable document content."""
     generator = IntelligentTagGenerator()
     tags = generator.generate_tags(content)

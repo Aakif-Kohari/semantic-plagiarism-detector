@@ -6,6 +6,7 @@ based on document characteristics, dataset homogeneity, and user feedback.
 """
 
 import logging
+import threading
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -74,7 +75,7 @@ class OptimizationResult:
     document_type: str
     method: str
     confidence: float
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 # ============================================================================
@@ -119,7 +120,7 @@ def detect_document_type(scores: List[float], texts: List[str]) -> str:
         return "mixed"
 
 
-def detect_document_homogeneity(scores: List[float]) -> float:
+def detect_document_homogeneity(scores: list[float]) -> float:
     """
     Calculate document homogeneity score.
 
@@ -140,7 +141,7 @@ def detect_document_homogeneity(scores: List[float]) -> float:
     return homogeneity
 
 
-def detect_document_complexity(texts: List[str]) -> float:
+def detect_document_complexity(texts: list[str]) -> float:
     """
     Estimate document complexity based on text length and vocabulary.
 
@@ -185,8 +186,8 @@ def detect_document_complexity(texts: List[str]) -> float:
 
 
 def optimize_threshold_f1(
-    scores: List[float],
-    labels: List[int],
+    scores: list[float],
+    labels: list[int],
     min_threshold: float = 0.10,
     max_threshold: float = 0.99,
     step: float = 0.01,
@@ -240,8 +241,8 @@ def optimize_threshold_f1(
 
 
 def optimize_threshold_roc(
-    scores: List[float],
-    labels: List[int],
+    scores: list[float],
+    labels: list[int],
     min_threshold: float = 0.10,
     max_threshold: float = 0.99,
     step: float = 0.01,
@@ -296,8 +297,8 @@ def optimize_threshold_roc(
 
 
 def optimize_threshold_adaptive(
-    scores: List[float],
-    labels: List[int],
+    scores: list[float],
+    labels: list[int],
     document_type: str = "mixed",
     precision_weight: float = 0.5,
     recall_weight: float = 0.5,
@@ -523,7 +524,7 @@ class ThresholdOptimizer:
 # ============================================================================
 
 _optimizer: Optional[ThresholdOptimizer] = None
-_optimizer_lock = threading.Lock()  # noqa: F821
+_optimizer_lock = threading.Lock()
 
 
 def get_threshold_optimizer() -> ThresholdOptimizer:

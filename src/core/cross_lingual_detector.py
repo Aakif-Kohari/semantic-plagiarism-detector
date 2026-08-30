@@ -1,3 +1,25 @@
+# MIT License
+#
+# Copyright (c) 2026 Ganesh Kambli
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
 """
 Cross-Lingual Plagiarism Detection Engine.
 
@@ -111,7 +133,7 @@ class LanguageMatch:
     translation_used: bool = True
     confidence: float = 0.0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -124,7 +146,7 @@ class CrossLingualResult:
     language_distribution: Dict[str, int] = field(default_factory=dict)
     total_comparisons: int = 0
     processing_time: float = 0.0
-    summary: Dict[str, Any] = field(default_factory=dict)
+    summary: dict[str, Any] = field(default_factory=dict)
     source_text: str = ""
     target_text: str = ""
     source_lang: str = "en"
@@ -135,7 +157,7 @@ class CrossLingualResult:
     is_plagiarism: bool = False
     confidence: float = 0.0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "documents": self.documents,
             "matches": [
@@ -176,13 +198,13 @@ class TranslationCache:
 
     def __init__(self, max_size: int = 1000):
         self.max_size = max_size
-        self._cache: Dict[str, str] = {}
-        self._timestamps: Dict[str, float] = {}
+        self._cache: dict[str, str] = {}
+        self._timestamps: dict[str, float] = {}
         self._hits = 0
         self._misses = 0
 
     def get(self, text: str, source_lang: str, target_lang: str) -> Optional[str]:
-        key = f"{source_lang}:{target_lang}:{hashlib.md5(text.encode('utf-8')).hexdigest()}"
+        key = f"{source_lang}:{target_lang}:{hashlib.md5(text.encode('utf-8')).hexdigest()}"  # nosec
         if key in self._cache:
             self._hits += 1
             return self._cache[key]
@@ -220,7 +242,7 @@ class CrossLingualDetector:
             self.target_lang = "en"
 
         self._model = None
-        self._cache: Dict[str, np.ndarray] = {}
+        self._cache: dict[str, np.ndarray] = {}
         self.cache = TranslationCache() if use_cache else None
         logger.info("CrossLingualDetector initialized")
 
@@ -238,7 +260,7 @@ class CrossLingualDetector:
         words = text.split()
         if not words:
             return "en"
-        text_words = set(w.lower() for w in words[:100])
+        text_words = {w.lower() for w in words[:100]}
         common_en = {"the", "is", "and", "of", "to", "in"}
         common_es = {"el", "la", "de", "en", "que"}
         common_fr = {"le", "la", "de", "et", "les"}

@@ -3,7 +3,7 @@
 from typing import Any, List
 
 
-def render_stylometric_timeline(matches: List[Any]) -> str:
+def render_stylometric_timeline(matches: list[Any]) -> str:
     """Renders HTML telemetry timeline list for stylometric author comparisons."""
     if not matches:
         return """

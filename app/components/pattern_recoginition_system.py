@@ -55,7 +55,7 @@ class RiskPrediction:
     document_name: str
     predicted_risk_score: float
     risk_level: str  # 'low', 'medium', 'high', 'critical'
-    contributing_factors: List[str]
+    contributing_factors: list[str]
     confidence: float
     prediction_date: datetime
     recommendations: List[str]
@@ -75,8 +75,8 @@ class PatternTrend:
     frequency_change: float  # percentage change
     new_documents: int
     risk_trend: str  # 'increasing', 'decreasing', 'stable'
-    forecast: Dict[str, Any]
-    metadata: Dict = field(default_factory=dict)
+    forecast: dict[str, Any]
+    metadata: dict = field(default_factory=dict)
 
 
 # ── Pattern Recognition Engine ────────────────────────────────────────────
@@ -86,10 +86,10 @@ class PatternRecognitionEngine:
     """Main pattern recognition and prediction engine"""
 
     def __init__(self):
-        self.patterns: Dict[str, PlagiarismPattern] = {}
-        self.predictions: Dict[str, RiskPrediction] = {}
-        self.historical_data: List[Dict] = []
-        self.trends: Dict[str, PatternTrend] = {}
+        self.patterns: dict[str, PlagiarismPattern] = {}
+        self.predictions: dict[str, RiskPrediction] = {}
+        self.historical_data: list[dict] = []
+        self.trends: dict[str, PatternTrend] = {}
         self.pattern_counts = defaultdict(int)
         self._init_pattern_types()
 

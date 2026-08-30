@@ -357,7 +357,7 @@ def render_cross_lingual_settings() -> bool:
     return enabled
 
 
-def get_cross_lingual_metadata() -> Dict[str, List[Dict[str, Any]]]:
+def get_cross_lingual_metadata() -> dict[str, list[dict[str, Any]]]:
     """Get cross-lingual metadata from session state."""
     return st.session_state.get("translation_metadata", {})
 

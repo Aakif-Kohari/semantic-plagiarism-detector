@@ -3,7 +3,7 @@
 from typing import Any, List
 
 
-def render_ocr_timeline(matches: List[Any]) -> str:
+def render_ocr_timeline(matches: list[Any]) -> str:
     """Renders HTML telemetry timeline list for OCR document image scans."""
     if not matches:
         return """

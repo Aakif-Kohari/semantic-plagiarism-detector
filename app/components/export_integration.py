@@ -69,14 +69,14 @@ class ExportJob:
     id: str
     name: str
     format: ExportFormat
-    data: Dict[str, Any]
+    data: dict[str, Any]
     status: ExportStatus
     created_at: float
     completed_at: Optional[float] = None
     file_path: Optional[str] = None
     file_size: Optional[int] = None
     error: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -87,13 +87,13 @@ class ExportTemplate:
     name: str
     description: str
     format: ExportFormat
-    fields: List[str]
-    filters: Dict[str, Any]
-    styling: Dict[str, Any]
+    fields: list[str]
+    filters: dict[str, Any]
+    styling: dict[str, Any]
     created_at: float
     created_by: str
     is_default: bool = False
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -101,10 +101,10 @@ class CloudConfig:
     """Cloud storage configuration."""
 
     provider: CloudProvider
-    credentials: Dict[str, str]
+    credentials: dict[str, str]
     folder_path: str
     enabled: bool = True
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 # ==============================================================================
@@ -119,10 +119,10 @@ class ExportManager:
 
     def __init__(self, storage_path: Path):
         self.storage_path = storage_path
-        self.export_history: List[ExportJob] = []
-        self.templates: List[ExportTemplate] = []
-        self.cloud_configs: Dict[CloudProvider, CloudConfig] = {}
-        self.export_queue: List[ExportJob] = []
+        self.export_history: list[ExportJob] = []
+        self.templates: list[ExportTemplate] = []
+        self.cloud_configs: dict[CloudProvider, CloudConfig] = {}
+        self.export_queue: list[ExportJob] = []
         self.is_running = False
         self.worker_thread: Optional[threading.Thread] = None
         self._load_data()
@@ -527,11 +527,11 @@ class ExportManager:
 
     def export_data(
         self,
-        data: Dict[str, Any],
+        data: dict[str, Any],
         name: str,
         format: ExportFormat = ExportFormat.CSV,
-        filters: Dict[str, Any] = None,
-        metadata: Dict[str, Any] = None,
+        filters: dict[str, Any] = None,
+        metadata: dict[str, Any] = None,
         template_id: str = None,
         upload_to_cloud: bool = False,
         cloud_provider: str = None,

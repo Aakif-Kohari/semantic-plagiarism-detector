@@ -70,8 +70,6 @@ from src.utils.text_stats import (
 # Test utilities for golden fixture comparison
 from tests.utils import FIXTURES_DIR, assert_pdf_matches, compare_pdf_bytes
 
-# Test utilities for golden fixture comparison
-
 
 def _read_text(pdf_bytes: bytes) -> str:
     reader = PdfReader(BytesIO(pdf_bytes))
@@ -355,7 +353,6 @@ def test_compress_pdf_buffer_fallback(monkeypatch):
 
 def test_compress_pdf_buffer_all_fail(monkeypatch):
     import sys
-
     import fitz
 
     def mock_fitz_open(*args, **kwargs):
@@ -491,7 +488,6 @@ def test_generate_plagiarism_report_dark_mode():
 def test_load_branding_logo_returns_bytes_for_valid_path(tmp_path):
     """load_branding_logo returns bytes when logo_path points to a real file."""
     import json
-
     from src.utils.pdf_report import load_branding_logo
 
     logo_file = tmp_path / "logo.png"
@@ -527,7 +523,6 @@ def test_load_branding_logo_returns_bytes_for_valid_path(tmp_path):
 def test_load_branding_logo_returns_none_for_missing_path(tmp_path):
     """load_branding_logo returns None when logo_path is empty."""
     import json
-
     from src.utils.pdf_report import load_branding_logo
 
     config_file = tmp_path / "branding_config.json"
@@ -546,7 +541,6 @@ def test_load_branding_logo_returns_none_for_missing_path(tmp_path):
 def test_load_branding_logo_returns_none_for_invalid_path(tmp_path):
     """load_branding_logo returns None when logo_path points to a non-existent file."""
     import json
-
     from src.utils.pdf_report import load_branding_logo
 
     config_file = tmp_path / "branding_config.json"
@@ -565,7 +559,6 @@ def test_load_branding_logo_returns_none_for_invalid_path(tmp_path):
 def test_pdf_generation_succeeds_with_custom_logo(tmp_path):
     """PDF generation succeeds when load_branding_logo returns valid image bytes."""
     import io
-
     from PIL import Image
 
     img = Image.new("RGB", (200, 80), color=(30, 58, 138))

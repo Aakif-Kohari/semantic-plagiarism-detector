@@ -50,7 +50,7 @@ class DocumentVersion:
     word_count: int
     change_type: str  # create, update, delete, rollback
     parent_version_id: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -60,10 +60,10 @@ class VersionDiff:
     version_id_a: str
     version_id_b: str
     document_id: str
-    added_lines: List[str]
-    removed_lines: List[str]
-    modified_lines: List[Tuple[str, str]]
-    unchanged_lines: List[str]
+    added_lines: list[str]
+    removed_lines: list[str]
+    modified_lines: list[tuple[str, str]]
+    unchanged_lines: list[str]
     summary: str
     change_percentage: float
 
@@ -93,8 +93,8 @@ class VersionManager:
 
     def __init__(self, storage_path: Path):
         self.storage_path = storage_path
-        self.versions: Dict[str, List[DocumentVersion]] = defaultdict(list)
-        self.current_versions: Dict[str, str] = {}  # doc_id -> version_id
+        self.versions: dict[str, list[DocumentVersion]] = defaultdict(list)
+        self.current_versions: dict[str, str] = {}  # doc_id -> version_id
         self._load_versions()
 
     def _load_versions(self):

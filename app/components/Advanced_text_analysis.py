@@ -103,10 +103,10 @@ class LinguisticFeatures:
     unique_words: int
     readability: ReadabilityMetrics
     style: StyleMetrics
-    pos_distribution: Dict[str, int]
-    named_entities: List[Dict[str, str]]
-    vocabulary_profile: Dict[str, Any]
-    language_detection: Dict[str, float]
+    pos_distribution: dict[str, int]
+    named_entities: list[dict[str, str]]
+    vocabulary_profile: dict[str, Any]
+    language_detection: dict[str, float]
     document_complexity_score: float
     timestamp: datetime = field(default_factory=datetime.now)
     metadata: Dict = field(default_factory=dict)
@@ -124,7 +124,7 @@ class TextAnalysisEngine:
     def __init__(self):
         self.stopwords = set(stopwords.words("english"))
         self.syllable_cache = {}
-        self.analysis_history: List[Dict] = []
+        self.analysis_history: list[dict] = []
         self._init_patterns()
 
     def _init_patterns(self):

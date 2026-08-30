@@ -73,7 +73,7 @@ class SearchResult:
     chunk_text: str
     similarity_score: float
     chunk_index: int
-    matched_terms: List[str] = field(default_factory=list)
+    matched_terms: list[str] = field(default_factory=list)
     context: str = ""
     snippet: str = ""
     relevance_score: float = 0.0
@@ -90,8 +90,8 @@ class SearchQuery:
     user: str
     results_count: int
     execution_time: float
-    filters: Dict[str, Any] = field(default_factory=dict)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    filters: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -99,9 +99,9 @@ class SearchPattern:
     """Discovered search pattern."""
 
     pattern_type: str  # plagiarism, similarity, keyword
-    keywords: List[str]
-    documents_affected: List[str]
-    similarity_range: Tuple[float, float]
+    keywords: list[str]
+    documents_affected: list[str]
+    similarity_range: tuple[float, float]
     frequency: int
     last_detected: float
 
@@ -118,12 +118,12 @@ class SmartSearchEngine:
 
     def __init__(self, embedding_model: Optional[Any] = None):
         self.embedding_model = embedding_model
-        self.search_index: Dict[str, np.ndarray] = {}
-        self.chunk_registry: Dict[str, Dict] = {}
-        self.search_history: List[SearchQuery] = []
-        self.result_cache: Dict[str, List[SearchResult]] = {}
-        self.pattern_cache: Dict[str, SearchPattern] = {}
-        self.query_suggestions: List[str] = []
+        self.search_index: dict[str, np.ndarray] = {}
+        self.chunk_registry: dict[str, dict] = {}
+        self.search_history: list[SearchQuery] = []
+        self.result_cache: dict[str, list[SearchResult]] = {}
+        self.pattern_cache: dict[str, SearchPattern] = {}
+        self.query_suggestions: list[str] = []
         self._initialize_model()
 
     def _initialize_model(self):
@@ -158,7 +158,8 @@ class SmartSearchEngine:
             # Generate embeddings for chunks
             doc_chunks = chunks.get(doc_name, [])
             for idx, chunk in enumerate(doc_chunks):
-                chunk_embedding = self.embedding_model.encode([chunk])[0]
+                chunk_text = chunk.text if hasattr(chunk, "text") else chunk
+                chunk_embedding = self.embedding_model.encode([chunk_text])[0]
                 key = f"{doc_name}_chunk_{idx}"
                 self.search_index[key] = chunk_embedding
                 self.chunk_registry[key] = {

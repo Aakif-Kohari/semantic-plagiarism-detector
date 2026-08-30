@@ -13,6 +13,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from src.utils.export_sanitizer import sanitize_spreadsheet_value
+
 logger = logging.getLogger(__name__)
 
 

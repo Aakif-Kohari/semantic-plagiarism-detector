@@ -89,8 +89,8 @@ class Workflow:
     description: str
     category: WorkflowCategory
     status: WorkflowStatus
-    tasks: List[Dict[str, Any]]
-    triggers: List[Dict[str, Any]]
+    tasks: list[dict[str, Any]]
+    triggers: list[dict[str, Any]]
     created_at: float
     created_by: str
     updated_at: Optional[float] = None
@@ -98,7 +98,7 @@ class Workflow:
     completed_at: Optional[float] = None
     execution_count: int = 0
     last_execution: Optional[float] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -110,9 +110,9 @@ class WorkflowExecution:
     status: WorkflowStatus
     started_at: float
     completed_at: Optional[float] = None
-    task_results: List[Dict[str, Any]] = field(default_factory=list)
+    task_results: list[dict[str, Any]] = field(default_factory=list)
     error: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -123,8 +123,8 @@ class Task:
     name: str
     description: str
     function: str
-    parameters: Dict[str, Any]
-    dependencies: List[str]
+    parameters: dict[str, Any]
+    dependencies: list[str]
     status: TaskStatus
     created_at: float
     started_at: Optional[float] = None
@@ -134,7 +134,7 @@ class Task:
     retry_count: int = 0
     max_retries: int = 3
     timeout_seconds: int = 300
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -145,13 +145,13 @@ class ApprovalRequest:
     workflow_id: str
     task_id: str
     requester: str
-    approvers: List[str]
+    approvers: list[str]
     status: WorkflowStatus
     created_at: float
     responded_at: Optional[float] = None
     response: Optional[str] = None
-    comments: List[Dict[str, Any]] = field(default_factory=list)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    comments: list[dict[str, Any]] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -162,13 +162,13 @@ class WorkflowTemplate:
     name: str
     description: str
     category: WorkflowCategory
-    tasks: List[Dict[str, Any]]
-    triggers: List[Dict[str, Any]]
+    tasks: list[dict[str, Any]]
+    triggers: list[dict[str, Any]]
     created_at: float
     created_by: str
     is_active: bool = True
     usage_count: int = 0
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 # ==============================================================================
@@ -183,14 +183,14 @@ class WorkflowEngine:
 
     def __init__(self, storage_path: Path):
         self.storage_path = storage_path
-        self.workflows: Dict[str, Workflow] = {}
-        self.executions: List[WorkflowExecution] = []
-        self.templates: List[WorkflowTemplate] = []
-        self.approvals: List[ApprovalRequest] = []
+        self.workflows: dict[str, Workflow] = {}
+        self.executions: list[WorkflowExecution] = []
+        self.templates: list[WorkflowTemplate] = []
+        self.approvals: list[ApprovalRequest] = []
         self.task_queue: queue.Queue = queue.Queue()
         self.is_running = False
         self.worker_thread: Optional[threading.Thread] = None
-        self.task_handlers: Dict[str, Callable] = {}
+        self.task_handlers: dict[str, Callable] = {}
         self._load_data()
         self._register_default_handlers()
         self._start_worker()

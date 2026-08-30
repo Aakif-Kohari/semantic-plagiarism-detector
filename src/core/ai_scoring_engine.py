@@ -1,3 +1,25 @@
+# MIT License
+#
+# Copyright (c) 2026 Ganesh Kambli
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
 """
 AI-Powered Plagiarism Scoring Engine.
 
@@ -47,7 +69,7 @@ class ScoreComponent:
     method: str
     score: float
     confidence: float
-    details: Dict[str, Any]
+    details: dict[str, Any]
     weight: float = 1.0
 
     def weighted_score(self) -> float:
@@ -62,11 +84,11 @@ class PlagiarismScore:
     doc_b: str
     overall_score: float
     severity: SeverityLevel
-    components: List[ScoreComponent]
+    components: list[ScoreComponent]
     fingerprint_match: bool
-    metadata: Dict[str, Any]
+    metadata: dict[str, Any]
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "doc_a": self.doc_a,
             "doc_b": self.doc_b,
@@ -83,13 +105,13 @@ class ContentFingerprint:
     """Content fingerprint for near-duplicate detection."""
 
     doc_name: str
-    shingles: Set[str]
-    minhash_signature: List[int]
+    shingles: set[str]
+    minhash_signature: list[int]
     ngram_hash: str
     word_set_hash: str
-    paragraph_hashes: List[str]
+    paragraph_hashes: list[str]
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "doc_name": self.doc_name,
             "shingle_count": len(self.shingles),
@@ -157,7 +179,7 @@ class ContentFingerprinter:
             paragraph_hashes=para_hashes,
         )
 
-    def _create_shingles(self, words: List[str]) -> Set[str]:
+    def _create_shingles(self, words: list[str]) -> set[str]:
         """Create word-level shingles."""
         shingles = set()
         for i in range(len(words) - self.config.shingle_size + 1):
@@ -165,13 +187,13 @@ class ContentFingerprinter:
             shingles.add(hashlib.md5(shingle.encode()).hexdigest()[:12])
         return shingles
 
-    def _compute_minhash(self, shingles: Set[str]) -> List[int]:
+    def _compute_minhash(self, shingles: set[str]) -> list[int]:
         """Compute MinHash signature."""
         signature = []
         for i in range(self.config.minhash_num_perm):
             min_val = float("inf")
             for shingle in shingles:
-                hash_val = int(hashlib.md5(f"{shingle}_{i}".encode()).hexdigest(), 16)
+                hash_val = int(hashlib.md5(f"{shingle}_{i}".encode()).hexdigest(), 16)  # nosec
                 min_val = min(min_val, hash_val)
             signature.append(min_val % (2**32))
         return signature
@@ -186,15 +208,15 @@ class ContentFingerprinter:
         combined = "|".join(sorted(ngrams)[:100])
         return hashlib.sha256(combined.encode()).hexdigest()[:16]
 
-    def _word_set_hash(self, words: List[str]) -> str:
+    def _word_set_hash(self, words: list[str]) -> str:
         """Compute word set hash."""
-        word_set = sorted(set(w.lower() for w in words))
-        return hashlib.md5(" ".join(word_set).encode()).hexdigest()[:16]
+        word_set = sorted({w.lower() for w in words})
+        return hashlib.md5(" ".join(word_set).encode()).hexdigest()[:16]  # nosec
 
-    def _paragraph_hashes(self, text: str) -> List[str]:
+    def _paragraph_hashes(self, text: str) -> list[str]:
         """Compute paragraph-level hashes."""
         paragraphs = [p.strip() for p in text.split("\n\n") if len(p.strip()) > 20]
-        return [hashlib.md5(p.encode()).hexdigest()[:12] for p in paragraphs[:50]]
+        return [hashlib.md5(p.encode()).hexdigest()[:12] for p in paragraphs[:50]]  # nosec
 
     def compare_fingerprints(
         self, fp1: ContentFingerprint, fp2: ContentFingerprint
@@ -232,9 +254,9 @@ class AIScoringEngine:
     def __init__(self, config: Optional[ScoringConfig] = None):
         self.config = config or ScoringConfig()
         self.fingerprinter = ContentFingerprinter(config)
-        self._cache: Dict[str, Any] = {}
+        self._cache: dict[str, Any] = {}
 
-    def _preprocess(self, text: str) -> List[str]:
+    def _preprocess(self, text: str) -> list[str]:
         """Tokenize and preprocess text."""
         text = text.lower()
         text = re.sub(r"[^\w\s]", " ", text)
@@ -337,8 +359,8 @@ class AIScoringEngine:
         type_token_sim = 1 - abs(vocab_rich_a - vocab_rich_b)
         freq_a = Counter(words_a)
         freq_b = Counter(words_b)
-        top_a = set(w for w, _ in freq_a.most_common(20))
-        top_b = set(w for w, _ in freq_b.most_common(20))
+        top_a = {w for w, _ in freq_a.most_common(20)}
+        top_b = {w for w, _ in freq_b.most_common(20)}
         keyword_sim = len(top_a & top_b) / len(top_a | top_b) if (top_a | top_b) else 0
         score = 0.5 * type_token_sim + 0.5 * keyword_sim
         return ScoreComponent(
@@ -464,7 +486,21 @@ class AIScoringEngine:
             },
         )
 
-    def batch_score(self, documents: Dict[str, str]) -> List[PlagiarismScore]:
+        return PlagiarismScore(
+            doc_a=doc_a,
+            doc_b=doc_b,
+            overall_score=overall,
+            severity=severity,
+            components=components,
+            fingerprint_match=fp_match,
+            metadata={
+                "text_a_length": len(text_a),
+                "text_b_length": len(text_b),
+                "timestamp": datetime.now().isoformat(),
+            },
+        )
+
+    def batch_score(self, documents: dict[str, str]) -> list[PlagiarismScore]:
         """Score all document pairs in a batch."""
         scores = []
         doc_names = list(documents.keys())

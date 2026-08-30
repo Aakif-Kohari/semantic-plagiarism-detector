@@ -263,7 +263,7 @@ class OfflineModelManager:
     def __init__(self, config: OfflineConfig):
         self.config = config
         self.model_cache_dir = Path(config.model_cache_dir)
-        self._models: Dict[str, Any] = {}
+        self._models: dict[str, Any] = {}
         self._lock = threading.RLock()
         self._ensure_model_dir()
 

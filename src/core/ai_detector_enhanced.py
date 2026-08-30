@@ -30,7 +30,7 @@ class AIDetectionResult:
     burstiness_score: float
     pattern_score: float
     sentence_variability: float
-    features: Dict[str, Any] = field(default_factory=dict)
+    features: dict[str, Any] = field(default_factory=dict)
     is_suspicious: bool = False
 
 
@@ -304,9 +304,9 @@ class AIDetectorEnhanced:
 
 
 def detect_ai_probability_enhanced(
-    chunked_docs: Dict[str, List[str]],
+    chunked_docs: dict[str, list[str]],
     threshold: float = 0.65,
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """
     Enhanced AI detection for document chunks.
 
@@ -322,7 +322,7 @@ def detect_ai_probability_enhanced(
 
     results = {}
     for doc_name, chunks in chunked_docs.items():
-        text = " ".join(chunks)
+        text = " ".join(chunk.text if hasattr(chunk, "text") else chunk for chunk in chunks)
         result = detector.detect_document(text, doc_name)
         results[doc_name] = result.ai_probability
 
@@ -332,7 +332,7 @@ def detect_ai_probability_enhanced(
 def classify_ai_generated(
     text: str,
     threshold: float = 0.65,
-) -> Tuple[bool, float, Dict[str, Any]]:
+) -> tuple[bool, float, dict[str, Any]]:
     """
     Classify if text is AI-generated.
 

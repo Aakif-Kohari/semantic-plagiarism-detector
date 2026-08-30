@@ -354,7 +354,7 @@ def compare_multilingual_texts(
     text_a: str,
     text_b: str,
     preprocessor: Optional[MultilingualPreprocessor] = None,
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """
     Compare two texts with multilingual support.
 

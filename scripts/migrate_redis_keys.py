@@ -111,7 +111,7 @@ def get_redis_client(
     return client
 
 
-def migrate_redis_keys(client: Any, dry_run: bool = False) -> Dict[str, Any]:
+def migrate_redis_keys(client: Any, dry_run: bool = False) -> dict[str, Any]:
     """Scans all keys in the Redis database and migrates legacy keys to spd:v1:* namespace.
 
     Args:
@@ -121,7 +121,7 @@ def migrate_redis_keys(client: Any, dry_run: bool = False) -> Dict[str, Any]:
     Returns:
         Dictionary containing summary statistics and list of renamed keys.
     """
-    stats: Dict[str, Any] = {
+    stats: dict[str, Any] = {
         "scanned": 0,
         "migrated": 0,
         "skipped": 0,

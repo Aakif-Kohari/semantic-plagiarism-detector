@@ -14,6 +14,7 @@ descriptive feedback and to enforce stricter business logic rules.
 """
 
 import logging
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Union
@@ -24,7 +25,7 @@ logger = logging.getLogger(__name__)
 # This should match or be slightly less than the server.maxUploadSize in config.toml
 # to ensure our application-level check catches it before the server does,
 # allowing us to return a friendly error message.
-MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024
+MAX_FILE_SIZE_BYTES = int(os.getenv("MAX_UPLOAD_SIZE_MB", "50")) * 1024 * 1024
 
 # Allowed file extensions for document processing.
 # These correspond to the formats supported by src/core/document_parser.py
@@ -39,6 +40,7 @@ ALLOWED_EXTENSIONS = {
     ".rtf",
     ".odt",
     ".csv",
+    ".epub",
 }
 
 # Magic byte signatures for common document formats.
@@ -50,6 +52,7 @@ MAGIC_SIGNATURES = {
     ".doc": b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1",  # OLE2 Compound Document
     ".rtf": b"{\\rtf",
     ".odt": b"PK\x03\x04",  # ZIP archive
+    ".epub": b"PK\x03\x04",  # ZIP archive (EPUB is a ZIP)
     ".png": b"\x89PNG\r\n\x1a\n",
     ".jpg": b"\xff\xd8\xff",
     ".jpeg": b"\xff\xd8\xff",
@@ -79,6 +82,10 @@ class FileValidator:
     This class provides a centralized validation mechanism that can be used
     by both the Streamlit UI and the FastAPI backend to ensure files are
     safe and supported before processing.
+
+    By default a magic-byte mismatch is logged but tolerated. Pass
+    ``strict_mode=True`` to make such mismatches a hard failure with
+    ``error_code="MAGIC_BYTE_MISMATCH"`` (Issue #3201).
     """
 
     def __init__(
@@ -91,6 +98,10 @@ class FileValidator:
         Args:
             max_size_bytes: Maximum allowed file size in bytes.
             allowed_extensions: Set of allowed file extensions (e.g., {'.pdf', '.txt'}).
+            strict_mode: When True, a magic-byte/extension mismatch fails
+                validation with ``MAGIC_BYTE_MISMATCH`` instead of logging a
+                warning and passing (Issue #3201). Off by default so existing
+                callers keep the permissive behaviour.
         """
         self.max_size_bytes = max_size_bytes
         self.allowed_extensions = allowed_extensions or ALLOWED_EXTENSIONS
@@ -111,6 +122,14 @@ class FileValidator:
         Returns:
             A ValidationResult object indicating success or failure.
         """
+        if "\x00" in filename:
+            return ValidationResult(
+                is_valid=False,
+                filename=filename,
+                error_message="Filename contains invalid characters.",
+                error_code="INVALID_FILENAME_CHARACTERS"
+            )
+
         logger.debug("Validating file: %s", filename)
 
         # 1. Check file size
@@ -126,9 +145,18 @@ class FileValidator:
         # 3. Check magic bytes (content verification)
         magic_result = self._check_magic_bytes(file_data, filename)
         if not magic_result.is_valid:
-            # Log a warning for magic byte mismatch, but don't fail hard
-            # unless it's a known dangerous signature. Some valid files
-            # might have unusual headers.
+            # In strict mode a mismatch is a hard failure: an executable
+            # renamed to .pdf must not reach the processing pipeline
+            # (Issue #3201).
+            if self.strict_mode:
+                logger.error(
+                    "Magic byte mismatch for %s (strict mode). Expected %s, got %s",
+                    filename, magic_result.error_message, file_data[:8]
+                )
+                return magic_result
+
+            # Permissive default: log the mismatch and let the file through,
+            # because some valid files carry unusual headers.
             logger.warning(
                 "Magic byte mismatch for %s. Expected %s, got %s",
                 filename,

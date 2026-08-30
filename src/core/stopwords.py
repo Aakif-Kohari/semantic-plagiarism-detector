@@ -226,7 +226,7 @@ ACADEMIC_STOPWORDS = {
 }
 
 # Custom stopwords - can be extended by users
-CUSTOM_STOPWORDS: Set[str] = set()
+CUSTOM_STOPWORDS: set[str] = set()
 
 
 # ============================================================================
@@ -249,7 +249,7 @@ class StopwordManager:
         self.english = set(ENGLISH_STOPWORDS)
         self.academic = set(ACADEMIC_STOPWORDS)
         self.custom = set(CUSTOM_STOPWORDS)
-        self._combined_cache: Optional[Set[str]] = None
+        self._combined_cache: Optional[set[str]] = None
         self._enabled = {
             "english": True,
             "academic": True,
@@ -385,7 +385,7 @@ class StopwordManager:
 
 def filter_stopwords(
     text: str,
-    stopwords: Optional[Set[str]] = None,
+    stopwords: Optional[set[str]] = None,
     stopword_manager: Optional[StopwordManager] = None,
 ) -> str:
     """
@@ -419,9 +419,9 @@ def filter_stopwords(
 
 def tokenize_filtered(
     text: str,
-    stopwords: Optional[Set[str]] = None,
+    stopwords: Optional[set[str]] = None,
     stopword_manager: Optional[StopwordManager] = None,
-) -> Set[str]:
+) -> set[str]:
     """
     Tokenize text and filter stopwords.
 
@@ -449,9 +449,9 @@ def tokenize_filtered(
 
 
 def filter_texts_batch(
-    texts: List[str],
+    texts: list[str],
     stopword_manager: Optional[StopwordManager] = None,
-) -> List[str]:
+) -> list[str]:
     """
     Filter stopwords from multiple texts.
 
@@ -505,6 +505,6 @@ def get_stopword_manager() -> StopwordManager:
     return _stopword_manager
 
 
-def get_stopwords() -> Set[str]:
+def get_stopwords() -> set[str]:
     """Get the global stopword set."""
     return get_stopword_manager().get_stopwords()

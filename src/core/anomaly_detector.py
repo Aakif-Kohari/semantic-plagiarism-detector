@@ -49,12 +49,12 @@ class Anomaly:
     severity: AnomalySeverity
     title: str
     description: str
-    affected_documents: List[str]
+    affected_documents: list[str]
     confidence: float
-    evidence: Dict[str, Any]
+    evidence: dict[str, Any]
     detected_at: str
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "anomaly_id": self.anomaly_id,
             "anomaly_type": self.anomaly_type.value,
@@ -78,7 +78,7 @@ class AnomalyResult:
     recommendations: List[str]
     processing_time: float
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "anomalies": [a.to_dict() for a in self.anomalies],
             "summary": self.summary,
@@ -136,7 +136,7 @@ class StatisticalAnalyzer:
                 anomalies.append((i, z, severity))
         return anomalies
 
-    def iqr_analysis(self, scores: List[float]) -> List[Tuple[int, float]]:
+    def iqr_analysis(self, scores: list[float]) -> list[tuple[int, float]]:
         """Identify outliers using IQR method."""
         if len(scores) < 4:
             return []
@@ -147,7 +147,7 @@ class StatisticalAnalyzer:
         upper = q3 + 1.5 * iqr
         return [(i, s) for i, s in enumerate(scores) if s < lower or s > upper]
 
-    def percentile_analysis(self, scores: List[float]) -> Dict[str, float]:
+    def percentile_analysis(self, scores: list[float]) -> dict[str, float]:
         """Compute percentile distribution."""
         if not scores:
             return {}
@@ -161,7 +161,7 @@ class StatisticalAnalyzer:
             "p99": float(np.percentile(arr, 99)),
         }
 
-    def detect_distribution_anomaly(self, scores: List[float]) -> Optional[Anomaly]:
+    def detect_distribution_anomaly(self, scores: list[float]) -> Optional[Anomaly]:
         """Detect if distribution shape indicates anomalies."""
         if len(scores) < 10:
             return None
@@ -267,7 +267,7 @@ class PatternAnalyzer:
         self, documents: Dict[str, str], min_length: int = 20
     ) -> List[Dict[str, Any]]:
         """Find repeated phrases across documents."""
-        phrase_docs: Dict[str, Set[str]] = defaultdict(set)
+        phrase_docs: dict[str, set[str]] = defaultdict(set)
         for doc_name, text in documents.items():
             words = text.lower().split()
             for i in range(len(words) - min_length + 1):
@@ -291,7 +291,7 @@ class PatternAnalyzer:
     ) -> List[Anomaly]:
         """Detect template-based plagiarism."""
         anomalies = []
-        doc_template_count: Dict[str, int] = Counter()
+        doc_template_count: dict[str, int] = Counter()
         for phrase_info in repeated_phrases:
             for doc in phrase_info["documents"]:
                 doc_template_count[doc] += 1
@@ -313,7 +313,7 @@ class PatternAnalyzer:
                 )
         return anomalies
 
-    def detect_copy_patterns(self, documents: Dict[str, str]) -> List[Anomaly]:
+    def detect_copy_patterns(self, documents: dict[str, str]) -> list[Anomaly]:
         """Detect exact copy patterns."""
         anomalies = []
         doc_names = list(documents.keys())
@@ -368,9 +368,9 @@ class AnomalyDetector:
 
     def detect(
         self,
-        documents: Dict[str, str],
+        documents: dict[str, str],
         similarity_matrix: Optional[np.ndarray] = None,
-        similarity_scores: Optional[List[float]] = None,
+        similarity_scores: Optional[list[float]] = None,
     ) -> AnomalyResult:
         """
         Run full anomaly detection pipeline.

@@ -49,13 +49,13 @@ class ReportTemplate:
     id: str
     name: str
     description: str
-    sections: List[str]
-    style_config: Dict[str, Any]
+    sections: list[str]
+    style_config: dict[str, Any]
     default_format: ExportFormat
     created_at: datetime
     updated_at: datetime
     is_custom: bool = False
-    metadata: Dict = field(default_factory=dict)
+    metadata: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -66,14 +66,14 @@ class ReportJob:
     name: str
     template_id: str
     schedule: str  # 'daily', 'weekly', 'monthly', 'custom'
-    recipients: List[str]
+    recipients: list[str]
     format: ExportFormat
-    filters: Dict[str, Any]
+    filters: dict[str, Any]
     last_run: Optional[datetime] = None
     next_run: Optional[datetime] = None
     status: ReportStatus = ReportStatus.PENDING
     created_at: datetime = field(default_factory=datetime.now)
-    metadata: Dict = field(default_factory=dict)
+    metadata: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -113,7 +113,7 @@ class ReportInsight:
     description: str
     severity: str  # 'low', 'medium', 'high', 'critical'
     confidence: float
-    data: Dict[str, Any]
+    data: dict[str, Any]
     created_at: datetime = field(default_factory=datetime.now)
 
     def to_dict(self) -> Dict:
@@ -127,10 +127,10 @@ class ReportGenerator:
     """Main report generation engine"""
 
     def __init__(self):
-        self.templates: Dict[str, ReportTemplate] = {}
-        self.reports: Dict[str, Report] = {}
-        self.jobs: Dict[str, ReportJob] = {}
-        self.insights: Dict[str, List[ReportInsight]] = defaultdict(list)
+        self.templates: dict[str, ReportTemplate] = {}
+        self.reports: dict[str, Report] = {}
+        self.jobs: dict[str, ReportJob] = {}
+        self.insights: dict[str, list[ReportInsight]] = defaultdict(list)
         self._init_default_templates()
 
     def _init_default_templates(self):

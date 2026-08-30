@@ -2,14 +2,14 @@
 
 import logging
 import os
-from typing import Any, Dict
+from typing import Any, Callable, Dict, Optional
 
 import psutil
 
 logger = logging.getLogger(__name__)
 
 
-def get_memory_usage() -> Dict[str, Any]:
+def get_memory_usage() -> dict[str, Any]:
     """Get current memory usage of the process."""
     try:
         process = psutil.Process(os.getpid())
@@ -26,7 +26,7 @@ def get_memory_usage() -> Dict[str, Any]:
         return {"rss_mb": 0, "vms_mb": 0, "percent": 0, "cpu_percent": 0}
 
 
-def log_memory_usage(tag: str = "") -> Dict[str, Any]:
+def log_memory_usage(tag: str = "") -> dict[str, Any]:
     """Log current memory usage with a tag."""
     usage = get_memory_usage()
     logger.info(

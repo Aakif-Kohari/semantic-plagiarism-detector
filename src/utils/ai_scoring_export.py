@@ -21,7 +21,7 @@ class AIScoringExporter:
         self.output_dir = output_dir
         os.makedirs(output_dir, exist_ok=True)
 
-    def export_json(self, scores: List[Dict], filename: str = "ai_scores.json") -> str:
+    def export_json(self, scores: list[dict], filename: str = "ai_scores.json") -> str:
         """Export scores to JSON."""
         path = os.path.join(self.output_dir, filename)
         export_data = {"exported_at": datetime.now().isoformat(), "scores": scores}
@@ -30,7 +30,7 @@ class AIScoringExporter:
         logger.info(f"Exported JSON: {path}")
         return path
 
-    def export_csv(self, scores: List[Dict], filename: str = "ai_scores.csv") -> str:
+    def export_csv(self, scores: list[dict], filename: str = "ai_scores.csv") -> str:
         """Export scores to CSV."""
         if not scores:
             return ""
@@ -88,7 +88,7 @@ class AIScoringExporter:
         logger.info(f"Exported summary: {path}")
         return path
 
-    def export_all(self, scores: List[Dict]) -> Dict[str, str]:
+    def export_all(self, scores: list[dict]) -> dict[str, str]:
         """Export all formats."""
         exports = {}
         exports["json"] = self.export_json(scores)

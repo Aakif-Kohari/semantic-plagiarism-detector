@@ -11,6 +11,7 @@ import pytest
 from src.utils.storage_metrics import (
     _deduplicate_paths,
     calculate_storage_usage,
+    get_directory_size_bytes,
     get_faiss_index_paths,
     get_sqlite_db_paths,
 )

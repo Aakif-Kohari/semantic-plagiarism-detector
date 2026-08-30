@@ -21,7 +21,7 @@ class AnomalyExporter:
         self.output_dir = output_dir
         os.makedirs(output_dir, exist_ok=True)
 
-    def export_json(self, result: Dict, filename: str = "anomaly_results.json") -> str:
+    def export_json(self, result: dict, filename: str = "anomaly_results.json") -> str:
         path = os.path.join(self.output_dir, filename)
         with open(path, "w", encoding="utf-8") as f:
             json.dump(
@@ -33,7 +33,7 @@ class AnomalyExporter:
         logger.info(f"Exported JSON: {path}")
         return path
 
-    def export_csv(self, anomalies: List[Dict], filename: str = "anomalies.csv") -> str:
+    def export_csv(self, anomalies: list[dict], filename: str = "anomalies.csv") -> str:
         if not anomalies:
             return ""
         path = os.path.join(self.output_dir, filename)

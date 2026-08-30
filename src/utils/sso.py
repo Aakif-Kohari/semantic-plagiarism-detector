@@ -1,19 +1,76 @@
+# MIT License
+#
+# Copyright (c) 2026 Ganesh Kambli
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
 # src/utils/sso.py
 
+import base64
+import hashlib
 import logging
 import os
+import re
 import secrets
 import time
 import urllib.parse
-from typing import Optional, Tuple, Dict, Any
+from dataclasses import dataclass
+from typing import Any, Dict, Optional, Tuple
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util import Retry
 from dotenv import load_dotenv
+
+from src.errors import SSOConfigurationError
 
 logger = logging.getLogger(__name__)
 
 # State expiration constant - 10 minutes
 STATE_EXPIRATION_SECONDS = 600
+
+
+def _get_oauth_session() -> requests.Session:
+    """Create and return a requests.Session configured with retry logic for transient errors.
+
+    Acceptance Criteria (Issue #3455):
+    - Uses urllib3.util.Retry(total=3, backoff_factor=0.5, status_forcelist=[500, 502, 503, 504])
+    """
+    session = requests.Session()
+    retries = Retry(
+        total=3,
+        backoff_factor=0.5,
+        status_forcelist=[500, 502, 503, 504],
+        raise_on_status=False,  # Keep status code responses accessible so we can log/handle them.
+    )
+    adapter = HTTPAdapter(max_retries=retries)
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+    return session
+
+
+@dataclass
+class SSOUserProfile:
+    email: str
+    username: str
+    name: str
+    avatar: str
 
 
 def _load_env() -> None:
@@ -83,6 +140,22 @@ def verify_sso_state(
     return True, None
 
 
+def generate_pkce_pair() -> Tuple[str, str]:
+    """Generate a PKCE code_verifier and code_challenge pair.
+
+    Uses ``secrets.token_urlsafe(32)`` for the verifier and SHA-256 with
+    base64url encoding (no padding) for the challenge, as specified by
+    RFC 7636.
+
+    Returns:
+        tuple[str, str]: (code_verifier, code_challenge)
+    """
+    code_verifier = secrets.token_urlsafe(32)
+    digest = hashlib.sha256(code_verifier.encode("ascii")).digest()
+    code_challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+    return code_verifier, code_challenge
+
+
 def get_google_auth_url() -> Tuple[str, str, Dict[str, Any]]:
     """
     Return the Google OAuth authorization URL, state, and state data.
@@ -101,12 +174,24 @@ def get_google_auth_url() -> Tuple[str, str, Dict[str, Any]]:
     # Create state data with timestamp for expiration checking
     state_data = {"token": state, "created_at": time.time(), "provider": "google"}
 
+    try:
+        from src.db.auth import store_sso_state
+
+        store_sso_state(state)
+    except Exception as e:
+        logger.warning(f"Failed to store Google SSO state parameter: {e}")
+
+    google_scopes = os.getenv("GOOGLE_OAUTH_SCOPES", "email profile")
+
     query_params = {
         "response_type": "code",
         "client_id": client_id,
         "redirect_uri": redirect_uri,
-        "scope": "email profile",
+        "scope": google_scopes,
         "state": state,
+        "prompt": "select_account",
+        "code_challenge": code_challenge,
+        "code_challenge_method": "S256",
     }
 
     encoded_args = urllib.parse.urlencode(query_params)
@@ -115,27 +200,50 @@ def get_google_auth_url() -> Tuple[str, str, Dict[str, Any]]:
     return url, state, state_data
 
 
-def exchange_google_code(code: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
-    """Exchange code for access token and fetch user info."""
+def exchange_google_code(code: str, state: str | None = None, code_verifier: str | None = None) -> tuple[SSOUserProfile | None, str | None]:
+    """Exchange code for access token and fetch user info.
+
+    Args:
+        code: The authorization code from the OAuth callback.
+        state: Optional CSRF state token for validation.
+        code_verifier: Optional PKCE code_verifier (Issue #3453).  When
+            supplied, it is included in the token exchange request so that
+            Google can verify the proof key.
+    """
+    if state is not None:
+        if not verify_sso_state(state):
+            return (
+                None,
+                "Invalid or expired SSO state parameter (CSRF protection failed).",
+            )
+
     _load_env()
     client_id = os.getenv("GOOGLE_CLIENT_ID")
     if not client_id:
-        raise ValueError("GOOGLE_CLIENT_ID environment variable is not configured")
+        raise SSOConfigurationError("GOOGLE_CLIENT_ID environment variable is not configured")
     client_secret = os.getenv("GOOGLE_CLIENT_SECRET")
     if not client_secret:
-        raise ValueError("GOOGLE_CLIENT_SECRET environment variable is not configured")
+        raise SSOConfigurationError("GOOGLE_CLIENT_SECRET environment variable is not configured")
     redirect_uri = _get_redirect_uri()
 
+    token_data = {
+        "code": code,
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "redirect_uri": redirect_uri,
+        "grant_type": "authorization_code",
+    }
+    # PKCE: include code_verifier in token exchange (Issue #3453)
+    if code_verifier is not None:
+        token_data["code_verifier"] = code_verifier
+
+    # Setup retrying OAuth session
+    session = _get_oauth_session()
+
     try:
-        token_resp = requests.post(
+        token_resp = session.post(
             "https://oauth2.googleapis.com/token",
-            data={
-                "code": code,
-                "client_id": client_id,
-                "client_secret": client_secret,
-                "redirect_uri": redirect_uri,
-                "grant_type": "authorization_code",
-            },
+            data=token_data,
             timeout=10,
         )
     except requests.Timeout:
@@ -156,7 +264,7 @@ def exchange_google_code(code: str) -> Tuple[Optional[Dict[str, Any]], Optional[
         return None, "Invalid or expired SSO authorization code"
 
     try:
-        user_info_resp = requests.get(
+        user_info_resp = session.get(
             "https://www.googleapis.com/oauth2/v2/userinfo",
             headers={"Authorization": f"Bearer {access_token}"},
             timeout=10,
@@ -173,7 +281,90 @@ def exchange_google_code(code: str) -> Tuple[Optional[Dict[str, Any]], Optional[
     if not user_info_resp.ok:
         return None, "SSO authentication failed"
 
-    return user_info_resp.json(), None
+    user_data = user_info_resp.json()
+    email = user_data.get("email", "")
+    raw_username = email.split("@")[0] if email else ""
+    username = re.sub(r"[^a-zA-Z0-9_-]", "_", raw_username)
+
+    # Fallback avatar generation (Issue #3459)
+    avatar_url = user_data.get("picture")
+    if not avatar_url:
+        name_param = urllib.parse.quote(user_data.get("name") or raw_username or email)
+        avatar_url = f"https://ui-avatars.com/api/?name={name_param}"
+
+    profile = SSOUserProfile(
+        email=email,
+        username=username,
+        name=user_data.get("name", ""),
+        avatar=avatar_url
+    )
+    return profile, None
+
+
+def verify_sso_state(state: str) -> bool:
+    """Verify that the state parameter returned in the OAuth callback matches the stored value.
+
+    Checks the token against the ``sso_states`` table via
+    :func:`src.db.auth.validate_sso_state`, which also consumes the row so a
+    replayed callback is rejected. See :func:`verify_sso_state_payload` for the
+    stateless equivalent that validates a session-held ``state_data`` dict.
+
+    Args:
+        state: State token string returned from OAuth provider callback.
+
+    Returns:
+        bool: True if state is valid, unexpired, and not previously used; False otherwise.
+    """
+    if not state:
+        logger.warning("SSO state verification failed: Empty state parameter.")
+        try:
+            from src.db.auth import log_security_event
+
+            log_security_event(
+                "SSO_CSRF_REJECTED",
+                username="anonymous",
+                details=f"Invalid state: {state}",
+            )
+        except Exception as audit_err:
+            logger.warning(
+                f"Failed to log security event for SSO CSRF rejection: {audit_err}"
+            )
+        return False
+
+    try:
+        from src.db.auth import log_security_event, validate_sso_state
+
+        is_valid = validate_sso_state(state)
+        if not is_valid:
+            logger.warning(
+                f"CSRF protection: Invalid or expired SSO state parameter '{state}'"
+            )
+            try:
+                log_security_event(
+                    "SSO_CSRF_REJECTED",
+                    username="anonymous",
+                    details=f"Invalid state: {state}",
+                )
+            except Exception as audit_err:
+                logger.warning(
+                    f"Failed to log security event for SSO CSRF rejection: {audit_err}"
+                )
+        return is_valid
+    except Exception as e:
+        logger.error(f"Error during SSO state verification: {e}")
+        try:
+            from src.db.auth import log_security_event
+
+            log_security_event(
+                "SSO_CSRF_REJECTED",
+                username="anonymous",
+                details=f"Invalid state: {state}",
+            )
+        except Exception as audit_err:
+            logger.warning(
+                f"Failed to log security event for SSO CSRF rejection: {audit_err}"
+            )
+        return False
 
 
 def get_github_auth_url() -> Tuple[str, str, Dict[str, Any]]:
@@ -197,7 +388,7 @@ def get_github_auth_url() -> Tuple[str, str, Dict[str, Any]]:
     query_params = {
         "client_id": client_id,
         "redirect_uri": redirect_uri,
-        "scope": "user:email",
+        "scope": github_scopes,
         "state": state,
     }
 
@@ -207,19 +398,29 @@ def get_github_auth_url() -> Tuple[str, str, Dict[str, Any]]:
     return url, state, state_data
 
 
-def exchange_github_code(code: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+def exchange_github_code(code: str, state: str | None = None) -> tuple[SSOUserProfile | None, str | None]:
     """Exchange code for access token and fetch user info."""
+    if state is not None:
+        if not verify_sso_state(state):
+            return (
+                None,
+                "Invalid or expired SSO state parameter (CSRF protection failed).",
+            )
+
     _load_env()
     client_id = os.getenv("GITHUB_CLIENT_ID")
     if not client_id:
-        raise ValueError("GITHUB_CLIENT_ID environment variable is not configured")
+        raise SSOConfigurationError("GITHUB_CLIENT_ID environment variable is not configured")
     client_secret = os.getenv("GITHUB_CLIENT_SECRET")
     if not client_secret:
-        raise ValueError("GITHUB_CLIENT_SECRET environment variable is not configured")
+        raise SSOConfigurationError("GITHUB_CLIENT_SECRET environment variable is not configured")
     redirect_uri = _get_redirect_uri()
 
+    # Setup retrying OAuth session
+    session = _get_oauth_session()
+
     try:
-        token_resp = requests.post(
+        token_resp = session.post(
             "https://github.com/login/oauth/access_token",
             data={
                 "client_id": client_id,
@@ -254,7 +455,7 @@ def exchange_github_code(code: str) -> Tuple[Optional[Dict[str, Any]], Optional[
         return None, "Invalid or expired SSO authorization code"
 
     try:
-        user_info_resp = requests.get(
+        user_info_resp = session.get(
             "https://api.github.com/user",
             headers={"Authorization": f"Bearer {access_token}"},
             timeout=10,
@@ -282,7 +483,7 @@ def exchange_github_code(code: str) -> Tuple[Optional[Dict[str, Any]], Optional[
     # GitHub might not return email in /user if it's private, fetch explicitly
     if not user_data.get("email"):
         try:
-            emails_resp = requests.get(
+            emails_resp = session.get(
                 "https://api.github.com/user/emails",
                 headers={"Authorization": f"Bearer {access_token}"},
                 timeout=10,
@@ -323,7 +524,19 @@ def exchange_github_code(code: str) -> Tuple[Optional[Dict[str, Any]], Optional[
             "GitHub login failed: A verified public email is required. Please update your GitHub settings."
         )
 
-    return user_data, None
+    # Fallback avatar generation (Issue #3459)
+    avatar_url = user_data.get("avatar_url")
+    if not avatar_url:
+        name_param = urllib.parse.quote(user_data.get("name") or user_data.get("login") or user_data["email"])
+        avatar_url = f"https://ui-avatars.com/api/?name={name_param}"
+
+    profile = SSOUserProfile(
+        email=user_data["email"],
+        username=user_data.get("login", ""),
+        name=user_data.get("name", ""),
+        avatar=avatar_url
+    )
+    return profile, None
 
 
 def create_state_token(provider: str) -> Tuple[str, Dict[str, Any]]:
@@ -351,7 +564,7 @@ def cleanup_expired_states(
         states: Dictionary of stored states {state_token: state_data}
 
     Returns:
-        dict: Filtered dictionary with expired states removed
+        dict: Cleaned states dictionary
     """
     current_time = time.time()
     expiration_threshold = current_time - STATE_EXPIRATION_SECONDS

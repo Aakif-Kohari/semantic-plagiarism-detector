@@ -81,11 +81,11 @@ class ApiEndpoint:
     description: str
     status: ApiStatus
     handler: str
-    parameters: List[Dict[str, Any]]
-    responses: Dict[str, Dict[str, Any]]
+    parameters: list[dict[str, Any]]
+    responses: dict[str, dict[str, Any]]
     rate_limit: int  # requests per minute
     requires_auth: bool = True
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -99,9 +99,9 @@ class ApiKey:
     created_at: float
     expires_at: Optional[float] = None
     is_active: bool = True
-    permissions: List[str] = field(default_factory=list)
+    permissions: list[str] = field(default_factory=list)
     rate_limit: int = 60
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -111,14 +111,14 @@ class Webhook:
     id: str
     name: str
     url: str
-    events: List[str]
-    headers: Dict[str, str]
+    events: list[str]
+    headers: dict[str, str]
     status: WebhookStatus
     created_at: float
     last_triggered: Optional[float] = None
     retry_count: int = 0
     max_retries: int = 3
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -128,11 +128,11 @@ class ServiceConnection:
     id: str
     name: str
     type: ServiceType
-    config: Dict[str, Any]
+    config: dict[str, Any]
     status: bool
     created_at: float
     last_used: Optional[float] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -148,7 +148,7 @@ class ApiLog:
     timestamp: float
     ip_address: str
     user_agent: str
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 # ==============================================================================
@@ -163,13 +163,13 @@ class ApiGateway:
 
     def __init__(self, storage_path: Path):
         self.storage_path = storage_path
-        self.endpoints: Dict[str, ApiEndpoint] = {}
-        self.api_keys: Dict[str, ApiKey] = {}
-        self.webhooks: Dict[str, Webhook] = {}
-        self.services: Dict[str, ServiceConnection] = {}
-        self.api_logs: List[ApiLog] = []
-        self.handlers: Dict[str, Callable] = {}
-        self.rate_limits: Dict[str, List[float]] = defaultdict(list)
+        self.endpoints: dict[str, ApiEndpoint] = {}
+        self.api_keys: dict[str, ApiKey] = {}
+        self.webhooks: dict[str, Webhook] = {}
+        self.services: dict[str, ServiceConnection] = {}
+        self.api_logs: list[ApiLog] = []
+        self.handlers: dict[str, Callable] = {}
+        self.rate_limits: dict[str, list[float]] = defaultdict(list)
         self._load_data()
         self._register_default_handlers()
 
@@ -355,8 +355,8 @@ class ApiGateway:
         method: ApiMethod,
         description: str,
         handler: str,
-        parameters: List[Dict[str, Any]],
-        responses: Dict[str, Dict[str, Any]],
+        parameters: list[dict[str, Any]],
+        responses: dict[str, dict[str, Any]],
         rate_limit: int = 60,
         requires_auth: bool = True,
         status: ApiStatus = ApiStatus.ACTIVE,
@@ -383,7 +383,7 @@ class ApiGateway:
         self,
         name: str,
         user: str,
-        permissions: List[str] = None,
+        permissions: list[str] = None,
         rate_limit: int = 60,
         expires_in_days: int = 365,
     ) -> ApiKey:
@@ -499,7 +499,7 @@ class ApiGateway:
     def call_api(
         self,
         endpoint_id: str,
-        params: Dict[str, Any],
+        params: dict[str, Any],
         api_key: Optional[str] = None,
         ip_address: str = None,
         user_agent: str = None,

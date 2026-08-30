@@ -11,7 +11,7 @@ import fitz  # PyMuPDF
 
 def highlight_pdf_matches(
     pdf_bytes: bytes,
-    matching_phrases: Optional[List[str]] = None,
+    matching_phrases: Optional[list[str]] = None,
     password: Optional[str] = None,
 ) -> bytes:
     """Open a PDF in-memory, search for matching phrases, and apply yellow highlight annotations."""

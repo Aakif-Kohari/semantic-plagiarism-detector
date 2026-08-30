@@ -1,3 +1,25 @@
+# MIT License
+#
+# Copyright (c) 2026 Ganesh Kambli
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
 """
 Batch History Tracking and Persistence Layer.
 
@@ -34,7 +56,7 @@ class HistoryRecord:
     error_message: Optional[str]
     metadata: str
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "job_id": self.job_id,
@@ -76,7 +98,8 @@ class BatchHistory:
         """Initialize database schema."""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        cursor.execute("""
+        cursor.execute(
+            """
             CREATE TABLE IF NOT EXISTS batch_history (
                 job_id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
@@ -93,20 +116,27 @@ class BatchHistory:
                 error_message TEXT,
                 metadata TEXT DEFAULT '{}'
             )
-        """)
-        cursor.execute("""
+        """
+        )
+        cursor.execute(
+            """
             CREATE TABLE IF NOT EXISTS batch_results (
                 job_id TEXT PRIMARY KEY,
                 results_json TEXT NOT NULL,
                 FOREIGN KEY (job_id) REFERENCES batch_history(job_id)
             )
-        """)
-        cursor.execute("""
+        """
+        )
+        cursor.execute(
+            """
             CREATE INDEX IF NOT EXISTS idx_status ON batch_history(status)
-        """)
-        cursor.execute("""
+        """
+        )
+        cursor.execute(
+            """
             CREATE INDEX IF NOT EXISTS idx_created ON batch_history(created_at)
-        """)
+        """
+        )
         conn.commit()
         conn.close()
 
@@ -114,7 +144,7 @@ class BatchHistory:
         """Get database connection."""
         return sqlite3.connect(self.db_path)
 
-    def record_job(self, job_data: Dict[str, Any]) -> bool:
+    def record_job(self, job_data: dict[str, Any]) -> bool:
         """
         Record or update a batch job in history.
 
@@ -168,7 +198,7 @@ class BatchHistory:
             logger.error(f"Failed to record job: {e}")
             return False
 
-    def store_results(self, job_id: str, results: Dict[str, Any]) -> bool:
+    def store_results(self, job_id: str, results: dict[str, Any]) -> bool:
         """Store detailed results for a job."""
         try:
             conn = self._get_conn()
@@ -198,7 +228,7 @@ class BatchHistory:
             return None
         return self._row_to_record(row)
 
-    def get_recent_jobs(self, limit: int = 20) -> List[HistoryRecord]:
+    def get_recent_jobs(self, limit: int = 20) -> list[HistoryRecord]:
         """Get recent jobs sorted by creation date."""
         conn = self._get_conn()
         cursor = conn.cursor()
@@ -262,7 +292,7 @@ class BatchHistory:
             params.append(max_documents)
 
         where_clause = " AND ".join(conditions) if conditions else "1=1"
-        query_sql = f"SELECT * FROM batch_history WHERE {where_clause} ORDER BY created_at DESC LIMIT ?"
+        query_sql = f"SELECT * FROM batch_history WHERE {where_clause} ORDER BY created_at DESC LIMIT ?"  # nosec
         params.append(limit)
 
         conn = self._get_conn()
@@ -272,7 +302,7 @@ class BatchHistory:
         conn.close()
         return [self._row_to_record(row) for row in rows]
 
-    def get_statistics(self) -> Dict[str, Any]:
+    def get_statistics(self) -> dict[str, Any]:
         """Get aggregate statistics."""
         conn = self._get_conn()
         cursor = conn.cursor()
@@ -308,7 +338,7 @@ class BatchHistory:
         conn.close()
         return stats
 
-    def get_daily_summary(self, days: int = 7) -> List[Dict[str, Any]]:
+    def get_daily_summary(self, days: int = 7) -> list[dict[str, Any]]:
         """Get daily job summaries for the last N days."""
         conn = self._get_conn()
         cursor = conn.cursor()
@@ -353,7 +383,7 @@ class BatchHistory:
         logger.info(f"Cleaned up {deleted} old records")
         return deleted
 
-    def _row_to_record(self, row: Tuple) -> HistoryRecord:
+    def _row_to_record(self, row: tuple) -> HistoryRecord:
         """Convert database row to HistoryRecord."""
         return HistoryRecord(
             job_id=row[0],

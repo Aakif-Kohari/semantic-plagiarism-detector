@@ -1,6 +1,8 @@
-from enum import IntEnum
-from typing import Dict, Optional
+import sys
 from dataclasses import dataclass
+from datetime import datetime
+from enum import IntEnum
+from typing import Any, Optional
 
 
 class CliExitCodes(IntEnum):
@@ -459,7 +461,7 @@ class CliExitCodes(IntEnum):
             return "UNKNOWN"
 
     @classmethod
-    def to_dict(cls) -> Dict[int, str]:
+    def to_dict(cls) -> dict[int, str]:
         return {code.value: code.name for code in cls}
 
     @classmethod
