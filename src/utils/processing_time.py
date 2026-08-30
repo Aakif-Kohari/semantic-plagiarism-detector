@@ -16,7 +16,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from html import escape
 from numbers import Real
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 
 @dataclass
@@ -43,7 +43,7 @@ class ProfilerSpan:
     def __init__(self, name: str, parent: Optional["ProfilerSpan"] = None):
         self.name = name
         self.parent = parent
-        self.children: List["ProfilerSpan"] = []
+        self.children: list["ProfilerSpan"] = []
         self.start_time: float = time.perf_counter()
         self.end_time: Optional[float] = None
         self.duration: float = 0.0
@@ -53,7 +53,7 @@ class ProfilerSpan:
         self.end_time = time.perf_counter()
         self.duration = self.end_time - self.start_time
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert the span and its children to a dictionary."""
         return {
             "name": self.name,
@@ -69,11 +69,11 @@ class ProcessingTimer:
     """
 
     def __init__(self):
-        self.durations: List[float] = []
-        self.spans: List[ProfilerSpan] = []
-        self._active_stack: List[ProfilerSpan] = []
+        self.durations: list[float] = []
+        self.spans: list[ProfilerSpan] = []
+        self._active_stack: list[ProfilerSpan] = []
         self._active_timers: int = 0
-        self._aggregate_stats: Dict[str, float] = defaultdict(float)
+        self._aggregate_stats: dict[str, float] = defaultdict(float)
 
     @contextmanager
     def time_block(self, name: str = "Unnamed Block"):
@@ -108,7 +108,7 @@ class ProcessingTimer:
 
             self._aggregate_stats[name] += span.duration
 
-    def get_summary(self) -> Dict[str, float]:
+    def get_summary(self) -> dict[str, float]:
         """Returns aggregated durations for all named blocks."""
         return dict(self._aggregate_stats)
 
@@ -431,3 +431,36 @@ def calculate_kb_per_second(total_bytes: int, elapsed_seconds: float) -> float:
     kilobytes = total_bytes / 1024.0
 
     return round(kilobytes / elapsed_seconds, 2)
+
+
+def format_uptime_seconds(seconds: float) -> str:
+    """Convert raw seconds into formatted strings like '3 days, 4 hours, 12 minutes'.
+
+    Args:
+        seconds (float): Raw uptime in seconds.
+
+    Returns:
+        str: Human-readable uptime string.
+    """
+    if seconds < 0:
+        seconds = 0.0
+
+    total_seconds = int(round(seconds))
+
+    days = total_seconds // (24 * 3600)
+    total_seconds %= 24 * 3600
+
+    hours = total_seconds // 3600
+    total_seconds %= 3600
+
+    minutes = total_seconds // 60
+
+    parts = []
+    if days > 0:
+        parts.append(f"{days} day" + ("s" if days != 1 else ""))
+    if hours > 0:
+        parts.append(f"{hours} hour" + ("s" if hours != 1 else ""))
+    if minutes > 0 or not parts:
+        parts.append(f"{minutes} minute" + ("s" if minutes != 1 else ""))
+
+    return ", ".join(parts)

@@ -23,12 +23,14 @@ EbookLib>=0.18                   # EPUB e-book parsing
 thefuzz>=0.22.1                  # Fuzzy string matching
 networkx>=3.0                    # Plagiarism network graphs
 argon2-cffi>=23.1.0              # Password hashing
+zxcvbn>=4.4.28                   # Password strength and common dictionary checks
 
 # ── Web UI ────────────────────────────────────────────────────────────────────
 streamlit>=1.61.1                # Dashboard framework
 bcrypt>=4.0.0                    # Password hashing for auth
 pyotp>=2.10.0                     # TOTP generator/verifier for 2FA
 qrcode>=7.4.2                    # Local QR code generator for 2FA setup
+cryptography>=42.0.0              # Symmetric encryption for TOTP secrets
 python-dotenv>=1.0.0             # Load credentials from .env
 plotly>=5.20.0                   # Interactive heatmap with hover values
 deep-translator>=1.11.4          # Translation alignment for cross-lingual support
@@ -51,11 +53,14 @@ networkx>=3.0                     # Plagiarism cluster detection
 faker>=20.0.0                   # Fake data generation for mock essay utility (#255)
 hypothesis>=6.100.0             # Property-based testing for filename sanitization (#963)
 jsonschema>=4.20.0               # JSON Schema validation for API error-response tests
+pytest-xdist>=3.5.0             # Parallel test execution across CPU cores (#3773)
 
 # ── Caching & Session Management ───────────────────────────────────────────────
 
+cachetools>=5.3.0               # In-memory TTL cache for revoked tokens & rate limiting
 redis>=5.0.0                    # Redis client for session state and caching
 psutil>=5.9.0                   # System memory monitoring
+
 
 # ── Web Scraping ───────────────────────────────────────────────────────────────
 beautifulsoup4>=4.15.0          # HTML parsing for URL content extraction
@@ -77,6 +82,9 @@ isort>=5.13.0                   # Import sorting library
 # ── Google Integration ─────────────────────────────────────────────────────────
 google-api-python-client>=2.198.0
 google-auth>=2.56.2
+
+# ── Azure Integration ────────────────────────────────────────────────────────
+azure-storage-blob>=12.20.0      # Upload plagiarism reports to Azure Blob Storage (#3465)
 
 # ── ZIP Encryption ────────────────────────────────────────────────────────────
 pyzipper>=0.4.0                 # AES-256 encrypted ZIP archives for backups

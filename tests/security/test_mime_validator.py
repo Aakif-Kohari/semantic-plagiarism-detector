@@ -2,7 +2,10 @@ import io
 import zipfile
 from unittest.mock import patch
 
+import pytest
+
 from src.security.mime_validator import (
+    is_executable_upload,
     validate_mime_type,
 )
 
@@ -72,6 +75,14 @@ def test_validate_mime_type_pdf():
         )
         is False
     )
+
+
+def test_executable_magic_byte_detection():
+    """Issue #3720: Test is_executable_upload with files starting with b'MZ' and b'#!/bin/sh'."""
+    assert is_executable_upload(b"MZ\x90\x00\x03\x00\x00\x00\x04\x00\x00\x00\xff\xff", "assignment.pdf") is True
+    assert is_executable_upload(b"#!/bin/sh\nrm -rf /", "notes.txt") is True
+    assert is_executable_upload(b"MZ", "report.docx") is True
+    assert is_executable_upload(b"#!/bin/sh", "thesis.md") is True
 
 
 def test_valid_docx_package_is_accepted():
@@ -230,7 +241,7 @@ def test_weak_pk_signature_without_full_magic_bytes_is_rejected():
 
 def test_too_many_archive_members_are_rejected(monkeypatch):
     monkeypatch.setattr(
-        "src.security.mime_validator." "MAX_OOXML_ARCHIVE_ENTRIES",
+        "src.security.mime_validator.MAX_OOXML_ARCHIVE_ENTRIES",
         2,
     )
 
@@ -243,20 +254,22 @@ def test_too_many_archive_members_are_rejected(monkeypatch):
     )
 
 
-def test_ooxml_validation_does_not_trust_python_magic():
-    with patch(
-        "magic.from_buffer",
-        return_value="application/zip",
-    ) as magic_mock:
-        assert (
-            validate_mime_type(
-                build_zip({"random.bin": b"123"}),
-                "spoofed.docx",
-            )
-            is False
-        )
+def test_ooxml_validation_does_not_trust_python_magic(monkeypatch):
+    called = []
 
-    magic_mock.assert_not_called()
+    def mock_check(*args, **kwargs):
+        called.append(True)
+        return True
+
+    monkeypatch.setattr("src.security.mime_validator._check_magic_bytes", mock_check)
+    assert (
+        validate_mime_type(
+            build_zip({"random.bin": b"123"}),
+            "spoofed.docx",
+        )
+        is False
+    )
+    assert len(called) == 0
 
 
 def test_validate_mime_type_text():
@@ -287,30 +300,30 @@ def test_validate_mime_type_unsupported_extension():
     )
 
 
-def test_validate_mime_type_magic_fallback():
-    with patch(
-        "magic.from_buffer",
-        side_effect=ImportError("No magic module"),
-    ):
-        assert (
-            validate_mime_type(
-                b"%PDF-1.4\n%...\n",
-                "test.pdf",
-            )
-            is True
+def test_validate_mime_type_magic_fallback(monkeypatch):
+    monkeypatch.setattr(
+        "src.security.mime_validator._check_magic_bytes",
+        lambda *args, **kwargs: None,
+    )
+    assert (
+        validate_mime_type(
+            b"%PDF-1.4\n%...\n",
+            "test.pdf",
         )
-        assert (
-            validate_mime_type(
-                b"MZ\x90\x00\x03\x00\x00\x00",
-                "malicious.pdf",
-            )
-            is False
+        is True
+    )
+    assert (
+        validate_mime_type(
+            b"MZ\x90\x00\x03\x00\x00\x00",
+            "malicious.pdf",
         )
+        is False
+    )
 
 
 def test_validate_mime_type_accepts_valid_legacy_doc_header(monkeypatch):
     """A .doc file with the complete OLE signature is accepted."""
-    valid_doc = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" b"\x00" * 64
+    valid_doc = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1\x00" * 64
     monkeypatch.setattr(
         "src.security.mime_validator._check_magic_bytes",
         lambda *_args: None,
@@ -352,10 +365,54 @@ def test_validate_mime_type_rejects_truncated_legacy_doc_header(monkeypatch):
 
 
 def test_validate_mime_type_legacy_doc_extension_is_case_insensitive(monkeypatch):
-    valid_doc = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" b"\x00" * 16
+    valid_doc = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1\x00" * 16
     monkeypatch.setattr(
         "src.security.mime_validator._check_magic_bytes",
         lambda *_args: None,
     )
 
     assert validate_mime_type(valid_doc, "REPORT.DOC") is True
+
+
+@pytest.mark.parametrize(
+    "declared_filename",
+    [
+        "assignment.pdf",
+        "essay.docx",
+        "analysis.xlsx",
+        "notes.txt",
+        "dataset.csv",
+        "report.doc",
+        "readme.md",
+    ],
+)
+def test_pe_magic_bytes_detected_across_common_document_types(declared_filename):
+    """Verify Windows PE header b'MZ' triggers executable detection regardless of declared extension."""
+    pe_header = b"MZ\x90\x00\x03\x00\x00\x00\x04\x00\x00\x00\xff\xff"
+    assert is_executable_upload(pe_header, declared_filename) is True
+
+
+@pytest.mark.parametrize(
+    "declared_filename",
+    [
+        "assignment.pdf",
+        "essay.docx",
+        "analysis.xlsx",
+        "notes.txt",
+        "dataset.csv",
+        "report.doc",
+        "readme.md",
+    ],
+)
+def test_shebang_magic_bytes_detected_across_common_document_types(declared_filename):
+    """Verify Unix shebang b'#!/bin/sh' triggers executable detection regardless of declared extension."""
+    shebang_header = b"#!/bin/sh\necho 'running malicious script'\n"
+    assert is_executable_upload(shebang_header, declared_filename) is True
+
+
+def test_legitimate_documents_not_flagged_as_executable():
+    """Verify standard document contents return False in is_executable_upload."""
+    assert is_executable_upload(b"%PDF-1.4\n1 0 obj\n", "assignment.pdf") is False
+    assert is_executable_upload(b"PK\x03\x04\x14\x00\x00\x00", "essay.docx") is False
+    assert is_executable_upload(b"Just plain text essay content.", "notes.txt") is False
+    assert is_executable_upload(b"col1,col2,col3\n1,2,3\n", "dataset.csv") is False
