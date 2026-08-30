@@ -957,7 +957,12 @@ def _ocr_pdf_page(
     except Exception as exc:
         ocr_invocations_total.labels(status="failure").inc()
         tess_err_type = getattr(pytesseract, "TesseractNotFoundError", None)
-        if tess_err_type is not None and isinstance(tess_err_type, type) and issubclass(tess_err_type, BaseException) and isinstance(exc, tess_err_type):
+        if (
+            tess_err_type is not None
+            and isinstance(tess_err_type, type)
+            and issubclass(tess_err_type, BaseException)
+            and isinstance(exc, tess_err_type)
+        ):
             from src.errors import OCR_TESSERACT_NOT_FOUND
 
             raise OCRDependencyError(OCR_TESSERACT_NOT_FOUND) from exc
@@ -1890,7 +1895,12 @@ def extract_text_from_image(
     except Exception as exc:
         ocr_invocations_total.labels(status="failure").inc()
         tess_err_type = getattr(pytesseract, "TesseractNotFoundError", None)
-        if tess_err_type is not None and isinstance(tess_err_type, type) and issubclass(tess_err_type, BaseException) and isinstance(exc, tess_err_type):
+        if (
+            tess_err_type is not None
+            and isinstance(tess_err_type, type)
+            and issubclass(tess_err_type, BaseException)
+            and isinstance(exc, tess_err_type)
+        ):
             from src.errors import OCR_TESSERACT_NOT_FOUND
 
             raise OCRDependencyError(OCR_TESSERACT_NOT_FOUND) from exc
@@ -2111,6 +2121,34 @@ class DummyMetric9(AbstractCircuitBreakerMetric):
 
 class DummyMetric10(AbstractCircuitBreakerMetric):
     pass
+
+
+import abc
+import concurrent.futures
+import threading
+
+
+class ExtractionTimeoutError(TimeoutError):
+    pass
+
+
+class EnterpriseTimeoutCircuitBreaker:
+    def __init__(self, timeout_seconds: float = 10.0):
+        self.timeout_seconds = timeout_seconds
+
+    def execute(self, func, *args, **kwargs):
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        future = executor.submit(func, *args, **kwargs)
+        try:
+            return future.result(timeout=self.timeout_seconds)
+        except concurrent.futures.TimeoutError as e:
+            future.cancel()
+            executor.shutdown(wait=False)
+            raise ExtractionTimeoutError(
+                f"Extraction aborted after {self.timeout_seconds}s limit."
+            ) from e
+        finally:
+            executor.shutdown(wait=False)
 
 
 def _extract_text_internal(
@@ -2399,20 +2437,53 @@ def _extract_pptx_text(file_obj) -> str:
         return "\n".join(text_runs)
     except Exception as e:
         return f"[Error parsing PowerPoint: {e}]"
-import zipfile
+
+
 import io
+import zipfile
+
 
 def _validate_ooxml_archive(file_bytes: bytes) -> bool:
     """
-    Validates that an OOXML archive (ZIP-based) only uses standard compression 
+    Validates that an OOXML archive (ZIP-based) only uses standard compression
     methods (ZIP_STORED or ZIP_DEFLATED) to prevent malformed archive exploits.
     """
     try:
         with zipfile.ZipFile(io.BytesIO(file_bytes)) as zf:
             for member in zf.infolist():
                 # Accept only ZIP_STORED (0) and ZIP_DEFLATED (8)
-                if member.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED):
+                if member.compress_type not in (
+                    zipfile.ZIP_STORED,
+                    zipfile.ZIP_DEFLATED,
+                ):
                     return False
         return True
     except (zipfile.BadZipFile, Exception):
         return False
+
+
+def extract_text(
+    file: PDFInput,
+    filename: str,
+    *,
+    ocr_language: str = DEFAULT_OCR_LANGUAGE,
+    ocr_dpi: int = DEFAULT_OCR_DPI,
+    clean_whitespace: bool = True,
+    mask_named_entities: bool = False,
+    timeout_seconds: float = 10.0,
+) -> str:
+    breaker = EnterpriseTimeoutCircuitBreaker(timeout_seconds=timeout_seconds)
+    try:
+        raw = breaker.execute(
+            _extract_text_internal,
+            file,
+            filename,
+            ocr_language=ocr_language,
+            ocr_dpi=ocr_dpi,
+            clean_whitespace=clean_whitespace,
+            mask_named_entities=mask_named_entities,
+        )
+    except ExtractionTimeoutError as e:
+        logger.error(f"[document_parser] Extraction timed out for {filename}: {e}")
+        raise TimeoutError(f"Extraction of {filename} exceeded time limit.") from e
+    return raw
