@@ -2,11 +2,20 @@ import faiss
 import numpy as np
 import pytest
 
-from src.core.faiss_index import (ChunkRecord, add_to_index, build_index,
-                                  find_plagiarised_chunks, load_index,
-                                  optimize_faiss_index,
-                                  remove_document_from_index, save_index,
-                                  search_batch_vectors, search_similar_chunks)
+from src.core.faiss_index import (
+    ChunkRecord,
+    FAISSIndex,
+    FaissIndexManager,
+    add_to_index,
+    build_index,
+    find_plagiarised_chunks,
+    load_index,
+    optimize_faiss_index,
+    remove_document_from_index,
+    save_index,
+    search_batch_vectors,
+    search_similar_chunks,
+)
 
 
 def _unit_vecs(n, dim=384):
@@ -530,3 +539,75 @@ def test_remove_document_from_index_hnsw_fallback(two_doc_data, monkeypatch):
     assert compact_called is True
     assert len(new_registry) == 3
     assert all(r.doc_name == "doc_b" for r in new_registry)
+
+
+# ── FaissIndexManager wrapper tests (Issue #4033) ─────────────────────────────
+
+
+def test_faiss_index_manager_total_vectors_uninitialized():
+    """Verify total_vectors returns 0 when index is None / uninitialized."""
+    manager = FaissIndexManager(index=None)
+    assert manager.total_vectors == 0
+    assert manager.ntotal == 0
+
+
+def test_faiss_index_manager_total_vectors_empty_init():
+    """Verify total_vectors returns 0 when newly initialized with 0 vectors."""
+    manager = FaissIndexManager(dimension=384)
+    assert manager.total_vectors == 0
+    assert manager.ntotal == 0
+
+
+def test_faiss_index_manager_total_vectors_with_existing_index():
+    """Verify total_vectors returns index.ntotal for populated FAISS index."""
+    dim = 384
+    index = faiss.IndexFlatIP(dim)
+    vecs = _unit_vecs(7, dim=dim)
+    index.add(vecs)
+
+    manager = FaissIndexManager(index=index)
+    assert manager.total_vectors == 7
+    assert manager.ntotal == 7
+
+
+def test_faiss_index_manager_total_vectors_after_adding_vectors():
+    """Verify total_vectors updates correctly when vectors are added via manager."""
+    manager = FaissIndexManager(dimension=384)
+    assert manager.total_vectors == 0
+
+    vecs1 = _unit_vecs(5, dim=384)
+    manager.add(vecs1)
+    assert manager.total_vectors == 5
+    assert manager.ntotal == 5
+
+    vecs2 = _unit_vecs(3, dim=384)
+    manager.add(vecs2)
+    assert manager.total_vectors == 8
+    assert manager.ntotal == 8
+
+
+def test_faiss_index_manager_search():
+    """Verify nearest neighbor search using FaissIndexManager."""
+    manager = FaissIndexManager(dimension=384)
+    vecs = _unit_vecs(5, dim=384)
+    manager.add(vecs)
+
+    distances, indices = manager.search(vecs[0], top_k=3)
+    assert distances.shape == (1, 3)
+    assert indices.shape == (1, 3)
+    assert indices[0][0] == 0
+
+
+def test_faiss_index_manager_search_empty():
+    """Verify search on empty/uninitialized index returns sentinel -1 indices."""
+    manager = FaissIndexManager(index=None)
+    query = np.random.rand(384).astype("float32")
+    distances, indices = manager.search(query, top_k=3)
+    assert distances.shape == (1, 3)
+    assert indices.shape == (1, 3)
+    assert (indices == -1).all()
+
+
+def test_faiss_index_alias():
+    """Verify FAISSIndex alias matches FaissIndexManager."""
+    assert FAISSIndex is FaissIndexManager
