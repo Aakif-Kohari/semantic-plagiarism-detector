@@ -155,7 +155,7 @@ def test_detect_documents_ai_probability_empty():
     assert result == {}
 
 
-def test_detect_documents_ai_probability_single_doc():
+def test_detect_documents_ai_probability_single_doc(mock_fast_tokenizer):
     """Test AI detection with a single document."""
     chunked_docs = {
         "test_doc.txt": ["This is a test chunk of text.", "Another test chunk here."]
@@ -404,7 +404,7 @@ def test_calculate_text_perplexity_whitespace_only():
     assert result == 0.0
 
 
-def test_calculate_text_perplexity_returns_float():
+def test_calculate_text_perplexity_returns_float(mock_fast_tokenizer):
     """The return type must always be a float."""
     result = calculate_text_perplexity("This is a valid sentence for testing.")
     assert isinstance(result, float)
@@ -539,7 +539,7 @@ def test_calculate_text_perplexity_non_string_input():
     assert calculate_text_perplexity(True) == 0.0
 
 
-def test_calculate_text_perplexity_long_text():
+def test_calculate_text_perplexity_long_text(mock_fast_tokenizer):
     """Very long text should be handled gracefully with truncation."""
     long_text = "This is a sentence. " * 500
     result = calculate_text_perplexity(long_text)
