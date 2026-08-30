@@ -2379,3 +2379,20 @@ def _extract_pptx_text(file_obj) -> str:
         return "\n".join(text_runs)
     except Exception as e:
         return f"[Error parsing PowerPoint: {e}]"
+import zipfile
+import io
+
+def _validate_ooxml_archive(file_bytes: bytes) -> bool:
+    """
+    Validates that an OOXML archive (ZIP-based) only uses standard compression 
+    methods (ZIP_STORED or ZIP_DEFLATED) to prevent malformed archive exploits.
+    """
+    try:
+        with zipfile.ZipFile(io.BytesIO(file_bytes)) as zf:
+            for member in zf.infolist():
+                # Accept only ZIP_STORED (0) and ZIP_DEFLATED (8)
+                if member.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED):
+                    return False
+        return True
+    except (zipfile.BadZipFile, Exception):
+        return False
