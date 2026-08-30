@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Handled Windows reserved device names with extensions (e.g. `NUL.txt`, `CON.pdf`, `COM1.docx`) in `sanitize_filename` by checking base stems against `_WINDOWS_RESERVED_NAMES` (`src/utils/filename.py`).
 - Mobile viewports (<768px): tighter main padding and shorter plotly chart heights (`app/css_constants.py`).
 - Add `role="button"` and `aria-label` on custom HTML tag chips and notification badges (`app/components/`).
+- Fixed a mismatched bracket in the forecast confidence band and a duplicate `yaxis` keyword in the top-flagged-pairs layout that together kept the Trends & Insights page from parsing (`app/pages/9_Trends_Insights.py`).
 - Graceful degradation when reportlab is not installed: badge generator module loads without reportlab and raises a clear error only when PDF generation is requested (`src/utils/badge_generator.py`).
 - Embed bundled DejaVu Sans / Roboto TTF in ReportLab PDF reports so non-ASCII document names render correctly (`src/utils/pdf_report.py`).
 - Graceful degradation when reportlab is not installed: badge generator module loads without reportlab and raises a clear error only when PDF generation is requested (`src/utils/badge_generator.py`).
