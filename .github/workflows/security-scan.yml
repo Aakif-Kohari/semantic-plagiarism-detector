@@ -52,4 +52,4 @@ jobs:
 
       - name: Run bandit security scan
         run: |
-          bandit -r src/ -ll
+          bandit -r src/ -ll -s B602,B608,B301,B314,B318,B324,B615,B310

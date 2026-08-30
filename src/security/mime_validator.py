@@ -16,15 +16,13 @@ logger = logging.getLogger(__name__)
 ALLOWED_MIME_TYPES: dict[str, list[str]] = {
     "pdf": ["application/pdf"],
     "docx": [
-        "application/vnd.openxmlformats-officedocument."
-        "wordprocessingml.document",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "application/zip",
         "application/x-zip-compressed",
         "application/octet-stream",
     ],
     "xlsx": [
-        "application/vnd.openxmlformats-officedocument."
-        "spreadsheetml.sheet",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "application/zip",
         "application/x-zip-compressed",
         "application/octet-stream",
@@ -559,6 +557,13 @@ def validate_mime_type(file_bytes: bytes, filename: str) -> bool:
     if not validate_single_extension(filename):
         logger.warning(
             "[mime_validator] Blocked executable double extension: '%s'.",
+            filename,
+        )
+        return False
+
+    if is_executable_upload(file_bytes, filename):
+        logger.warning(
+            "[mime_validator] Executable file signature or extension detected: '%s'.",
             filename,
         )
         return False
