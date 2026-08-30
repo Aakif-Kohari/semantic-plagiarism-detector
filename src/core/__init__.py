@@ -24,6 +24,8 @@ from .faiss_index import (
     format_faiss_memory_badge,
     get_faiss_index_memory_bytes,
     load_index,
+    rebuild_index_from_database,
+    rebuild_index_from_db,
     save_index,
     search_similar_chunks,
 )
@@ -102,6 +104,8 @@ __all__ = [
     "load_branding_config",
     "load_index",
     "manhattan_similarity",
+    "rebuild_index_from_database",
+    "rebuild_index_from_db",
     "reload_branding_config",
     "run_extraction_pipeline",
     "run_pipeline",

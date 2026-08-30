@@ -2,11 +2,20 @@ import faiss
 import numpy as np
 import pytest
 
-from src.core.faiss_index import (ChunkRecord, add_to_index, build_index,
-                                  find_plagiarised_chunks, load_index,
-                                  optimize_faiss_index,
-                                  remove_document_from_index, save_index,
-                                  search_batch_vectors, search_similar_chunks)
+from src.core.faiss_index import (
+    ChunkRecord,
+    add_to_index,
+    build_index,
+    find_plagiarised_chunks,
+    load_index,
+    optimize_faiss_index,
+    rebuild_index_from_database,
+    rebuild_index_from_db,
+    remove_document_from_index,
+    save_index,
+    search_batch_vectors,
+    search_similar_chunks,
+)
 
 
 def _unit_vecs(n, dim=384):
@@ -530,3 +539,132 @@ def test_remove_document_from_index_hnsw_fallback(two_doc_data, monkeypatch):
     assert compact_called is True
     assert len(new_registry) == 3
     assert all(r.doc_name == "doc_b" for r in new_registry)
+
+
+# ── rebuild_index_from_db tests (Issue #4031) ─────────────────────────────────
+
+
+def test_rebuild_index_from_db_populates_index(tmp_path):
+    """Verify rebuild_index_from_db reads embeddings from SQLite chunks and builds FAISS index."""
+    import sqlite3
+
+    db_path = tmp_path / "test_corpus.db"
+    index_path = tmp_path / "test_corpus.index"
+
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """
+        CREATE TABLE chunks (
+            vector_id INTEGER PRIMARY KEY,
+            filename TEXT NOT NULL,
+            chunk_index INTEGER NOT NULL,
+            chunk_text TEXT NOT NULL,
+            embedding BLOB NOT NULL
+        )
+        """
+    )
+    vecs = _unit_vecs(5, dim=384)
+    for idx, vec in enumerate(vecs):
+        conn.execute(
+            "INSERT INTO chunks (vector_id, filename, chunk_index, chunk_text, embedding) VALUES (?, ?, ?, ?, ?)",
+            (idx, f"doc_{idx}.txt", 0, f"text {idx}", vec.tobytes()),
+        )
+    conn.commit()
+    conn.close()
+
+    total_added = rebuild_index_from_db(db_path=db_path, index_path=index_path)
+    assert total_added == 5
+    assert index_path.exists()
+
+    loaded = load_index(str(index_path))
+    assert loaded.ntotal == 5
+
+
+def test_rebuild_index_from_db_empty_db(tmp_path):
+    """Verify rebuild_index_from_db returns 0 on an empty chunks table."""
+    import sqlite3
+
+    db_path = tmp_path / "empty.db"
+    index_path = tmp_path / "empty.index"
+
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """
+        CREATE TABLE chunks (
+            vector_id INTEGER PRIMARY KEY,
+            filename TEXT NOT NULL,
+            chunk_index INTEGER NOT NULL,
+            chunk_text TEXT NOT NULL,
+            embedding BLOB NOT NULL
+        )
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    total_added = rebuild_index_from_db(db_path=db_path, index_path=index_path)
+    assert total_added == 0
+    assert index_path.exists()
+
+    loaded = load_index(str(index_path))
+    assert loaded.ntotal == 0
+
+
+def test_rebuild_index_from_db_nonexistent_db(tmp_path):
+    """Verify rebuild_index_from_db handles nonexistent database file gracefully."""
+    db_path = tmp_path / "nonexistent.db"
+    index_path = tmp_path / "fallback.index"
+
+    total_added = rebuild_index_from_db(db_path=db_path, index_path=index_path)
+    assert total_added == 0
+    assert index_path.exists()
+
+    loaded = load_index(str(index_path))
+    assert loaded.ntotal == 0
+
+
+def test_rebuild_index_from_db_default_paths(tmp_path, monkeypatch):
+    """Verify rebuild_index_from_db uses default paths when db_path and index_path are None."""
+    import sqlite3
+    import src.core.app_config as app_config
+
+    db_path = tmp_path / "default_data" / "corpus.db"
+    index_path = tmp_path / "default_data" / "corpus.index"
+
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """
+        CREATE TABLE chunks (
+            vector_id INTEGER PRIMARY KEY,
+            filename TEXT NOT NULL,
+            chunk_index INTEGER NOT NULL,
+            chunk_text TEXT NOT NULL,
+            embedding BLOB NOT NULL
+        )
+        """
+    )
+    vecs = _unit_vecs(3, dim=384)
+    for idx, vec in enumerate(vecs):
+        conn.execute(
+            "INSERT INTO chunks (vector_id, filename, chunk_index, chunk_text, embedding) VALUES (?, ?, ?, ?, ?)",
+            (idx, f"doc_{idx}.txt", 0, f"text {idx}", vec.tobytes()),
+        )
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setattr(app_config, "CORPUS_DB_PATH", db_path)
+    monkeypatch.setattr(app_config, "FAISS_INDEX_PATH", index_path)
+
+    total_added = rebuild_index_from_db()
+    assert total_added == 3
+    assert index_path.exists()
+
+    loaded = load_index(str(index_path))
+    assert loaded.ntotal == 3
+
+
+def test_rebuild_index_from_database_alias():
+    """Verify rebuild_index_from_database alias points to rebuild_index_from_db."""
+    assert rebuild_index_from_database is rebuild_index_from_db
+
