@@ -414,7 +414,8 @@ class PlagiarismReportGenerator:
                     width: 100%;
                     border-collapse: collapse;
                     margin: 15px 0;
-                    background: white;
+                    background-color: var(--background-color, #ffffff);
+                    color: var(--text-color, #111827);
                     border-radius: 8px;
                     overflow: hidden;
                 }}
