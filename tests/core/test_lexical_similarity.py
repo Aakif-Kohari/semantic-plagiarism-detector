@@ -107,9 +107,9 @@ def test_dice_coefficient():
     assert score > 0.0
 
 
-def test_overlap_coefficient():
-    text1 = "semantic plagiarism detection"
-    text2 = "semantic plagiarism detection and automated document verification"
+def test_overlap_coefficient_subset_returns_one():
+    text1 = "the cat sat"
+    text2 = "the cat sat on the mat"
     score = overlap_coefficient(text1, text2)
     assert score == pytest.approx(1.0)
 
