@@ -192,6 +192,24 @@ except ImportError:
 
 
 # ── Theme Definitions ──────────────────────────────────────────────────────────
+HIGH_CONTRAST_THEME = {
+    "background": "#000000",
+    "surface": "#000000",
+    "card": "#000000",
+    "ink": "#ffffff",
+    "muted": "#ffffff",
+    "accent": "#ffff00",
+    "border": "#ffff00",
+    "input": "#000000",
+    "danger": "#ffff00",
+    "danger_soft": "#000000",
+    "warning": "#ffff00",
+    "warning_soft": "#000000",
+    "success": "#ffff00",
+    "success_soft": "#000000",
+    "neutral_soft": "#000000",
+}
+
 THEMES = {
     "Light": {
         "background": "#FFFFFF",
@@ -227,6 +245,7 @@ THEMES = {
         "success_soft": "#052E16",
         "neutral_soft": "#1E293B",
     },
+    "Accessible High Contrast": HIGH_CONTRAST_THEME,
 }
 
 # Backward-compatible default palette used by existing tests and callers.
@@ -273,10 +292,16 @@ def initialize_theme() -> None:
     try:
         if "theme" not in st.session_state:
             query_theme = st.query_params.get("theme")
-            if query_theme and query_theme.lower() == "dark":
-                st.session_state.theme = "Dark"
-            elif query_theme and query_theme.lower() == "light":
-                st.session_state.theme = "Light"
+            if query_theme:
+                match = next(
+                    (
+                        name
+                        for name in THEMES
+                        if name.lower() == str(query_theme).lower()
+                    ),
+                    None,
+                )
+                st.session_state.theme = match or "Light"
             else:
                 st.session_state.theme = "Light"
 

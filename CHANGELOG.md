@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `reset_analysis_session_state()` clears document lists, matrices, and scan flags while keeping theme and session id (`app/state_manager.py`).
 - Custom low/mid/high color-scale thresholds in `build_similarity_workbook` (`src/utils/excel_export.py`).
 - `show_notification()` toast helper with success/warning/error/info icons (`app/components/notifications.py`).
+- Accessible High Contrast theme (`HIGH_CONTRAST_THEME`) with sidebar theme selector (`app/theme.py`).
 
 ### Fixed
 - Split the two `from` imports that had been welded onto one line in `src/core/processing.py`, un-interleaved `PipelineResult`'s docstring from `is_incremental_update()` and moved the method below the annotated fields where a `NamedTuple` requires it, and separated `run_full_pipeline`'s return annotation from its docstring; the module did not parse, so neither the synchronous upload path nor the background worker could import the pipeline (`src/core/processing.py`).

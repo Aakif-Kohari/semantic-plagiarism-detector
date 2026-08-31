@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 from app.theme import (
     COLORS,
+    HIGH_CONTRAST_THEME,
     THEMES,
     badge_html,
     empty_state_html,
@@ -52,7 +53,7 @@ def test_get_colors_returns_valid_theme_colors():
 
 
 def test_themes_have_expected_keys():
-    """Verify both Light and Dark themes have all expected color keys."""
+    """Verify registered themes have all expected color keys."""
     required_keys = [
         "background",
         "surface",
@@ -71,9 +72,17 @@ def test_themes_have_expected_keys():
         "neutral_soft",
     ]
     for theme_name, theme in THEMES.items():
-        assert theme_name in ["Light", "Dark"]
+        assert theme_name in ["Light", "Dark", "Accessible High Contrast"]
         for key in required_keys:
             assert key in theme, f"Theme {theme_name} missing key: {key}"
+
+
+def test_high_contrast_theme_colors():
+    assert "Accessible High Contrast" in THEMES
+    assert THEMES["Accessible High Contrast"] is HIGH_CONTRAST_THEME
+    assert HIGH_CONTRAST_THEME["background"] == "#000000"
+    assert HIGH_CONTRAST_THEME["ink"] == "#ffffff"
+    assert HIGH_CONTRAST_THEME["accent"] == "#ffff00"
 
 
 def test_default_colors():

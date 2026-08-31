@@ -1068,6 +1068,7 @@ from app.state_manager import (
     update_global_activity,
 )
 from app.theme import (
+    THEMES,
     back_to_top_html,
     get_chart_colors,
     get_theme_name,
@@ -1660,6 +1661,7 @@ with theme_col:
     if st.button(theme_icon, key="theme_toggle"):
         new_theme = "Light" if current_theme == "Dark" else "Dark"
         set_theme(new_theme)
+        st.session_state["theme_selector"] = new_theme
         st.rerun()
 # Corpus Overview Header & Quick Actions
 render_corpus_header(_INDEX_PATH)
@@ -1748,6 +1750,17 @@ with st.sidebar:
                 options=lang_options,
                 key=SessionKeys.LANG_SELECTOR,
             )
+            if "theme_selector" not in st.session_state:
+                st.session_state["theme_selector"] = get_theme_name()
+            st.selectbox(
+                "🎨 Theme",
+                options=list(THEMES.keys()),
+                key="theme_selector",
+                help="Light, Dark, or Accessible High Contrast (WCAG AAA).",
+            )
+            if st.session_state.get("theme_selector") != get_theme_name():
+                set_theme(st.session_state["theme_selector"])
+                st.rerun()
             selected_lang_name = st.session_state.get(SessionKeys.LANG_SELECTOR, "English")
             _lang_reverse = {v: k for k, v in _SUPPORTED_LANGUAGES.items()}
             lang_code = _lang_reverse.get(selected_lang_name, "en")
