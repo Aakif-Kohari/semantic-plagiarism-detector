@@ -5,10 +5,14 @@ from __future__ import annotations
 import logging
 import os
 import re
+import time
 
 from deep_translator import DeeplTranslator, GoogleTranslator
 
 logger = logging.getLogger(__name__)
+
+# In-memory pipeline cache for MarianMT models: (source_lang, target_lang) -> pipeline
+_MARIAN_PIPELINES: dict[tuple[str, str], object] = {}
 
 # Comprehensive ISO-639-1 (and ISO-639-2) language code database
 ISO_639_LANGUAGES: dict[str, dict[str, str]] = {
@@ -235,6 +239,53 @@ def _batch_sentences(text: str, max_chars: int = 4500) -> list[str]:
     return final_batches
 
 
+def translate_text_marian(
+    text: str,
+    source_lang: str = "es",
+    target_lang: str = "en",
+) -> str:
+    """Translate text offline using local HuggingFace MarianMT (Helsinki-NLP/opus-mt) models.
+
+    Args:
+        text: Input text string to translate.
+        source_lang: Source language ISO code (e.g., 'es', 'fr', 'de').
+        target_lang: Target language ISO code (e.g., 'en').
+
+    Returns:
+        Translated text string, or error marker on model loading failure.
+    """
+    if not text or not str(text).strip():
+        return str(text or "")
+
+    src = (source_lang or "es").strip().lower()
+    tgt = (target_lang or "en").strip().lower()
+    if src == "auto":
+        src = "es"
+
+    cache_key = (src, tgt)
+    pipe = _MARIAN_PIPELINES.get(cache_key)
+
+    if pipe is None:
+        try:
+            from transformers import pipeline
+
+            model_name = f"Helsinki-NLP/opus-mt-{src}-{tgt}"
+            pipe = pipeline("translation", model=model_name)
+            _MARIAN_PIPELINES[cache_key] = pipe
+        except Exception as exc:
+            logger.error("Failed to load MarianMT model for %s->%s: %s", src, tgt, exc)
+            return f"(Translation Error: MarianMT {exc})"
+
+    try:
+        results = pipe(str(text))
+        if isinstance(results, list) and len(results) > 0 and "translation_text" in results[0]:
+            return str(results[0]["translation_text"]).strip()
+        return str(results).strip()
+    except Exception as exc:
+        logger.error("MarianMT translation execution error: %s", exc)
+        return f"(Translation Error: {exc})"
+
+
 def translate_text(
     text: str | None,
     target_lang: str = "en",
@@ -271,6 +322,11 @@ def translate_text(
             translated_batches.append(chunk_trans or "")
         return " ".join(translated_batches).strip()
 
+    # Check for offline translation via HuggingFace MarianMT (#3988)
+    if os.getenv("OFFLINE_TRANSLATION_ENABLED", "").lower() in ("true", "1", "yes"):
+        res = translate_text_marian(original, source_lang=source_lang, target_lang=target_lang)
+        return res
+
     deepl_api_key = os.getenv("DEEPL_API_KEY")
     translated = None
 
@@ -288,13 +344,31 @@ def translate_text(
             translated = None
 
     if translated is None:
-        try:
-            translated = GoogleTranslator(
-                source=source_lang or "auto",
-                target=target_lang,
-            ).translate(original)
-        except Exception as exc:
-            return f"(Translation Error: {exc})"
+        max_retries = 3
+        last_exc = None
+
+        for attempt in range(max_retries):
+            try:
+                translated = GoogleTranslator(
+                    source=source_lang or "auto",
+                    target=target_lang,
+                ).translate(original)
+                break
+            except Exception as exc:
+                last_exc = exc
+                if attempt < max_retries - 1:
+                    sleep_time = 2**attempt  # 1s, 2s, 4s
+                    logger.warning(
+                        "Translation failed on attempt %d/%d (%s). Retrying in %ds...",
+                        attempt + 1,
+                        max_retries,
+                        exc,
+                        sleep_time,
+                    )
+                    time.sleep(sleep_time)
+
+        if last_exc and translated is None:
+            return f"(Translation Error: {last_exc})"
 
     translated = str(translated or "").strip()
     if not translated:
@@ -596,3 +670,4 @@ def get_common_translation_pairs() -> list[tuple[str, str]]:
         ("pt", "en"),
         ("it", "en"),
     ]
+# Helper function verified for issue 3993
