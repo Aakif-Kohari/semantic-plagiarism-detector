@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 
 from deep_translator import DeeplTranslator, GoogleTranslator
 
@@ -203,6 +204,37 @@ LANGUAGE_NAME_MAP: dict[str, str] = {
 }
 
 
+def _batch_sentences(text: str, max_chars: int = 4500) -> list[str]:
+    """Helper to split long text into smaller batches by sentence boundaries."""
+    # Split by punctuation followed by space (basic sentence boundary)
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    
+    batches = []
+    current_batch = ""
+    
+    for sentence in sentences:
+        if len(current_batch) + len(sentence) + 1 <= max_chars:
+            current_batch += (sentence + " ").lstrip()
+        else:
+            if current_batch:
+                batches.append(current_batch.strip())
+            current_batch = sentence + " "
+            
+    if current_batch.strip():
+        batches.append(current_batch.strip())
+        
+    # Safety net: If a single sentence without punctuation is still longer than max_chars
+    final_batches = []
+    for batch in batches:
+        if len(batch) > max_chars:
+            for i in range(0, len(batch), max_chars):
+                final_batches.append(batch[i:i + max_chars])
+        else:
+            final_batches.append(batch)
+
+    return final_batches
+
+
 def translate_text(
     text: str | None,
     target_lang: str = "en",
@@ -226,6 +258,18 @@ def translate_text(
     original = str(text)
     if not original.strip():
         return original
+
+    # Chunking logic for texts exceeding API limits
+    if len(original) > 4500:
+        batches = _batch_sentences(original, max_chars=4500)
+        translated_batches = []
+        for batch in batches:
+            chunk_trans = translate_text(batch, target_lang=target_lang, source_lang=source_lang)
+            if chunk_trans and str(chunk_trans).startswith("(Translation Error:"):
+                # If any chunk fails with a network/translation error, return the error
+                return chunk_trans
+            translated_batches.append(chunk_trans or "")
+        return " ".join(translated_batches).strip()
 
     deepl_api_key = os.getenv("DEEPL_API_KEY")
     translated = None
