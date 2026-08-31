@@ -16,6 +16,8 @@ import sys
 import types
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 # ---------------------------------------------------------------------------
 # Import version_check directly to avoid pulling in the heavy src/__init__.py
 # chain (which transitively requires docx, faiss, etc.)
@@ -102,6 +104,15 @@ class TestIsUpdateAvailable:
 
 class TestFetchLatestGithubVersion:
     """Tests for the async fetch function."""
+
+    @pytest.fixture(autouse=True)
+    def reset_cache(self):
+        """Reset version cache before and after each test."""
+        if hasattr(_vc_mod, "clear_version_cache"):
+            _vc_mod.clear_version_cache()
+        yield
+        if hasattr(_vc_mod, "clear_version_cache"):
+            _vc_mod.clear_version_cache()
 
     def _run(self, coro):
         """Helper: run a coroutine in a fresh event loop."""
