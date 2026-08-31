@@ -11,6 +11,7 @@ from src.core.text_chunking import (
     ChunkString,
     _find_sentence_boundary,
     chunk_by_sentences,
+    chunk_document,
     chunk_documents,
     chunk_text,
     chunk_text_dynamic,
@@ -165,6 +166,17 @@ def test_chunk_overlap_boundaries():
     assert len(chunks) > 1
     overlap = chunks[0].text[-chunk_overlap:]
     assert chunks[1].text.startswith(overlap)
+
+
+def test_chunk_document_overlap_integrity():
+    """Adjacent chunks share the exact specified character overlap (Issue #4005)."""
+    text = "a" * 2000
+    chunks = chunk_document(
+        text, chunk_size=500, chunk_overlap=100, min_words=1
+    )
+    assert len(chunks) > 1
+    for i in range(len(chunks) - 1):
+        assert chunks[i].text[-100:] == chunks[i + 1].text[:100]
 
 
 def test_chunk_by_sentences_cjk_boundaries():
