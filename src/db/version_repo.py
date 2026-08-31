@@ -298,7 +298,7 @@ class DocumentSnapshotRepository:
 
         with self._conn() as conn:
             count_row = conn.execute(
-                f"SELECT COUNT(*) FROM document_snapshots{where}",
+                f"SELECT COUNT(*) FROM document_snapshots{where}",  # nosec
                 params,  # nosec
             ).fetchone()
             total = count_row[0] if count_row else 0
@@ -375,7 +375,7 @@ class DocumentSnapshotRepository:
 
         with self._conn() as conn:
             count_row = conn.execute(
-                f"SELECT COUNT(*) FROM version_lineage{where}",
+                f"SELECT COUNT(*) FROM version_lineage{where}",  # nosec
                 params,  # nosec
             ).fetchone()
             total = count_row[0] if count_row else 0

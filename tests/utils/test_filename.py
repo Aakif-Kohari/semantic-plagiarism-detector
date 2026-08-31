@@ -24,6 +24,11 @@ from src.utils.filename import (
         ("  final report  .PDF", "final_report.pdf"),
         ("name&copy;.txt", "name.txt"),
         ("CON.pdf", "_CON.pdf"),
+        ("NUL.txt", "_NUL.txt"),
+        ("COM1.docx", "_COM1.docx"),
+        ("AUX.txt", "_AUX.txt"),
+        ("PRN.pdf", "_PRN.pdf"),
+        ("nul.tar.gz", "_nul.tar.gz"),
         ("", "document"),
         (None, "document"),
     ],
@@ -328,3 +333,32 @@ def test_format_extension_badge_ignores_double_extension_trick():
     """A double extension like 'report.pdf.exe' must badge by its true
     final extension, not an earlier one hidden inside the name."""
     assert format_extension_badge("report.pdf.exe") == "📁 FILE"
+
+
+def test_sanitize_filename_preserves_unicode():
+    """Verify that sanitize_filename retains non-ASCII alphanumeric characters (e.g. Greek, Cyrillic, accented)."""
+    greek = "αβγ.docx"
+    cyrillic = "исследование.pdf"
+    accented = "résumé.txt"
+    mix = "Greek_α_Cyrillic_б_Accented_é.pdf"
+
+    assert sanitize_filename(greek) == "αβγ.docx"
+    assert sanitize_filename(cyrillic) == "исследование.pdf"
+    assert sanitize_filename(accented) == "résumé.txt"
+    assert sanitize_filename(mix) == "Greek_α_Cyrillic_б_Accented_é.pdf"
+
+
+def test_sanitize_filename_prevents_hidden_dotfiles():
+    """Verify that sanitize_filename never returns a hidden dotfile starting with '.'."""
+    # Test standard dotfiles
+    assert sanitize_filename(".env") == "document.env"
+    assert sanitize_filename(".bashrc") == "document.bashrc"
+    
+    # Test fallback being a dotfile
+    assert sanitize_filename(".env", fallback=".env") == "env.env"
+
+    # Test short max_length forcing empty stem with long extension
+    # Extension has length 8 (.longext)
+    assert sanitize_filename(".longext", max_length=8) == "document.longext"
+
+

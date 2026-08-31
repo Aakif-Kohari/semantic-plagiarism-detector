@@ -97,8 +97,10 @@ __all__ = [
     "EVENT_MISSING_FIELD",
     "EVENT_UNKNOWN_TYPE",
     "EventSchemaError",
+    "SSOConfigurationError",
     "PDFEncryptedError",
 ]
+
 # Authentication Errors
 AUTH_USERNAME_EMPTY = "Username cannot be empty."
 AUTH_PASSWORD_TOO_SHORT = "Password must be at least 6 characters long."
@@ -286,6 +288,17 @@ EVENT_UNKNOWN_TYPE = "Unknown webhook event type: {event_type}"
 
 class EventSchemaError(ValueError):
     """Raised when a webhook event payload violates the schema definition."""
+
+    pass
+
+
+class SSOConfigurationError(ValueError):
+    """Raised when required SSO provider environment configuration (e.g. client ID or secret) is missing.
+
+    Acceptance Criteria (Issue #2583):
+    Subclasses ValueError so existing exception handlers and tests work seamlessly while providing
+    a dedicated exception type for UI layers to catch and display as a graceful Streamlit error.
+    """
 
     pass
 

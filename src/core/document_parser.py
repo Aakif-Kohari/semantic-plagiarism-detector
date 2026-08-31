@@ -20,9 +20,30 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+from __future__ import annotations
+
+# Copyright (c) 2026 Ganesh Kambli
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
 """Document text extraction with OCR fallback for scanned PDF pages."""
 
-from __future__ import annotations
 
 import functools
 import io
@@ -34,6 +55,7 @@ import shutil
 import socket
 import subprocess
 import tempfile
+import time
 import xml.etree.ElementTree
 import zipfile
 from collections import Counter
@@ -274,7 +296,7 @@ def get_stopwords() -> frozenset:
     return ENGLISH_STOPWORDS | load_custom_stopwords()
 
 
-def reject_zero_width_characters(text: str, filename: str | None = None) -> str:
+def reject_zero_width_characters(text: str, filename: Optional[str] = None) -> str:
     """Reject text containing zero-width Unicode characters."""
     if not text:
         return text
@@ -488,14 +510,14 @@ def validate_ocr_language(value: str) -> str:
     if not parts or any(not p for p in parts):
         supported = ", ".join(sorted(SUPPORTED_OCR_LANGUAGES))
         raise ValueError(
-            f"Unsupported OCR language '{value}'. " f"Supported values: {supported}."
+            f"Unsupported OCR language '{value}'. Supported values: {supported}."
         )
 
     for part in parts:
         if part not in SUPPORTED_OCR_LANGUAGES:
             supported = ", ".join(sorted(SUPPORTED_OCR_LANGUAGES))
             raise ValueError(
-                f"Unsupported OCR language '{part}'. " f"Supported values: {supported}."
+                f"Unsupported OCR language '{part}'. Supported values: {supported}."
             )
 
     return "+".join(dict.fromkeys(parts))
@@ -956,7 +978,12 @@ def _ocr_pdf_page(
     except Exception as exc:
         ocr_invocations_total.labels(status="failure").inc()
         tess_err_type = getattr(pytesseract, "TesseractNotFoundError", None)
-        if tess_err_type is not None and isinstance(tess_err_type, type) and issubclass(tess_err_type, BaseException) and isinstance(exc, tess_err_type):
+        if (
+            tess_err_type is not None
+            and isinstance(tess_err_type, type)
+            and issubclass(tess_err_type, BaseException)
+            and isinstance(exc, tess_err_type)
+        ):
             from src.errors import OCR_TESSERACT_NOT_FOUND
 
             raise OCRDependencyError(OCR_TESSERACT_NOT_FOUND) from exc
@@ -1889,7 +1916,12 @@ def extract_text_from_image(
     except Exception as exc:
         ocr_invocations_total.labels(status="failure").inc()
         tess_err_type = getattr(pytesseract, "TesseractNotFoundError", None)
-        if tess_err_type is not None and isinstance(tess_err_type, type) and issubclass(tess_err_type, BaseException) and isinstance(exc, tess_err_type):
+        if (
+            tess_err_type is not None
+            and isinstance(tess_err_type, type)
+            and issubclass(tess_err_type, BaseException)
+            and isinstance(exc, tess_err_type)
+        ):
             from src.errors import OCR_TESSERACT_NOT_FOUND
 
             raise OCRDependencyError(OCR_TESSERACT_NOT_FOUND) from exc
@@ -2112,6 +2144,30 @@ class DummyMetric10(AbstractCircuitBreakerMetric):
     pass
 
 
+
+import abc
+import concurrent.futures
+import threading
+
+class ExtractionTimeoutError(TimeoutError):
+    pass
+
+class EnterpriseTimeoutCircuitBreaker:
+    def __init__(self, timeout_seconds: float = 10.0):
+        self.timeout_seconds = timeout_seconds
+
+    def execute(self, func, *args, **kwargs):
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        future = executor.submit(func, *args, **kwargs)
+        try:
+            return future.result(timeout=self.timeout_seconds)
+        except concurrent.futures.TimeoutError as e:
+            future.cancel()
+            executor.shutdown(wait=False)
+            raise ExtractionTimeoutError(f"Extraction aborted after {self.timeout_seconds}s limit.") from e
+        finally:
+            executor.shutdown(wait=False)
+
 def _extract_text_internal(
     file: PDFInput,
     filename: str,
@@ -2119,6 +2175,7 @@ def _extract_text_internal(
     ocr_dpi: int,
     clean_whitespace: bool,
     mask_named_entities: bool,
+    to_lowercase: bool = False,
 ) -> str:
     """Internal synchronous extraction logic."""
     file_bytes = _read_pdf_bytes(file)
@@ -2147,8 +2204,13 @@ def _extract_text_internal(
     else:
         raw = extract_text_from_txt(file)
 
+    if isinstance(raw, ParsedDocxText):
+        raw = raw.text
+
     raw = strip_bibliography(raw)
     raw = normalize_unicode_spaces(raw)
+    raw = normalize_extended_punctuation(raw)
+    raw = normalize_unicode_nfc(raw)
     raw = reject_zero_width_characters(raw, filename=filename)
 
     if clean_whitespace and raw:
@@ -2159,7 +2221,8 @@ def _extract_text_internal(
     if mask_named_entities and raw:
         raw = mask_named_entities_in_text(raw)
 
-    raw = normalize_extended_punctuation(raw)
+    if to_lowercase and raw:
+        raw = raw.lower()
 
     if not raw or not raw.strip():
         logger.warning(
@@ -2183,6 +2246,7 @@ def extract_text(
     ocr_dpi: int = DEFAULT_OCR_DPI,
     clean_whitespace: bool = True,
     mask_named_entities: bool = False,
+    to_lowercase: bool = False,
     timeout_seconds: float = 10.0,
 ) -> str:
     """Route extraction according to a filename extension with an enforced timeout."""
@@ -2191,6 +2255,8 @@ def extract_text(
         dpi=ocr_dpi,
     )
 
+    extension = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    start_time = time.perf_counter()
     breaker = EnterpriseTimeoutCircuitBreaker(timeout_seconds=timeout_seconds)
     try:
         raw = breaker.execute(
@@ -2201,11 +2267,20 @@ def extract_text(
             ocr_dpi,
             clean_whitespace,
             mask_named_entities,
+            to_lowercase,
         )
     except ExtractionTimeoutError as e:
         logger.error(f"[document_parser] Extraction timed out for {filename}: {e}")
         # Acceptance Criteria: return safe empty fallback or raise TimeoutError
         raise TimeoutError(f"Extraction of {filename} exceeded time limit.") from e
+    finally:
+        elapsed = time.perf_counter() - start_time
+        try:
+            from src.core.metrics import spd_doc_parse_seconds
+
+            spd_doc_parse_seconds.labels(extension=extension).observe(elapsed)
+        except Exception:
+            pass
 
     return raw
 
@@ -2379,3 +2454,51 @@ def _extract_pptx_text(file_obj) -> str:
         return "\n".join(text_runs)
     except Exception as e:
         return f"[Error parsing PowerPoint: {e}]"
+
+
+import io
+import zipfile
+
+
+def _validate_ooxml_archive(file_bytes: bytes) -> bool:
+    """
+    Validates that an OOXML archive (ZIP-based) only uses standard compression
+    methods (ZIP_STORED or ZIP_DEFLATED) to prevent malformed archive exploits.
+    """
+    try:
+        with zipfile.ZipFile(io.BytesIO(file_bytes)) as zf:
+            for member in zf.infolist():
+                # Accept only ZIP_STORED (0) and ZIP_DEFLATED (8)
+                if member.compress_type not in (
+                    zipfile.ZIP_STORED,
+                    zipfile.ZIP_DEFLATED,
+                ):
+                    return False
+        return True
+    except (zipfile.BadZipFile, Exception):
+        return False
+def extract_text(
+    file: PDFInput,
+    filename: str,
+    *,
+    ocr_language: str = DEFAULT_OCR_LANGUAGE,
+    ocr_dpi: int = DEFAULT_OCR_DPI,
+    clean_whitespace: bool = True,
+    mask_named_entities: bool = False,
+    timeout_seconds: float = 10.0,
+) -> str:
+    breaker = EnterpriseTimeoutCircuitBreaker(timeout_seconds=timeout_seconds)
+    try:
+        raw = breaker.execute(
+            _extract_text_internal,
+            file,
+            filename,
+            ocr_language=ocr_language,
+            ocr_dpi=ocr_dpi,
+            clean_whitespace=clean_whitespace,
+            mask_named_entities=mask_named_entities
+        )
+    except ExtractionTimeoutError as e:
+        logger.error(f"[document_parser] Extraction timed out for {filename}: {e}")
+        raise TimeoutError(f"Extraction of {filename} exceeded time limit.") from e
+    return raw

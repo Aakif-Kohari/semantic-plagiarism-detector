@@ -34,7 +34,7 @@ import os
 import sqlite3
 import threading
 from contextlib import contextmanager
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import numpy as np
@@ -93,6 +93,10 @@ class CorpusRepository(BaseRepository):
     def get_all_documents(self, include_deleted: bool = False) -> list:
         """Return all indexed documents, optionally including soft-deleted ones."""
         return get_all_documents(include_deleted=include_deleted)
+
+    def get_corpus_stats(self) -> dict:
+        """Return high-level statistics about the stored corpus."""
+        return get_corpus_stats()
 
 
 corpus_repo = CorpusRepository(_DB_PATH)
@@ -583,6 +587,39 @@ def get_all_documents(include_deleted: bool = False) -> list:
             )
             for r in rows
         ]
+
+
+def get_corpus_stats() -> dict[str, Any]:
+    """Return high-level statistics about the stored corpus."""
+    with _connect() as conn:
+        doc_row = conn.execute(
+            "SELECT COUNT(1) FROM documents WHERE is_deleted IS NULL OR is_deleted = 0"
+        ).fetchone()
+        total_documents = doc_row[0] if doc_row else 0
+
+        chunk_row = conn.execute("SELECT COUNT(1) FROM chunks").fetchone()
+        total_chunks = chunk_row[0] if chunk_row else 0
+
+        emb_row = conn.execute(
+            "SELECT COUNT(1) FROM chunks WHERE embedding IS NOT NULL"
+        ).fetchone()
+        total_embeddings = emb_row[0] if emb_row else 0
+
+        latest_row = conn.execute(
+            "SELECT MAX(upload_date) FROM documents WHERE is_deleted IS NULL OR is_deleted = 0"
+        ).fetchone()
+        last_updated = (
+            latest_row[0]
+            if (latest_row and latest_row[0])
+            else datetime.now(timezone.utc).isoformat()
+        )
+
+        return {
+            "total_documents": total_documents,
+            "total_chunks": total_chunks,
+            "total_embeddings": total_embeddings,
+            "last_updated": last_updated,
+        }
 
 
 @with_sqlite_retry

@@ -69,7 +69,7 @@ class ReportSection:
     charts: list[dict[str, Any]] = field(default_factory=list)
     severity: str = "info"
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> Dict[str, Any]:
         return {
             "title": self.title,
             "content": self.content,
@@ -151,7 +151,7 @@ class ReportGenerator:
         """
         report_id = hashlib.md5(
             f"{datetime.now().isoformat()}_{report_type.value}".encode()
-        ).hexdigest()[:12]  # nosec
+        ).hexdigest()[:12]
         timestamp = datetime.now().isoformat()
 
         summary = self._generate_summary(detection_results)
@@ -211,15 +211,15 @@ class ReportGenerator:
             "average_similarity": round(avg_score, 4),
             "max_similarity": round(max_score, 4),
             "severity_distribution": severities,
-            "plagiarism_rate": (
-                round(len(matches) / total_pairs * 100, 2) if total_pairs > 0 else 0
-            ),
+            "plagiarism_rate": round(len(matches) / total_pairs * 100, 2)
+            if total_pairs > 0
+            else 0,
             "high_severity_count": severities["critical"] + severities["high"],
         }
 
     def _generate_sections(
-        self, results: dict[str, Any], report_type: ReportType
-    ) -> list[ReportSection]:
+        self, results: Dict[str, Any], report_type: ReportType
+    ) -> List[ReportSection]:
         """Generate report sections based on type."""
         sections = []
         sections.append(self._create_overview_section(results))
@@ -238,18 +238,18 @@ class ReportGenerator:
         content = f"""
 # Report Overview
 
-**Total Documents Analyzed:** {summary['total_documents']}
-**Total Document Pairs:** {summary['total_pairs']}
-**Flagged Matches:** {summary['total_matches']}
-**Average Similarity:** {summary['average_similarity']:.1%}
-**Maximum Similarity:** {summary['max_similarity']:.1%}
-**Plagiarism Rate:** {summary['plagiarism_rate']:.1f}%
+**Total Documents Analyzed:** {summary["total_documents"]}
+**Total Document Pairs:** {summary["total_pairs"]}
+**Flagged Matches:** {summary["total_matches"]}
+**Average Similarity:** {summary["average_similarity"]:.1%}
+**Maximum Similarity:** {summary["max_similarity"]:.1%}
+**Plagiarism Rate:** {summary["plagiarism_rate"]:.1f}%
 
 ## Severity Breakdown
-- 🔴 **Critical (≥90%):** {summary['severity_distribution']['critical']}
-- 🟠 **High (75-89%):** {summary['severity_distribution']['high']}
-- 🟡 **Moderate (50-74%):** {summary['severity_distribution']['moderate']}
-- 🟢 **Low (30-49%):** {summary['severity_distribution']['low']}
+- 🔴 **Critical (≥90%):** {summary["severity_distribution"]["critical"]}
+- 🟠 **High (75-89%):** {summary["severity_distribution"]["high"]}
+- 🟡 **Moderate (50-74%):** {summary["severity_distribution"]["moderate"]}
+- 🟢 **Low (30-49%):** {summary["severity_distribution"]["low"]}
 """
         return ReportSection(
             title="Overview", content=content, data=summary, severity="info"
@@ -327,7 +327,7 @@ class ReportGenerator:
         )
 
     def _create_document_breakdown_section(
-        self, results: dict[str, Any]
+        self, results: Dict[str, Any]
     ) -> ReportSection:
         """Create document breakdown section."""
         matches = results.get("matches", results.get("flagged", []))
@@ -362,7 +362,7 @@ class ReportGenerator:
         )
 
     def _create_executive_insights_section(
-        self, results: dict[str, Any]
+        self, results: Dict[str, Any]
     ) -> ReportSection:
         """Create executive insights section."""
         summary = self._generate_summary(results)

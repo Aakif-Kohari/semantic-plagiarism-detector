@@ -249,7 +249,7 @@ class BatchHistory:
         min_documents: Optional[int] = None,
         max_documents: Optional[int] = None,
         limit: int = 50,
-    ) -> list[HistoryRecord]:
+    ) -> List[HistoryRecord]:
         """
         Search jobs with filters.
 

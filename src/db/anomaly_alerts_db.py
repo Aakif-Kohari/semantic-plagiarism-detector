@@ -226,7 +226,7 @@ class AnomalyAlertRepository:
 
         with self._conn() as conn:
             total = conn.execute(
-                f"SELECT COUNT(*) FROM anomaly_scans{where}",
+                f"SELECT COUNT(*) FROM anomaly_scans{where}",  # nosec
                 params,  # nosec
             ).fetchone()[0]
 
@@ -339,7 +339,7 @@ class AnomalyAlertRepository:
 
         with self._conn() as conn:
             total = conn.execute(
-                f"SELECT COUNT(*) FROM anomaly_alerts{where}",
+                f"SELECT COUNT(*) FROM anomaly_alerts{where}",  # nosec
                 params,  # nosec
             ).fetchone()[0]
 

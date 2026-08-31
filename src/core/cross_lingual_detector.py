@@ -141,9 +141,9 @@ class LanguageMatch:
 class CrossLingualResult:
     """Result of cross-lingual plagiarism detection."""
 
-    documents: list[dict[str, Any]] = field(default_factory=list)
-    matches: list[LanguageMatch] = field(default_factory=list)
-    language_distribution: dict[str, int] = field(default_factory=dict)
+    documents: List[Dict[str, Any]] = field(default_factory=list)
+    matches: List[LanguageMatch] = field(default_factory=list)
+    language_distribution: Dict[str, int] = field(default_factory=dict)
     total_comparisons: int = 0
     processing_time: float = 0.0
     summary: dict[str, Any] = field(default_factory=dict)
@@ -176,7 +176,7 @@ class CrossLingualResult:
 class CrossLingualConfig:
     """Configuration for cross-lingual detection."""
 
-    enabled_languages: list[str] = field(
+    enabled_languages: List[str] = field(
         default_factory=lambda: ["en", "es", "fr", "de"]
     )
     similarity_threshold: float = 0.65
@@ -214,7 +214,7 @@ class TranslationCache:
     def set(
         self, text: str, source_lang: str, target_lang: str, translation: str
     ) -> None:
-        key = f"{source_lang}:{target_lang}:{hashlib.md5(text.encode('utf-8')).hexdigest()}"  # nosec
+        key = f"{source_lang}:{target_lang}:{hashlib.md5(text.encode('utf-8')).hexdigest()}"
         if len(self._cache) >= self.max_size:
             oldest_key = min(self._timestamps, key=self._timestamps.get)
             del self._cache[oldest_key]
@@ -227,7 +227,9 @@ class CrossLingualDetector:
     """Detects plagiarism across documents in different languages."""
 
     def __init__(
-        self, config: Optional[CrossLingualConfig | str] = None, use_cache: bool = True
+        self,
+        config: Optional[Union[CrossLingualConfig, str]] = None,
+        use_cache: bool = True,
     ):
         if isinstance(config, str):
             self.config = CrossLingualConfig()
@@ -289,7 +291,7 @@ class CrossLingualDetector:
         return embedding
 
     def compare_across_languages(
-        self, source_embeddings: list[np.ndarray], target_embeddings: list[np.ndarray]
+        self, source_embeddings: List[np.ndarray], target_embeddings: List[np.ndarray]
     ) -> np.ndarray:
         if not source_embeddings or not target_embeddings:
             return np.array([])
@@ -305,7 +307,7 @@ class CrossLingualDetector:
 
     def detect_cross_lingual_plagiarism(
         self,
-        documents: dict[str, tuple[str, list[str]]],
+        documents: Dict[str, Tuple[str, List[str]]],
         threshold: Optional[float] = None,
     ) -> CrossLingualResult:
         start_time = datetime.now()
@@ -314,7 +316,7 @@ class CrossLingualDetector:
         doc_chunks = {name: chunks for name, (_, chunks) in documents.items()}
         embeddings = {
             doc_name: [
-                self.embed_text(chunk.text if hasattr(chunk, "text") else chunk)
+                self.embed_text(chunk)
                 for chunk in chunks[: self.config.max_chunks_per_doc]
             ]
             for doc_name, chunks in doc_chunks.items()
@@ -355,14 +357,14 @@ class CrossLingualDetector:
                                 LanguageMatch(
                                     source_doc=name_a,
                                     source_lang=lang_a,
-                                    source_chunk=(
-                                        chunks_a[ci] if ci < len(chunks_a) else ""
-                                    ),
+                                    source_chunk=chunks_a[ci]
+                                    if ci < len(chunks_a)
+                                    else "",
                                     target_doc=name_b,
                                     target_lang=lang_b,
-                                    target_chunk=(
-                                        chunks_b[cj] if cj < len(chunks_b) else ""
-                                    ),
+                                    target_chunk=chunks_b[cj]
+                                    if cj < len(chunks_b)
+                                    else "",
                                     similarity=score,
                                     method="multilingual_embedding",
                                     translation_used=is_cross_lingual

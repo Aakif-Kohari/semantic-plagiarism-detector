@@ -5,13 +5,15 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import html
 import json
-import refrom typing import Any, Callable, Iterable, Mapping, Sequence
+import re
+from typing import Any, Callable, Iterable, Mapping, Sequence
 
 import pandas as pd
 import streamlit as st
 
 from app.theme import badge_html, tier_from_severity_label
 from src.core.config import normalize_severity_label, severity_from_score, severity_rank
+from src.core.stopwords import get_stopwords
 from src.db.incidents import _normalise_pair, add_false_positive, get_false_positives
 from src.i18n.translator import get_text
 from src.utils.pagination import PaginationPage, paginate_items
@@ -23,6 +25,8 @@ except ImportError:
         from fuzzywuzzy import fuzz  # type: ignore[import-untyped,reportMissingImports]
     except ImportError:
         fuzz = None
+
+
 FUZZY_THRESHOLD = 75
 MAX_SEARCH_QUERY_LENGTH = 200
 WARNING_SHORT_DOCUMENT = (
@@ -33,6 +37,7 @@ WARNING_BINARY_CHARACTERS = (
     "characters; the file may be binary or corrupted rather than text."
 )
 CONTROL_CHARACTER_RATIO_THRESHOLD = 0.01
+
 _SORT_KEYS = {
     "warn_sort_similarity": "similarity",
     "warn_sort_doc_a": "doc_a",
@@ -60,6 +65,7 @@ class DocumentWarning:
     warning_type: str = ""
     details: dict[str, Any] = field(default_factory=dict)
     occurrence_count: int = 1
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "doc_a": self.doc_a,
@@ -71,6 +77,7 @@ class DocumentWarning:
             "occurrence_count": self.occurrence_count,
             **self.details,
         }
+
 
 class WarningList:
     """Collection manager for document warnings supporting filtering by severity."""
@@ -108,6 +115,7 @@ class WarningList:
                 return
 
         self.warnings.append(dw)
+
     def filter_by_severity(self, severity: str) -> list[DocumentWarning]:
         """Filter warnings by severity level (e.g. 'High', 'Medium', 'Low')."""
         target = str(severity or "").strip().casefold()
@@ -184,7 +192,8 @@ def export_warnings_to_json(
     return json.dumps(records, indent=2)
 
 
-def _normalise_warning(    warning: Mapping[str, Any],
+def _normalise_warning(
+    warning: Mapping[str, Any],
 ) -> dict[str, Any]:
     try:
         similarity = float(warning.get("similarity", 0.0))
@@ -196,6 +205,31 @@ def _normalise_warning(    warning: Mapping[str, Any],
         severity = normalize_severity_label(raw_severity)
     except ValueError:
         severity = severity_from_score(similarity)
+
+    # Compute document-level stop-word percentages using chunked docs
+    def _doc_stopword_pct(doc_id: str) -> float:
+        try:
+            if (
+                "analysis_results" not in st.session_state
+                or st.session_state.analysis_results is None
+            ):
+                return 0.0
+            chunked_docs = _chunked_docs_from_results(st.session_state.analysis_results)
+            chunks = chunked_docs.get(doc_id, [])
+        except Exception:
+            return 0.0
+
+        text = " ".join([c for c in chunks if c])
+        tokens = re.findall(r"\w+", text.lower())
+        if not tokens:
+            return 0.0
+        stopset = get_stopwords()
+        stop_count = sum(1 for t in tokens if t in stopset)
+        return float(stop_count) / float(len(tokens))
+
+    stop_pct_a = _doc_stopword_pct(str(warning.get("doc_a", "")))
+    stop_pct_b = _doc_stopword_pct(str(warning.get("doc_b", "")))
+    high_stop = (stop_pct_a > 0.7) or (stop_pct_b > 0.7)
 
     existing_warnings = warning.get("warnings")
     if isinstance(existing_warnings, (list, tuple, set)):
@@ -230,6 +264,7 @@ def _normalise_warning(    warning: Mapping[str, Any],
                     break
             except (TypeError, ValueError):
                 pass
+
     res = {
         **dict(warning),
         "doc_a": str(warning.get("doc_a", "")).strip(),
@@ -237,6 +272,10 @@ def _normalise_warning(    warning: Mapping[str, Any],
         "similarity": similarity,
         "severity": severity,
         "severity_rank": severity_rank(severity),
+        "stopword_pct_a": stop_pct_a,
+        "stopword_pct_b": stop_pct_b,
+        "high_stopword_density": high_stop,
+        "warning_codes": (["WARNING_HIGH_STOPWORD_DENSITY"] if high_stop else []),
     }
 
     if warnings_list or "warnings" in warning:
@@ -581,6 +620,63 @@ def _has_exact_match(doc_a: str, doc_b: str) -> bool:
     norm_b = {"".join((c.text if hasattr(c, "text") else c).split()) for c in chunks_b if (c.text if hasattr(c, "text") else c).strip()}
 
     return not norm_a.isdisjoint(norm_b)
+
+
+# When a large proportion of the matching text consists of stop-words
+# the similarity score can be inflated by function words rather than
+# meaningful shared content. Trigger a visible warning when density is
+# above this threshold.
+STOPWORD_DENSITY_WARNING_THRESHOLD = 0.6
+
+
+def _stopword_density_for_flag(flag: Mapping[str, Any]) -> float:
+    """Estimate stop-word density for exact matching chunks between two docs.
+
+    Returns a float 0..1 representing the fraction of tokens in the
+    matching text that are stop-words (using the global stopword manager).
+    """
+    if (
+        "analysis_results" not in st.session_state
+        or st.session_state.analysis_results is None
+    ):
+        return 0.0
+
+    chunked_docs = _chunked_docs_from_results(st.session_state.analysis_results)
+    chunks_a = chunked_docs.get(flag.get("doc_a", ""), [])
+    chunks_b = chunked_docs.get(flag.get("doc_b", ""), [])
+
+    # Build mapping of normalized chunk -> original text for both docs
+    def _norm_map(chunks: Sequence[str]) -> dict[str, str]:
+        m: dict[str, str] = {}
+        for c in chunks:
+            if not c or not c.strip():
+                continue
+            key = "".join(c.split())
+            if key:
+                # keep the first occurrence
+                m.setdefault(key, c)
+        return m
+
+    map_a = _norm_map(chunks_a)
+    map_b = _norm_map(chunks_b)
+    common_keys = set(map_a.keys()).intersection(map_b.keys())
+    if not common_keys:
+        return 0.0
+
+    stopset = get_stopwords()
+    total_tokens = 0
+    stop_tokens = 0
+    for k in common_keys:
+        text = map_a.get(k, "")
+        tokens = re.findall(r"\w+", text.lower())
+        if not tokens:
+            continue
+        total_tokens += len(tokens)
+        stop_tokens += sum(1 for t in tokens if t in stopset)
+
+    if total_tokens == 0:
+        return 0.0
+    return float(stop_tokens) / float(total_tokens)
 
 
 def render_compact_warning_row(flag: Mapping[str, Any]) -> None:
@@ -1030,6 +1126,30 @@ def render_warning_controls(
                                         ai_b=ai_b,
                                     )
                                 )
+                            # Document-level stop-word density warning
+                            if flag.get("high_stopword_density", False):
+                                pct_a = flag.get("stopword_pct_a", 0.0) * 100
+                                pct_b = flag.get("stopword_pct_b", 0.0) * 100
+                                parts = []
+                                if pct_a > 70:
+                                    parts.append(f"{flag['doc_a']}: {pct_a:.0f}%")
+                                if pct_b > 70:
+                                    parts.append(f"{flag['doc_b']}: {pct_b:.0f}%")
+                                if parts:
+                                    st.warning(
+                                        f"WARNING_HIGH_STOPWORD_DENSITY — stop-words > 70% in {', '.join(parts)}. "
+                                        "Document-level similarity may be unreliable."
+                                    )
+                        # Warn when matched content is mostly stop-words
+                        try:
+                            density = _stopword_density_for_flag(flag)
+                        except Exception:
+                            density = 0.0
+                        if density >= STOPWORD_DENSITY_WARNING_THRESHOLD:
+                            st.warning(
+                                f"High stop-word density in matching text ({density * 100:.0f}%). "
+                                "Similarity may be inflated by common function words."
+                            )
                         if flag.get("warnings"):
                             for w_msg in flag["warnings"]:
                                 st.caption(f"⚠️ {w_msg}")
