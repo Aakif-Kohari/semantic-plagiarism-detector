@@ -393,7 +393,8 @@ def sync_flagged_incidents(
                     ON CONFLICT(incident_id) DO UPDATE SET
                         similarity_score = excluded.similarity_score,
                         severity_rank = excluded.severity_rank,
-                        last_seen = excluded.last_seen
+                        last_seen = excluded.last_seen,
+                        times_flagged = plagiarism_incidents.times_flagged + 1
                     """,
                     bulk_records,
                 )
@@ -408,7 +409,7 @@ def sync_flagged_incidents(
                 SELECT pi.incident_id, pi.document_a, pi.document_b,
                        pi.similarity_score, pi.severity_rank,
                        pi.review_status, pi.date_flagged, pi.last_seen,
-                       pi.threshold_at_time_of_flag
+                       pi.threshold_at_time_of_flag, pi.times_flagged
                 FROM plagiarism_incidents pi
                 LEFT JOIN documents da ON pi.document_a = da.filename
                 LEFT JOIN documents db ON pi.document_b = db.filename
@@ -429,6 +430,7 @@ def sync_flagged_incidents(
                     date_flagged=row["date_flagged"],
                     last_seen=row["last_seen"],
                     threshold_at_time_of_flag=row["threshold_at_time_of_flag"],
+                    times_flagged=row["times_flagged"]
                 )
                 for row in rows
             ]

@@ -6,7 +6,7 @@ import sqlite3
 
 from .common import column_exists, run_migrations, table_exists
 
-CORPUS_SCHEMA_VERSION = 18
+CORPUS_SCHEMA_VERSION = 19
 
 
 def migration_001_create_base_schema(
@@ -415,6 +415,23 @@ def migration_018_add_false_positives_audit_columns(
         )
 
 
+def migration_019_add_times_flagged(
+    connection: sqlite3.Connection,
+) -> None:
+    """Track how many times a recurring document pair has been re-flagged.
+
+    Issue #3421: when a document pair is flagged again in a later scan, the
+    existing incident row is updated in place (see the ON CONFLICT clause in
+    sync_flagged_incidents) rather than creating a duplicate row. This adds
+    the counter that tracks how many times that has happened.
+    """
+    if not column_exists(connection, "plagiarism_incidents", "times_flagged"):
+        connection.execute(
+            "ALTER TABLE plagiarism_incidents "
+            "ADD COLUMN times_flagged INTEGER NOT NULL DEFAULT 1"
+        )
+
+
 CORPUS_MIGRATIONS = {
     1: migration_001_create_base_schema,
     2: migration_002_add_document_metadata,
@@ -434,6 +451,7 @@ CORPUS_MIGRATIONS = {
     16: migration_016_add_scheduler_runs,
     17: migration_017_add_incident_date_flagged_index,
     18: migration_018_add_false_positives_audit_columns,
+    19: migration_019_add_times_flagged,
 }
 
 
@@ -549,6 +567,10 @@ def down_018_add_false_positives_audit_columns(
     _drop_column_if_exists(connection, "false_positives", "dismissal_reason")
 
 
+def down_019_add_times_flagged(connection: sqlite3.Connection) -> None:
+    _drop_column_if_exists(connection, "plagiarism_incidents", "times_flagged")
+
+
 CORPUS_DOWN_MIGRATIONS = {
     1: down_001_create_base_schema,
     2: down_002_add_document_metadata,
@@ -568,6 +590,7 @@ CORPUS_DOWN_MIGRATIONS = {
     16: down_016_add_scheduler_runs,
     17: down_017_add_incident_date_flagged_index,
     18: down_018_add_false_positives_audit_columns,
+    19: down_019_add_times_flagged,
 }
 
 
