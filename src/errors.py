@@ -97,6 +97,7 @@ __all__ = [
     "EVENT_MISSING_FIELD",
     "EVENT_UNKNOWN_TYPE",
     "EventSchemaError",
+    "PDFEncryptedError",
 ]
 # Authentication Errors
 AUTH_USERNAME_EMPTY = "Username cannot be empty."
@@ -287,3 +288,17 @@ class EventSchemaError(ValueError):
     """Raised when a webhook event payload violates the schema definition."""
 
     pass
+
+
+class PDFEncryptedError(ValueError):
+    """Raised when a PDF file is encrypted and password authentication fails or is not provided."""
+
+    def __init__(
+        self,
+        message: str = "PDF is encrypted and password was not provided or invalid.",
+    ):
+        self.message = message
+        super().__init__(self.message)
+
+    def __str__(self) -> str:
+        return self.message
