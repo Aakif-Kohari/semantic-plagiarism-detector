@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `show_notification()` toast helper with success/warning/error/info icons (`app/components/notifications.py`).
 
 ### Fixed
+- Split the two `from` imports that had been welded onto one line in `src/core/processing.py`, un-interleaved `PipelineResult`'s docstring from `is_incremental_update()` and moved the method below the annotated fields where a `NamedTuple` requires it, and separated `run_full_pipeline`'s return annotation from its docstring; the module did not parse, so neither the synchronous upload path nor the background worker could import the pipeline (`src/core/processing.py`).
 - Defined the module-level `logger` that `translate_text_batch()` referenced but never imported; the batch error handler raised `NameError` instead of logging, which left the per-text fallback loop unreachable (`src/core/translator.py`).
 - Handled empty file validation cleanly in `is_executable_upload` by explicitly returning `False` on empty byte payloads (`src/security/mime_validator.py`).
 - Handled Windows reserved device names with extensions (e.g. `NUL.txt`, `CON.pdf`, `COM1.docx`) in `sanitize_filename` by checking base stems against `_WINDOWS_RESERVED_NAMES` (`src/utils/filename.py`).
