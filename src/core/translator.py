@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import logging
+import os
 
-from deep_translator import GoogleTranslator
+from deep_translator import DeeplTranslator, GoogleTranslator
 
 logger = logging.getLogger(__name__)
 
@@ -226,18 +227,30 @@ def translate_text(
     if not original.strip():
         return original
 
-    # Reject unsupported target language codes before reaching the translation
-    # model, so invalid codes surface a clear ValueError instead of an uncaught
-    # provider/model exception.
-    validate_target_language_code(target_lang)
+    deepl_api_key = os.getenv("DEEPL_API_KEY")
+    translated = None
 
-    try:
-        translated = GoogleTranslator(
-            source=source_lang or "auto",
-            target=target_lang,
-        ).translate(original)
-    except Exception as exc:
-        return f"(Translation Error: {exc})"
+    if deepl_api_key:
+        try:
+            # DeeplTranslator uses api_key parameter
+            deepl_source = "auto" if not source_lang or source_lang == "auto" else source_lang
+            translated = DeeplTranslator(
+                api_key=deepl_api_key,
+                source=deepl_source,
+                target=target_lang,
+            ).translate(original)
+        except Exception as exc:
+            logger.warning("DeepL translation failed, falling back to GoogleTranslator: %s", exc)
+            translated = None
+
+    if translated is None:
+        try:
+            translated = GoogleTranslator(
+                source=source_lang or "auto",
+                target=target_lang,
+            ).translate(original)
+        except Exception as exc:
+            return f"(Translation Error: {exc})"
 
     translated = str(translated or "").strip()
     if not translated:
@@ -292,6 +305,19 @@ def translate_text_batch(
         return []
 
     validate_target_language_code(target_lang)
+
+    deepl_api_key = os.getenv("DEEPL_API_KEY")
+    if deepl_api_key:
+        try:
+            deepl_source = "auto" if not source_lang or source_lang == "auto" else source_lang
+            translated = DeeplTranslator(
+                api_key=deepl_api_key,
+                source=deepl_source,
+                target=target_lang,
+            ).translate_batch(texts)
+            return [str(t or "").strip() for t in translated]
+        except Exception as exc:
+            logger.warning("DeepL batch translation failed, falling back to GoogleTranslator: %s", exc)
 
     try:
         translated = GoogleTranslator(

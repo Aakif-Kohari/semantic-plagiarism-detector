@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import patch
 
-from src.core.translator import get_language_display_name, translate_text
+from src.core.translator import get_language_display_name, translate_text, validate_target_language_code
 
 
 def test_none_is_preserved():
@@ -55,4 +55,17 @@ def test_translate_text_network_exception(mock_translate):
     # Verify it didn't crash and returned the expected error string
     assert result.startswith("(Translation Error:")
     assert "Connection timed out" in result
-    
+
+
+def test_validate_target_language_code_valid():
+    valid_codes = ["en", "es", "fr"]
+    for code in valid_codes:
+        validate_target_language_code(code)
+
+
+def test_validate_target_language_code_invalid():
+    invalid_codes = ["invalid", "", None]
+    for code in invalid_codes:
+        with pytest.raises(ValueError):
+            validate_target_language_code(code)
+            
