@@ -171,6 +171,8 @@ def build_index(
         chunks = chunked_docs.get(doc_name, [])
         if emb.ndim != 2 or emb.shape[0] == 0:
             continue
+        if emb.shape[1] != dim:
+            raise ValueError(f"Embedding dimension mismatch: {emb.shape[1]} != {dim}")
         for i, (vec, chunk) in enumerate(zip(emb, chunks)):
             all_vectors.append(vec.astype("float32"))
             if isinstance(chunk, ChunkString):
@@ -519,6 +521,10 @@ def add_to_index(
         chunks = chunked_docs.get(doc_name, [])
         if emb.ndim != 2 or emb.shape[0] == 0:
             continue
+        if emb.shape[1] != index.d:
+            raise ValueError(
+                f"Embedding dimension mismatch: {emb.shape[1]} != {index.d}"
+            )
         for i, (vec, chunk) in enumerate(zip(emb, chunks)):
             new_vectors.append(vec.astype("float32"))
             if isinstance(chunk, ChunkString):
@@ -804,6 +810,9 @@ def build_index_from_matrix(
     dim = 384
     if matrix.size == 0 or matrix.shape[0] == 0:
         return faiss.IndexFlatIP(dim)
+
+    if matrix.shape[1] != dim:
+        raise ValueError(f"Embedding dimension mismatch: {matrix.shape[1]} != {dim}")
 
     n_vectors = matrix.shape[0]
     mat = matrix.astype("float32")
