@@ -6,7 +6,7 @@ import sqlite3
 
 from .common import column_exists, run_migrations, table_exists
 
-CORPUS_SCHEMA_VERSION = 19
+CORPUS_SCHEMA_VERSION = 20
 
 
 def migration_001_create_base_schema(
@@ -431,7 +431,46 @@ def migration_019_add_times_flagged(
             "ADD COLUMN times_flagged INTEGER NOT NULL DEFAULT 1"
         )
 
+def migration_020_add_embedding_metadata(
+    connection: sqlite3.Connection,
+) -> None:
+    """Add explicit model/schema metadata to persisted embeddings."""
+    columns = (
+        ("model_identifier", "TEXT"),
+        ("model_version", "TEXT"),
+        ("embedding_dimension", "INTEGER"),
+        ("normalization_strategy", "TEXT"),
+        ("embedding_generated_at", "TEXT"),
+        ("vector_schema_version", "INTEGER"),
+    )
 
+    for column_name, column_type in columns:
+        if not column_exists(connection, "chunks", column_name):
+            connection.execute(
+                f'ALTER TABLE chunks ADD COLUMN "{column_name}" {column_type}'
+            )
+
+    deleted_columns = (
+        ("model_identifier", "TEXT"),
+        ("model_version", "TEXT"),
+        ("embedding_dimension", "INTEGER"),
+        ("normalization_strategy", "TEXT"),
+        ("embedding_generated_at", "TEXT"),
+        ("vector_schema_version", "INTEGER"),
+    )
+
+    for column_name, column_type in deleted_columns:
+        if not column_exists(connection, "deleted_chunks", column_name):
+            connection.execute(
+                f'ALTER TABLE deleted_chunks ADD COLUMN "{column_name}" {column_type}'
+            )
+
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_chunks_embedding_model
+        ON chunks(model_identifier, model_version)
+        """
+    )
 CORPUS_MIGRATIONS = {
     1: migration_001_create_base_schema,
     2: migration_002_add_document_metadata,
@@ -452,6 +491,7 @@ CORPUS_MIGRATIONS = {
     17: migration_017_add_incident_date_flagged_index,
     18: migration_018_add_false_positives_audit_columns,
     19: migration_019_add_times_flagged,
+    20: migration_020_add_embedding_metadata,
 }
 
 
@@ -570,7 +610,24 @@ def down_018_add_false_positives_audit_columns(
 def down_019_add_times_flagged(connection: sqlite3.Connection) -> None:
     _drop_column_if_exists(connection, "plagiarism_incidents", "times_flagged")
 
+def down_020_add_embedding_metadata(
+    connection: sqlite3.Connection,
+) -> None:
+    """Remove embedding metadata columns added by migration 020."""
+    columns = (
+        "model_identifier",
+        "model_version",
+        "embedding_dimension",
+        "normalization_strategy",
+        "embedding_generated_at",
+        "vector_schema_version",
+    )
 
+    for table in ("chunks", "deleted_chunks"):
+        for column_name in columns:
+            _drop_column_if_exists(connection, table, column_name)
+
+    connection.execute("DROP INDEX IF EXISTS idx_chunks_embedding_model")
 CORPUS_DOWN_MIGRATIONS = {
     1: down_001_create_base_schema,
     2: down_002_add_document_metadata,

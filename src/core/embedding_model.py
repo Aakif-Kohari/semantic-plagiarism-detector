@@ -475,8 +475,9 @@ def embed_chunks(
         empty array of shape (0, 384) if the input list is empty.
     """
     if not chunks:
-        return np.empty((0, 384), dtype=np.float32)
-
+        model = _get_model()
+        dimension = model.get_sentence_embedding_dimension()
+        return np.empty((0, dimension), dtype=np.float32)
     if batch_size is None:
         batch_size = _get_embedding_batch_size()
 
@@ -551,9 +552,14 @@ def embed_documents(
     doc_names: list[str] = []
 
     # Initialize all documents with empty arrays to ensure consistent return types
-    for doc_name in chunked_docs.keys():
-        embeddings[doc_name] = np.empty((0, 384), dtype=np.float32)
+    model = _get_model()
+    embedding_dimension = model.get_sentence_embedding_dimension()
 
+    for doc_name in chunked_docs.keys():
+        embeddings[doc_name] = np.empty(
+            (0, embedding_dimension),
+            dtype=np.float32,
+        )
     # Flatten all chunks while tracking document boundaries
     for doc_name, chunks in chunked_docs.items():
         if not chunks:
