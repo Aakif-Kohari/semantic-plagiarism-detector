@@ -1713,8 +1713,6 @@ def revoke_token(token: str, details: str | None = None) -> None:
         raise sqlite3.Error(f"Failed to revoke token: {e}") from e
 
 
- feature/invalidate-tokens-on-password-change
-
 def revoke_all_user_refresh_tokens(username: str) -> None:
     """
     Revokes and deletes all active refresh token families for a specified user,
@@ -1743,8 +1741,6 @@ def revoke_all_user_refresh_tokens(username: str) -> None:
         raise sqlite3.Error(f"Failed to revoke user tokens: {e}") from e
 
 
-
- main
 def is_token_revoked(token: str) -> bool:
     """Return True if the token or its SHA-256 signature exists in revoked_tokens.
 

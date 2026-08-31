@@ -1233,3 +1233,78 @@ def get_index_consistency_status(
             )
 
     return status
+
+
+def rebuild_index_from_db(
+    db_path: Optional[Any] = None,
+    index_path: Optional[Any] = None,
+) -> int:
+    """Reconstruct the FAISS index file from scratch using embeddings stored in SQLite chunks table.
+
+    Administrative helper that queries all vector embeddings from the SQLite chunks table,
+    builds a clean FAISS vector index, saves it to disk, and returns the vector count.
+
+    Args:
+        db_path: Optional path to SQLite corpus database. Defaults to configured corpus DB if None.
+        index_path: Optional path to save FAISS index file. Defaults to FAISS_INDEX_PATH if None.
+
+    Returns:
+        int: Total vector count added to the rebuilt FAISS index.
+    """
+    import os
+    import sqlite3
+    from src.core.app_config import FAISS_INDEX_PATH
+    from src.core.concurrency import faiss_write_lock
+
+    if db_path is not None:
+        target_db = str(db_path)
+    else:
+        from src.core.app_config import CORPUS_DB_PATH
+
+        target_db = str(CORPUS_DB_PATH)
+
+    if index_path is not None:
+        target_index = str(index_path)
+    else:
+        target_index = str(FAISS_INDEX_PATH)
+
+    embeddings: list[np.ndarray] = []
+    if os.path.exists(target_db):
+        try:
+            with sqlite3.connect(target_db) as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT embedding FROM chunks ORDER BY vector_id ASC")
+                rows = cursor.fetchall()
+                for r in rows:
+                    if r and r[0] is not None:
+                        arr = np.frombuffer(r[0], dtype=np.float32)
+                        if arr.size > 0:
+                            embeddings.append(arr)
+        except sqlite3.OperationalError as exc:
+            logger.warning(
+                f"[faiss_index] Could not query chunks table from {target_db}: {exc}"
+            )
+
+    if embeddings:
+        matrix = np.vstack(embeddings)
+    else:
+        matrix = np.empty((0, 384), dtype=np.float32)
+
+    new_index = build_index_from_matrix(matrix)
+
+    out_dir = os.path.dirname(os.path.abspath(target_index))
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+
+    with faiss_write_lock(f"{target_index}.lock"):
+        save_index(new_index, target_index)
+
+    total_added = int(getattr(new_index, "ntotal", 0) or 0)
+    logger.info(
+        f"[faiss_index] Successfully rebuilt index from DB '{target_db}' -> '{target_index}' ({total_added} vectors)."
+    )
+    return total_added
+
+
+rebuild_index_from_database = rebuild_index_from_db
+

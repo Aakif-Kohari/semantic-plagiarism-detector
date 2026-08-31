@@ -23,10 +23,10 @@ from src.core.document_parser import extract_text
 from src.core.embedding_model import embed_documents
 from src.core.faiss_index import ChunkRecord, build_index, add_vectors_incremental
 from src.core.faiss_index_metadata import FAISSIndexMetadata
-from src.core.similarity import document_similarity_matrix, flag_plagiarismfrom src.core.text_chunking import chunk_documents
+from src.core.similarity import document_similarity_matrix, flag_plagiarism
+from src.core.text_chunking import chunk_documents
 from src.utils.tracing import get_tracer
 
-logger = logging.getLogger(__name__)
 logger = logging.getLogger(__name__)
 
 

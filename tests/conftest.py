@@ -630,9 +630,7 @@ def populated_db_connection(db_connection: sqlite3.Connection) -> sqlite3.Connec
         sample_incidents,
     )
     db_connection.commit()
-
-
-
+    return db_connection
 
 
 @pytest.fixture
@@ -702,4 +700,3 @@ def mock_fast_tokenizer(monkeypatch):
         pass
         
     return tokenizer
-    yield db_connection
