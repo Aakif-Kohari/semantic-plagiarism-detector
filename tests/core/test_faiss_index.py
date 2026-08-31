@@ -748,6 +748,108 @@ def test_rebuild_index_from_database_alias():
     assert rebuild_index_from_database is rebuild_index_from_db
 
 
+# ── rebuild_index_from_db after database reset tests (Issue #4065) ────────────
+
+
+def test_rebuild_index_from_db_after_database_reset(tmp_path):
+    """Verify rebuild_index_from_db produces an empty index after all DB records are cleared (Issue #4065)."""
+    import sqlite3
+
+    db_path = tmp_path / "reset_corpus.db"
+    index_path = tmp_path / "reset_corpus.index"
+
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """
+        CREATE TABLE chunks (
+            vector_id INTEGER PRIMARY KEY,
+            filename TEXT NOT NULL,
+            chunk_index INTEGER NOT NULL,
+            chunk_text TEXT NOT NULL,
+            embedding BLOB NOT NULL
+        )
+        """
+    )
+    vecs = _unit_vecs(4, dim=384)
+    for idx, vec in enumerate(vecs):
+        conn.execute(
+            "INSERT INTO chunks (vector_id, filename, chunk_index, chunk_text, embedding) VALUES (?, ?, ?, ?, ?)",
+            (idx, f"doc_{idx}.txt", 0, f"text {idx}", vec.tobytes()),
+        )
+    conn.commit()
+    conn.close()
+
+    # Pre-reset state: populated on-disk index backed by a populated database.
+    assert rebuild_index_from_db(db_path=db_path, index_path=index_path) == 4
+    assert load_index(str(index_path)).ntotal == 4
+
+    # Simulate a full database reset by clearing every chunk record.
+    conn = sqlite3.connect(db_path)
+    conn.execute("DELETE FROM chunks")
+    conn.commit()
+    remaining_rows = conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
+    conn.close()
+    assert remaining_rows == 0
+
+    # Rebuild must not crash and must overwrite the stale populated index.
+    total_added = rebuild_index_from_db(db_path=db_path, index_path=index_path)
+    assert total_added == 0
+
+    assert index_path.exists()
+    loaded = load_index(str(index_path))
+    assert loaded.ntotal == 0
+    assert loaded.d == 384
+
+
+def test_rebuild_index_from_db_after_reset_rebuilt_index_queryable(tmp_path):
+    """Verify the index rebuilt from a cleared database remains queryable without crashing (Issue #4065)."""
+    import sqlite3
+
+    db_path = tmp_path / "reset_query.db"
+    index_path = tmp_path / "reset_query.index"
+
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """
+        CREATE TABLE chunks (
+            vector_id INTEGER PRIMARY KEY,
+            filename TEXT NOT NULL,
+            chunk_index INTEGER NOT NULL,
+            chunk_text TEXT NOT NULL,
+            embedding BLOB NOT NULL
+        )
+        """
+    )
+    vecs = _unit_vecs(3, dim=384)
+    for idx, vec in enumerate(vecs):
+        conn.execute(
+            "INSERT INTO chunks (vector_id, filename, chunk_index, chunk_text, embedding) VALUES (?, ?, ?, ?, ?)",
+            (idx, f"doc_{idx}.txt", 0, f"text {idx}", vec.tobytes()),
+        )
+    conn.commit()
+    conn.close()
+
+    assert rebuild_index_from_db(db_path=db_path, index_path=index_path) == 3
+
+    # Clear all database records (database reset).
+    conn = sqlite3.connect(db_path)
+    conn.execute("DELETE FROM chunks")
+    conn.commit()
+    conn.close()
+
+    assert rebuild_index_from_db(db_path=db_path, index_path=index_path) == 0
+
+    # The rebuilt empty index must still answer searches without raising.
+    loaded = load_index(str(index_path))
+    query = np.random.rand(1, 384).astype("float32")
+    distances, indices = loaded.search(query, k=2)
+    assert indices.shape == (1, 2)
+    assert (indices == -1).all()
+    # FAISS reports the "no result" distance sentinel for empty indexes.
+    no_result_distance = -np.finfo(np.float32).max
+    assert (distances == no_result_distance).all()
+
+
 # ── FaissIndexManager wrapper tests (Issue #4033) ─────────────────────────────
 
 
