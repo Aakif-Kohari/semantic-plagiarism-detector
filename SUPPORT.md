@@ -129,3 +129,63 @@ PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 # Streamlit App Limits
 STREAMLIT_SERVER_MAX_UPLOAD_SIZE=200
 ```
+
+---
+
+## ❓ Frequently Asked Questions (Top Support Queries)
+
+This troubleshooting FAQ provides direct solutions for the top 5 common operational and setup questions:
+
+### 1. How do I install Tesseract OCR for scanned document parsing?
+Document OCR parsing relies on system-level Tesseract installations. Install it via your platform package manager:
+- **Ubuntu / Debian:** `sudo apt update && sudo apt install tesseract-ocr tesseract-ocr-eng`
+- **macOS:** `brew install tesseract tesseract-lang`
+- **Windows:** Run `choco install tesseract` or download installer binaries from [UB-Mannheim Wiki](https://github.com/UB-Mannheim/tesseract/wiki) and append `C:\Program Files\Tesseract-OCR` to system `PATH`.
+- **Verification:** Run `tesseract --version` and `tesseract --list-langs` in a terminal window.
+
+For step-by-step instructions and multi-language pack configuration, refer to the [Tesseract OCR Setup Guide](docs/ocr_setup.md) and [Troubleshooting Guide](docs/TROUBLESHOOTING.md#tesseract-ocr-missing-binary-error).
+
+### 2. How do I reset an administrator or user password?
+Password resets can be performed via CLI management tools or administrative Python modules:
+```bash
+python -m src.cli.manage_users reset-password --username admin --new-password "YourNewSecretPassword123!"
+```
+Administrators can also manage password rotation policies and unlock locked accounts via the Web UI Settings panel.
+
+For complete password policies, security options, and token revocation, see the [Authentication Guide](docs/AUTHENTICATION.md) and [CLI Guide](docs/CLI_GUIDE.md).
+
+### 3. How do I run the application using Docker and Docker Compose?
+You can spin up the full service stack (Streamlit Frontend, FastAPI Backend, Redis Cache, and FAISS vector worker) with a single command:
+```bash
+docker compose up --build -d
+```
+- **Streamlit Web UI:** `http://localhost:8501`
+- **FastAPI REST API:** `http://localhost:8000`
+- **Stopping Services:** `docker compose down`
+
+For container configuration parameters and production image optimization, refer to the [Docker Deployment Guide](README.md#docker-deployment-recommended-for-quick-setup) and [Deployment Documentation](docs/deployment.md).
+
+### 4. How do I configure Redis for session caching and rate limiting?
+Set the Redis connection parameters in your `.env` configuration file:
+```env
+REDIS_HOST=localhost
+REDIS_PORT=6379
+REDIS_PASSWORD=your_secure_password
+```
+Test the connection using `redis-cli -h localhost -p 6379 ping`. If Redis is offline, the application automatically degrades to in-memory caching.
+
+For setup details, fallback behavior, and cluster tuning, refer to the [Redis Setup Guide](docs/REDIS_SETUP.md) and [Redis Performance Guide](docs/REDIS_PERFORMANCE.md).
+
+### 5. How do I resolve Out-Of-Memory (OOM) errors during high-volume document uploads?
+spikes during large batch embedding generation can be prevented with the following configuration:
+1. **Thread Limits:** Add OpenMP/MKL flags to your `.env` file to prevent CPU over-subscription:
+   ```env
+   OMP_NUM_THREADS=4
+   MKL_NUM_THREADS=4
+   MALLOC_TRIM_THRESHOLD_=65536
+   ```
+2. **Chunk Size:** Decrease `CHUNK_SIZE` (e.g. 250-500 tokens) in [Chunking Strategies](docs/CHUNKING_STRATEGIES.md).
+3. **FAISS Index Persistence:** Enable periodic disk flushes (`save_index`) to reduce vector memory footprint.
+
+For comprehensive memory management tips, check the [Troubleshooting Guide](docs/TROUBLESHOOTING.md#memory-allocation-or-out-of-memory-errors).
+
