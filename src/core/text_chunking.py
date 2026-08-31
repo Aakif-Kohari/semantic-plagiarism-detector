@@ -10,9 +10,9 @@ chunk boundaries.
 
 Two strategies are available:
 
-* ``chunk_text``         – fixed character-count chunking with word-boundary
+* ``chunk_text``        – fixed character-count chunking with word-boundary
   awareness and optional sentence-aware padding (Issue #1480).
-* ``chunk_by_sentences``  – sentence-boundary-aware chunking that groups whole
+* ``chunk_by_sentences`` – sentence-boundary-aware chunking that groups whole
   sentences into blocks up to *max_chunk_size* characters, ensuring no sentence
   is split mid-word or mid-clause.
 
@@ -22,6 +22,8 @@ Recent Additions:
   off semantic context mid-sentence, improving embedding quality.
 - Issue #2912: Ensure min_words filtering applies dynamically inside the
   chunking loop to skip expensive padding logic for clearly invalid chunks.
+- Issue #3997: Enhanced citation masking before sentence splitting to preserve
+  author initial periods (e.g., 'J. Doe') and prevent premature splits.
 """
 
 from __future__ import annotations
@@ -60,8 +62,26 @@ _SENTENCE_BOUNDARY_PATTERN = re.compile(r"([.!?])\s+(?=[A-Z])|([.!?])$|([。！�
 _WORD_COUNT_PATTERN = re.compile(r"\b\w+\b")
 
 
-# ── Helper Functions ──────────────────────────────────────────────────────────
+# ── Citation Masking Helpers (Issue #3997) ────────────────────────────────────
 
+def mask_citation_initials(text: str) -> str:
+    """
+    Masks periods in author initials to prevent premature sentence splitting.
+    Uses a length-preserving null byte (\x00) to maintain index alignment for
+    chunking algorithms that rely on absolute string positions.
+    """
+    # \b      : word boundary
+    # ([A-Z]) : capture a single uppercase letter (Group 1)
+    # \.      : match the literal period
+    # (?=\s|\(): lookahead to ensure it's followed by a space or opening parenthesis
+    return re.sub(r'\b([A-Z])\.(?=\s|\()', r'\1\x00', text)
+
+def unmask_citation_initials(text: str) -> str:
+    """Restores the masked periods back to their original state."""
+    return text.replace('\x00', '.')
+
+
+# ── Helper Functions ──────────────────────────────────────────────────────────
 
 def _chunking_text(text: str) -> str:
     """Return plain text from either a string or a structured DOCX result."""
@@ -90,27 +110,30 @@ def _split_into_sentences(text: str) -> list[str]:
     if NLTK data is unavailable so the function works in restricted environments
     (e.g. CI containers without the punkt corpus downloaded).
     """
+    text = mask_citation_initials(text)
+
     if nltk is not None:
         try:
             from nltk.tokenize import sent_tokenize  # type: ignore
 
             sentences = sent_tokenize(text)
             if sentences:
-                return sentences
+                return [unmask_citation_initials(s) for s in sentences]
         except LookupError:
             # punkt_tab / punkt corpus not downloaded – trigger download once
             try:
                 nltk.download("punkt_tab", quiet=True)
                 from nltk.tokenize import sent_tokenize  # type: ignore
 
-                return sent_tokenize(text)
+                sentences = sent_tokenize(text)
+                return [unmask_citation_initials(s) for s in sentences]
             except Exception:
                 pass
 
     # Regex fallback: split on sentence-ending punctuation followed by
     # whitespace and an uppercase letter (covers English prose well).
     parts = re.split(r"(?<=[.!?])\s+(?=[A-Z\"\'\(])", text.strip())
-    return [p.strip() for p in parts if p.strip()]
+    return [unmask_citation_initials(p.strip()) for p in parts if p.strip()]
 
 
 def _align_to_sentence_boundary(
@@ -425,6 +448,9 @@ def chunk_text(
     structured_headings = getattr(text, "headings", None)
     text = _chunking_text(text)
 
+    if isinstance(text, str):
+        text = mask_citation_initials(text)
+
     if chunk_size <= 0:
         raise ValueError("chunk_size must be a positive integer > 0")
 
@@ -456,7 +482,7 @@ def chunk_text(
 
     text = text.strip()
     text_len = len(text)
-    chunks: list[str] = []
+    chunks: list[ChunkString] = []
     start = 0
 
     while start < text_len:
@@ -498,6 +524,7 @@ def chunk_text(
                     end = max_allowed_end
 
             chunk = text[start:end].strip()
+            chunk = unmask_citation_initials(chunk)
 
             # Final verification after sentence alignment
             final_word_count = count_words(chunk)
@@ -517,6 +544,7 @@ def chunk_text(
 
             if len(words) >= min_words:
                 chunk_str = separator.join(words)
+                chunk_str = unmask_citation_initials(chunk_str)
                 metadata = {}
                 section_title = None
                 if word_headings:
@@ -561,9 +589,13 @@ def chunk_text(
 
     # Fallback to character-based chunking if no valid chunks were formed
     if not chunks:
-        chunks = _character_fallback_chunking(
+        fallback_chunks = _character_fallback_chunking(
             text, chunk_size, chunk_overlap, count_bytes=count_bytes
         )
+        chunks = [
+            ChunkString(text=unmask_citation_initials(c.text), metadata=c.metadata) 
+            for c in fallback_chunks
+        ]
 
     logger.info(
         "chunk_text: Generated %d chunks from %d characters (min_words=%d).",
@@ -630,6 +662,8 @@ def chunk_by_sentences(
     text = text.strip()
     if not text:
         return []
+        
+    text = mask_citation_initials(text)
 
     # Split text into individual sentences
     raw_sentences = _SENTENCE_SPLIT_PATTERN.split(text)
@@ -656,6 +690,7 @@ def chunk_by_sentences(
         ):
             # Finalize the current chunk
             chunk_text_val = " ".join(current_chunk_sentences)
+            chunk_text_val = unmask_citation_initials(chunk_text_val)
 
             # Issue #2912: Apply min_words filter
             if (
@@ -682,6 +717,8 @@ def chunk_by_sentences(
     # Don't forget the last chunk if we didn't hit the limit
     if current_chunk_sentences and len(chunks) < max_chunks:
         chunk_text_val = " ".join(current_chunk_sentences)
+        chunk_text_val = unmask_citation_initials(chunk_text_val)
+        
         if (
             count_words(chunk_text_val) >= min_words
             and len(chunk_text_val) >= min_chunk_length
@@ -719,11 +756,11 @@ def chunk_text_dynamic(
     if max_chunks <= 0:
         raise ValueError("max_chunks must be greater than 0")
 
-    clean_src = text.strip()
+    clean_src = mask_citation_initials(text.strip())
     n_total = len(clean_src)
 
     if n_total <= target_size:
-        return [ChunkString(text=clean_src)]
+        return [ChunkString(text=unmask_citation_initials(clean_src))]
 
     margin = int(target_size * 0.20)
     chunks: list[ChunkString] = []
@@ -757,6 +794,8 @@ def chunk_text_dynamic(
                 actual_end = target_end
 
         chunk_content = clean_src[start:actual_end].strip()
+        chunk_content = unmask_citation_initials(chunk_content)
+        
         if chunk_content:
             chunks.append(
                 Chunk(
