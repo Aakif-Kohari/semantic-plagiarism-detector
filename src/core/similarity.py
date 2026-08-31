@@ -21,8 +21,13 @@ from src.core.match_consolidation import (
     consolidate_chunk_matches,
     consolidated_target_coverage,
 )
-from src.core.plagiarism_evidence import build_plagiarism_evidencefrom src.core.threshold_calibration import (compute_calibration_metrics,
-                                            find_optimal_threshold)
+from src.core.language_similarity_config import (
+    build_language_metadata,
+    get_language_pair_policy,
+)
+from src.core.plagiarism_evidence import build_plagiarism_evidence
+from src.core.threshold_calibration import (compute_calibration_metrics,
+                                            find_optimal_threshold)                                            find_optimal_threshold)
 
 logger = logging.getLogger(__name__)
 
@@ -729,8 +734,8 @@ def flag_plagiarism(
     use_cross_encoder: bool = CROSS_ENCODER_RERANKING_ENABLED,
     cross_encoder_model: str = DEFAULT_CROSS_ENCODER_MODEL,
     cross_encoder_top_k: int = DEFAULT_CROSS_ENCODER_TOP_K,
-) -> list[dict]:
-    """Identify document pairs whose similarity reaches the threshold.
+    language_metadata: Optional[dict[str, dict[str, Any]]] = None,
+) -> list[dict]:    """Identify document pairs whose similarity reaches the threshold.
 
     Flagging uses the configurable plagiarism threshold. Severity uses the
     central fixed boundaries: Medium at 0.75 and High at 0.90.
@@ -751,6 +756,18 @@ def flag_plagiarism(
     doc_names = similarity_df.columns.tolist()
     name_to_idx = {name: i for i, name in enumerate(doc_names)}
 
+    if language_metadata is None and chunked_docs is not None:
+        language_metadata = build_language_metadata(
+            {
+                name: " ".join(
+                    chunk.text if hasattr(chunk, "text") else str(chunk)
+                    for chunk in chunks
+                )
+                for name, chunks in chunked_docs.items()
+            }
+        )
+
+    language_metadata = language_metadata or {}
     if candidate_pairs is not None:
         pairs_to_check = [
             (name_to_idx[a], name_to_idx[b])
@@ -765,12 +782,36 @@ def flag_plagiarism(
     for i, j in pairs_to_check:
         score = float(similarity_df.iloc[i, j])
 
-        if is_plagiarism(score, threshold):
-            doc_a = doc_names[i]
-            doc_b = doc_names[j]
+        effective_threshold = threshold
+
+        if is_plagiarism(score, effective_threshold):            doc_b = doc_names[j]
             matched_length = 0
             chunk_pair_texts = None
 
+            source_language_info = language_metadata.get(
+                doc_a,
+                {"language": "unknown", "language_confident": False},
+            )
+            target_language_info = language_metadata.get(
+                doc_b,
+                {"language": "unknown", "language_confident": False},
+            )
+
+            source_language = source_language_info.get("language", "unknown")
+            target_language = target_language_info.get("language", "unknown")
+            detection_confident = bool(
+                source_language_info.get("language_confident", False)
+                and target_language_info.get("language_confident", False)
+            )
+
+            language_policy = get_language_pair_policy(
+                source_language,
+                target_language,
+                detection_confident=detection_confident,
+                base_threshold=threshold,
+            )
+
+            effective_threshold = language_policy.threshold
             if chunked_docs is not None and embeddings is not None:
                 sim_matrix = cosine_similarity(
                     embeddings[doc_a],
@@ -839,17 +880,30 @@ def flag_plagiarism(
                     target_length=target_length,
                 )
 
-                flag_dict = {
-                    "doc_a": doc_a,
-                    "doc_b": doc_b,
-                    "similarity": round(score, 4),
-                    "threshold_at_time_of_flag": float(threshold),
-                    "matched_length": matched_length,
-                    "severity": severity_from_score(
-                        score,
-                        DEFAULT_THRESHOLDS,
+            flag_dict = {
+                "doc_a": doc_a,
+                "doc_b": doc_b,
+                "similarity": round(score, 4),
+                "threshold_at_time_of_flag": float(effective_threshold),
+                "matched_length": matched_length,
+                "severity": severity_from_score(
+                    score,
+                    DEFAULT_THRESHOLDS,
+                ),
+                "language_pair": {
+                    "source": language_policy.source_language,
+                    "target": language_policy.target_language,
+                    "same_language": language_policy.same_language,
+                    "cross_lingual": language_policy.cross_lingual,
+                    "detection_confident": language_policy.detection_confident,
+                    "lexical_processing_available": (
+                        language_policy.lexical_processing_available
                     ),
-                    "chunk_matches": [
+                    "embedding_compatible": (
+                        language_policy.embedding_compatible
+                    ),
+                },
+                                "chunk_matches": [
                         match.to_dict() for match in chunk_matches
                     ],
                     "plagiarism_segments": [

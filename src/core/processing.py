@@ -23,9 +23,9 @@ from src.core.document_parser import extract_text
 from src.core.embedding_model import embed_documents
 from src.core.faiss_index import ChunkRecord, build_index, add_vectors_incremental
 from src.core.faiss_index_metadata import FAISSIndexMetadata
+from src.core.language_similarity_config import build_language_metadata
 from src.core.similarity import document_similarity_matrix, flag_plagiarism
-from src.core.text_chunking import chunk_documents
-from src.utils.tracing import get_tracer
+from src.core.text_chunking import chunk_documentsfrom src.utils.tracing import get_tracer
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +42,7 @@ class PipelineResult(NamedTuple):
     registry: list[ChunkRecord]
     ai_probabilities: dict[str, dict[str, Any]]
     flags: list[dict[str, Any]]
-
+    language_metadata: dict[str, dict[str, Any]]
     def is_incremental_update(self) -> bool:
         """Check if this result is from incremental index update vs full rebuild."""
         return hasattr(self, "_is_incremental") and self._is_incremental
@@ -118,11 +118,12 @@ def run_full_pipeline(
                 }
             parse_span.set_attribute("parsed.count", len(raw_texts))
 
+        language_metadata = build_language_metadata(raw_texts)
+
         with tracer.start_as_current_span("pipeline.chunk") as chunk_span:
             chunked_docs = chunk_documents(
                 raw_texts, chunk_size=chunk_size, chunk_overlap=chunk_overlap
-            )
-            total_chunks = sum(len(chunks) for chunks in chunked_docs.values())
+            )            total_chunks = sum(len(chunks) for chunks in chunked_docs.values())
             chunk_span.set_attribute("chunk.count", total_chunks)
 
         with tracer.start_as_current_span("pipeline.embed") as embed_span:
@@ -208,8 +209,8 @@ def run_full_pipeline(
             threshold=threshold,
             chunked_docs=chunked_docs,
             embeddings=embeddings,
+            language_metadata=language_metadata,
         )
-
         with tracer.start_as_current_span("pipeline.incident_sync"):
             pass
 
@@ -234,8 +235,8 @@ def run_full_pipeline(
             registry=registry,
             ai_probabilities=ai_probabilities,
             flags=flags,
+            language_metadata=language_metadata,
         )
-
 
 # ── Scheduled / continuous rescan pipeline ──────────────────────────────────
 #
