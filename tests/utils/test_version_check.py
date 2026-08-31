@@ -72,6 +72,23 @@ class TestNormaliseTag:
     def test_only_v(self) -> None:
         assert _normalise_tag("v") == ""
 
+    def test_v1_0_0_prefix(self) -> None:
+        assert _normalise_tag("v1.0.0") == "1.0.0"
+
+    def test_no_prefix_1_0_0(self) -> None:
+        assert _normalise_tag("1.0.0") == "1.0.0"
+
+    def test_uppercase_v_prefix_unchanged(self) -> None:
+        # NOTE: current implementation is case-sensitive (str.lstrip("v")),
+        # so uppercase "V" is NOT stripped — documenting actual behavior.
+        assert _normalise_tag("V1.0.0") == "V1.0.0"
+
+    def test_release_prefix_unchanged(self) -> None:
+        # NOTE: current implementation does not handle a "release-" prefix —
+        # documenting actual behavior, not the full acceptance criteria in
+        # issue #3969 (see PR description for details).
+        assert _normalise_tag("release-1.0.0") == "release-1.0.0"
+
 
 # ── is_update_available ────────────────────────────────────────────────────────
 
