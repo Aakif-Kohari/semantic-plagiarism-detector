@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 
-from deep_translator import GoogleTranslator
+from deep_translator import DeeplTranslator, GoogleTranslator
 
 logger = logging.getLogger(__name__)
 
@@ -227,32 +228,48 @@ def translate_text(
     if not original.strip():
         return original
 
-    max_retries = 3
-    last_exc = None
+    deepl_api_key = os.getenv("DEEPL_API_KEY")
     translated = None
 
-    for attempt in range(max_retries):
+    if deepl_api_key:
         try:
-            translated = GoogleTranslator(
-                source=source_lang or "auto",
+            # DeeplTranslator uses api_key parameter
+            deepl_source = "auto" if not source_lang or source_lang == "auto" else source_lang
+            translated = DeeplTranslator(
+                api_key=deepl_api_key,
+                source=deepl_source,
                 target=target_lang,
             ).translate(original)
-            break
         except Exception as exc:
-            last_exc = exc
-            if attempt < max_retries - 1:
-                sleep_time = 2**attempt  # 1s, 2s, 4s
-                logger.warning(
-                    "Translation failed on attempt %d/%d (%s). Retrying in %ds...",
-                    attempt + 1,
-                    max_retries,
-                    exc,
-                    sleep_time,
-                )
-                time.sleep(sleep_time)
+            logger.warning("DeepL translation failed, falling back to GoogleTranslator: %s", exc)
+            translated = None
 
-    if last_exc and translated is None:
-        return f"(Translation Error: {last_exc})"
+    if translated is None:
+        max_retries = 3
+        last_exc = None
+
+        for attempt in range(max_retries):
+            try:
+                translated = GoogleTranslator(
+                    source=source_lang or "auto",
+                    target=target_lang,
+                ).translate(original)
+                break
+            except Exception as exc:
+                last_exc = exc
+                if attempt < max_retries - 1:
+                    sleep_time = 2**attempt  # 1s, 2s, 4s
+                    logger.warning(
+                        "Translation failed on attempt %d/%d (%s). Retrying in %ds...",
+                        attempt + 1,
+                        max_retries,
+                        exc,
+                        sleep_time,
+                    )
+                    time.sleep(sleep_time)
+
+        if last_exc and translated is None:
+            return f"(Translation Error: {last_exc})"
 
     translated = str(translated or "").strip()
     if not translated:
@@ -307,6 +324,19 @@ def translate_text_batch(
         return []
 
     validate_target_language_code(target_lang)
+
+    deepl_api_key = os.getenv("DEEPL_API_KEY")
+    if deepl_api_key:
+        try:
+            deepl_source = "auto" if not source_lang or source_lang == "auto" else source_lang
+            translated = DeeplTranslator(
+                api_key=deepl_api_key,
+                source=deepl_source,
+                target=target_lang,
+            ).translate_batch(texts)
+            return [str(t or "").strip() for t in translated]
+        except Exception as exc:
+            logger.warning("DeepL batch translation failed, falling back to GoogleTranslator: %s", exc)
 
     try:
         translated = GoogleTranslator(

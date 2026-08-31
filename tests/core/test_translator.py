@@ -1,6 +1,6 @@
 import pytest
 
-from src.core.translator import get_language_display_name, translate_text
+from src.core.translator import get_language_display_name, translate_text, validate_target_language_code
 
 
 def test_none_is_preserved():
@@ -41,3 +41,17 @@ def test_translate_text_error_handling():
     with pytest.raises(ValueError) as excinfo:
         translate_text("Hello", target_lang="invalid_lang")
     assert "Unsupported target language code: invalid_lang" in str(excinfo.value)
+
+
+def test_validate_target_language_code_valid():
+    valid_codes = ["en", "es", "fr"]
+    for code in valid_codes:
+        validate_target_language_code(code)
+
+
+def test_validate_target_language_code_invalid():
+    invalid_codes = ["invalid", "", None]
+    for code in invalid_codes:
+        with pytest.raises(ValueError):
+            validate_target_language_code(code)
+            
