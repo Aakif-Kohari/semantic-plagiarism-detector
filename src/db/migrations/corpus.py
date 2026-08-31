@@ -430,7 +430,6 @@ def migration_019_add_times_flagged(
             "ALTER TABLE plagiarism_incidents "
             "ADD COLUMN times_flagged INTEGER NOT NULL DEFAULT 1"
         )
-
 def migration_020_add_embedding_metadata(
     connection: sqlite3.Connection,
 ) -> None:
@@ -471,6 +470,64 @@ def migration_020_add_embedding_metadata(
         ON chunks(model_identifier, model_version)
         """
     )
+    def migration_021_add_corpus_duplicate_detection(
+    connection: sqlite3.Connection,
+) -> None:
+    """Create persistent corpus-level duplicate/fingerprint metadata."""
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS document_fingerprints (
+            filename TEXT PRIMARY KEY,
+            exact_hash TEXT NOT NULL,
+            minhash_signature TEXT NOT NULL,
+            token_count INTEGER NOT NULL,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS corpus_duplicate_relationships (
+            relationship_id TEXT PRIMARY KEY,
+            document_a TEXT NOT NULL,
+            document_b TEXT NOT NULL,
+            relationship_type TEXT NOT NULL
+                CHECK (
+                    relationship_type IN (
+                        'exact_duplicate',
+                        'near_duplicate'
+                    )
+                ),
+            similarity REAL NOT NULL,
+            family_id TEXT NOT NULL,
+            detected_at TEXT NOT NULL,
+            UNIQUE(document_a, document_b)
+        )
+        """
+    )
+
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_duplicate_relationships_a
+        ON corpus_duplicate_relationships(document_a)
+        """
+    )
+
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_duplicate_relationships_b
+        ON corpus_duplicate_relationships(document_b)
+        """
+    )
+
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_duplicate_relationships_family
+        ON corpus_duplicate_relationships(family_id)
+        """
+    )
+
 CORPUS_MIGRATIONS = {
     1: migration_001_create_base_schema,
     2: migration_002_add_document_metadata,
@@ -492,6 +549,7 @@ CORPUS_MIGRATIONS = {
     18: migration_018_add_false_positives_audit_columns,
     19: migration_019_add_times_flagged,
     20: migration_020_add_embedding_metadata,
+    21: migration_021_add_corpus_duplicate_detection,
 }
 
 
@@ -628,6 +686,25 @@ def down_020_add_embedding_metadata(
             _drop_column_if_exists(connection, table, column_name)
 
     connection.execute("DROP INDEX IF EXISTS idx_chunks_embedding_model")
+    def down_020_add_corpus_duplicate_detection(
+    connection: sqlite3.Connection,
+) -> None:
+    """Remove corpus duplicate-detection metadata."""
+    connection.execute(
+        "DROP INDEX IF EXISTS idx_duplicate_relationships_a"
+    )
+    connection.execute(
+        "DROP INDEX IF EXISTS idx_duplicate_relationships_b"
+    )
+    connection.execute(
+        "DROP INDEX IF EXISTS idx_duplicate_relationships_family"
+    )
+    connection.execute(
+        "DROP TABLE IF EXISTS corpus_duplicate_relationships"
+    )
+    connection.execute(
+        "DROP TABLE IF EXISTS document_fingerprints"
+    )
 CORPUS_DOWN_MIGRATIONS = {
     1: down_001_create_base_schema,
     2: down_002_add_document_metadata,
@@ -648,8 +725,8 @@ CORPUS_DOWN_MIGRATIONS = {
     17: down_017_add_incident_date_flagged_index,
     18: down_018_add_false_positives_audit_columns,
     19: down_019_add_times_flagged,
+    20: down_020_add_corpus_duplicate_detection,
 }
-
 
 def migrate_corpus_database(
     connection: sqlite3.Connection,
