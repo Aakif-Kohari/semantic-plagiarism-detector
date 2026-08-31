@@ -289,3 +289,98 @@ def test_extract_text_observes_spd_doc_parse_seconds():
     assert after_count == before_count + 1
 
 
+# ── Prometheus text exposition format (Issue #3759) ─────────────────────────────
+
+
+def test_generate_latest_returns_bytes():
+    """generate_latest() must return the raw exposition payload as bytes,
+    matching the prometheus_client convention (not str, not a dict)."""
+    output = metrics.generate_latest()
+    assert isinstance(output, bytes)
+
+
+def test_generate_latest_output_contains_help_and_type_headers():
+    """Every metric family in valid Prometheus text format is preceded by
+    a '# HELP <name> <docstring>' line and a '# TYPE <name> <type>' line."""
+    output = metrics.generate_latest()
+    text = output.decode("utf-8")
+
+    assert "# HELP" in text
+    assert "# TYPE" in text
+
+
+def test_generate_latest_includes_help_and_type_for_a_known_spd_metric():
+    """Check HELP/TYPE aren't just present somewhere in the payload (e.g.
+    from Python's own default process metrics), but specifically cover one
+    of this application's own metrics."""
+    metrics.record_documents(1)
+    output = metrics.generate_latest()
+    text = output.decode("utf-8")
+
+    assert "# HELP spd_documents_total" in text
+    assert "# TYPE spd_documents_total counter" in text
+
+
+def test_generate_latest_metric_values_are_numeric():
+    """Every sample's value must parse as a number -- this is what makes the
+    payload valid Prometheus exposition format rather than arbitrary text.
+    Uses prometheus_client's own parser (the same one generate_metrics_json()
+    uses) rather than naive string splitting, so this stays correct even if
+    label formatting or line wrapping changes upstream.
+    """
+    from prometheus_client.parser import text_string_to_metric_families
+
+    metrics.record_documents(3)
+    metrics.record_upload("success")
+
+    output = metrics.generate_latest()
+    text = output.decode("utf-8")
+
+    families = list(text_string_to_metric_families(text))
+    assert len(families) > 0, "generate_latest() produced no metric families at all"
+
+    sample_count = 0
+    for family in families:
+        for sample in family.samples:
+            sample_count += 1
+            assert isinstance(sample.value, (int, float)), (
+                f"Non-numeric value for {sample.name}: {sample.value!r}"
+            )
+            assert sample.value == sample.value  # NaN check: NaN != NaN
+
+    assert sample_count > 0, "no individual metric samples were found"
+
+
+def test_generate_latest_specific_spd_counter_value_is_numeric_and_correct():
+    """A concrete example tying the parsed numeric value back to a known,
+    freshly-incremented counter, not just 'some number was present somewhere'."""
+    from prometheus_client.parser import text_string_to_metric_families
+
+    before = _sample_value(metrics.documents_total)
+    metrics.record_documents(7)
+
+    output = metrics.generate_latest()
+    families = {f.name: f for f in text_string_to_metric_families(output.decode("utf-8"))}
+
+    # The parser strips the "_total" suffix from the *family* name for
+    # counters (matching the convention generate_metrics_json() already
+    # relies on), while the individual *sample* keeps the full name.
+    assert "spd_documents" in families
+    documents_samples = [
+        s for s in families["spd_documents"].samples
+        if s.name == "spd_documents_total"
+    ]
+    assert len(documents_samples) == 1
+    assert documents_samples[0].value == before + 7
+
+
+def test_generate_latest_output_is_non_empty_and_multiline():
+    """A sanity check that the payload isn't degenerate (empty string, or a
+    single line with no actual metric data)."""
+    output = metrics.generate_latest()
+    text = output.decode("utf-8")
+
+    assert len(text) > 0
+    assert text.count("\n") > 1
+
+
