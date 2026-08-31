@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 
 from deep_translator import GoogleTranslator
 
@@ -226,18 +227,32 @@ def translate_text(
     if not original.strip():
         return original
 
-    # Reject unsupported target language codes before reaching the translation
-    # model, so invalid codes surface a clear ValueError instead of an uncaught
-    # provider/model exception.
-    validate_target_language_code(target_lang)
+    max_retries = 3
+    last_exc = None
+    translated = None
 
-    try:
-        translated = GoogleTranslator(
-            source=source_lang or "auto",
-            target=target_lang,
-        ).translate(original)
-    except Exception as exc:
-        return f"(Translation Error: {exc})"
+    for attempt in range(max_retries):
+        try:
+            translated = GoogleTranslator(
+                source=source_lang or "auto",
+                target=target_lang,
+            ).translate(original)
+            break
+        except Exception as exc:
+            last_exc = exc
+            if attempt < max_retries - 1:
+                sleep_time = 2**attempt  # 1s, 2s, 4s
+                logger.warning(
+                    "Translation failed on attempt %d/%d (%s). Retrying in %ds...",
+                    attempt + 1,
+                    max_retries,
+                    exc,
+                    sleep_time,
+                )
+                time.sleep(sleep_time)
+
+    if last_exc and translated is None:
+        return f"(Translation Error: {last_exc})"
 
     translated = str(translated or "").strip()
     if not translated:
