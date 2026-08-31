@@ -157,6 +157,42 @@ def test_save_and_load_index(tmp_path, two_doc_data):
     assert loaded.ntotal == index.ntotal
 
 
+def test_save_index_file_permissions(tmp_path, two_doc_data, monkeypatch):
+    """Verify that save_index writes the .faiss index file with restrictive file permissions (0o600)."""
+    import os
+    import stat
+
+    chmod_calls = []
+    orig_chmod = os.chmod
+
+    def mock_chmod(path, mode):
+        chmod_calls.append((path, mode))
+        try:
+            orig_chmod(path, mode)
+        except OSError:
+            pass
+
+    monkeypatch.setattr(os, "chmod", mock_chmod)
+
+    embeddings, chunked = two_doc_data
+    index, _ = build_index(embeddings, chunked, index_type="flat")
+    path = str(tmp_path / "test_permissions.faiss")
+    save_index(index, path)
+
+    assert os.path.exists(path)
+    assert len(chmod_calls) >= 1
+    assert chmod_calls[-1][0] == path
+    assert chmod_calls[-1][1] == 0o600
+
+    if os.name != "nt":
+        file_mode = stat.S_IMODE(os.stat(path).st_mode)
+        assert file_mode == 0o600
+
+    loaded = load_index(path)
+    assert loaded.ntotal == index.ntotal
+
+
+
 def test_chunk_record_repr():
     r = ChunkRecord("my_doc", 0, "Hello world this is a test chunk.")
     assert "my_doc" in repr(r)
