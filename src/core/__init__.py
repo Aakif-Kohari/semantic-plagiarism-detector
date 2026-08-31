@@ -53,7 +53,7 @@ from .similarity_engines import (
     SimilarityEngineFactory,
 )
 from .tag_manager import TagManager, sanitize_tag_name
-from .text_chunking import chunk_by_sentences, chunk_document, chunk_documents
+from .text_chunking import Chunk, ChunkString, chunk_by_sentences, chunk_document, chunk_documents
 from .translator import translate_text
 from .webhook import (
     EventDispatcher,
@@ -71,7 +71,9 @@ if TYPE_CHECKING:
 __all__ = [
     "BaseSimilarityEngine",
     "BrandingConfig",
+    "Chunk",
     "ChunkRecord",
+    "ChunkString",
     "EventDispatcher",
     "FAISSIndex",
     "FaissChunkRecord",

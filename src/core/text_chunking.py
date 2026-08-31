@@ -153,20 +153,54 @@ def _align_to_sentence_boundary(
     return raw_chunk
 
 
-# ── ChunkString ───────────────────────────────────────────────────────────────
+# ── Chunk & ChunkString ────────────────────────────────────────────────────────
+from typing import Optional
 
 
 @dataclass
-class ChunkString:
-    """Structured text chunk with optional metadata.
+class Chunk:
+    """Structured text chunk with position and section metadata (#4002).
 
-    The payload is stored explicitly in ``text`` rather than by subclassing
-    ``str``, which makes the type easier for static analyzers, serializers,
-    and C-extension boundaries to handle safely.
+    Attributes:
+        text: Raw text content of the chunk.
+        metadata: Additional arbitrary metadata key-value pairs.
+        page_number: Optional 1-based page number where chunk originated.
+        char_start: Starting character offset in the source document.
+        char_end: Ending character offset in the source document.
+        section_title: Optional title/heading of the section containing this chunk.
     """
 
     text: str
     metadata: dict = field(default_factory=dict)
+    page_number: Optional[int] = None
+    char_start: int = 0
+    char_end: int = 0
+    section_title: Optional[str] = None
+
+    def __post_init__(self):
+        # Synchronize metadata dictionary with primary fields
+        if self.page_number is not None and "page_number" not in self.metadata:
+            self.metadata["page_number"] = self.page_number
+        elif "page_number" in self.metadata and self.page_number is None:
+            self.page_number = self.metadata["page_number"]
+
+        if self.char_start != 0 and "char_start" not in self.metadata:
+            self.metadata["char_start"] = self.char_start
+        elif "char_start" in self.metadata and self.char_start == 0:
+            self.char_start = self.metadata["char_start"]
+
+        if self.char_end != 0 and "char_end" not in self.metadata:
+            self.metadata["char_end"] = self.char_end
+        elif "char_end" in self.metadata and self.char_end == 0:
+            self.char_end = self.metadata["char_end"]
+
+        if self.section_title is not None and "section_title" not in self.metadata:
+            self.metadata["section_title"] = self.section_title
+        elif "section_title" in self.metadata and self.section_title is None:
+            self.section_title = self.metadata["section_title"]
+
+
+ChunkString = Chunk
 
 
 # ── Character-level fallback (CJK / emoji / long-word texts) ─────────────────
@@ -279,7 +313,13 @@ def _character_fallback_chunking(
         end = _find_length_capped_end(text, start, chunk_size, count_bytes)
         chunk = text[start:end]
         if chunk:
-            chunks.append(ChunkString(text=chunk))
+            chunks.append(
+                Chunk(
+                    text=chunk,
+                    char_start=start,
+                    char_end=end,
+                )
+            )
         if end >= len(text):
             break
     return chunks
@@ -462,7 +502,14 @@ def chunk_text(
             # Final verification after sentence alignment
             final_word_count = count_words(chunk)
             if final_word_count >= min_words:
-                chunks.append(ChunkString(text=chunk))
+                chunks.append(
+                    Chunk(
+                        text=chunk,
+                        char_start=start,
+                        char_end=end,
+                        section_title=None,
+                    )
+                )
         else:
             # Original word-boundary path (sentence_padding=False)
             word_headings = structured_headings
@@ -471,12 +518,20 @@ def chunk_text(
             if len(words) >= min_words:
                 chunk_str = separator.join(words)
                 metadata = {}
+                section_title = None
                 if word_headings:
                     # Approximate heading lookup based on start index
-                    # Note: This is a simplified approximation for the non-padding path
                     metadata["section_title"] = None
 
-                chunks.append(ChunkString(text=chunk_str, metadata=metadata))
+                chunks.append(
+                    Chunk(
+                        text=chunk_str,
+                        char_start=start,
+                        char_end=end,
+                        section_title=section_title,
+                        metadata=metadata,
+                    )
+                )
 
         if len(chunks) >= max_chunks:
             logger.warning(
@@ -703,7 +758,13 @@ def chunk_text_dynamic(
 
         chunk_content = clean_src[start:actual_end].strip()
         if chunk_content:
-            chunks.append(ChunkString(text=chunk_content))
+            chunks.append(
+                Chunk(
+                    text=chunk_content,
+                    char_start=start,
+                    char_end=actual_end,
+                )
+            )
 
             if len(chunks) >= max_chunks:
                 logger.warning(
